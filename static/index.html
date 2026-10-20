@@ -51,12 +51,45 @@
             <label>Water <input name="prod_water" type="number" min="0" step="1" required></label>
             <label>Games <input name="prod_games" type="number" min="0" step="1" required></label>
           </fieldset>
+          <fieldset>
+            <legend>Need growth per step (0–1)</legend>
+            <label>Hunger <input name="rate_hunger" type="number" min="0" max="1" step="0.001" required></label>
+            <label>Sleep <input name="rate_sleep" type="number" min="0" max="1" step="0.001" required></label>
+            <label>Thirst <input name="rate_thirst" type="number" min="0" max="1" step="0.001" required></label>
+            <label>Boredom <input name="rate_boredom" type="number" min="0" max="1" step="0.001" required></label>
+          </fieldset>
+          <div class="balance" data-for="add-form"></div>
           <label class="wide">Movement (px/step) <input name="movement" type="number" min="1" max="200" step="1" placeholder="random 5–25"></label>
           <div class="form-actions">
             <button type="button" id="add-defaults">Defaults</button>
             <button type="submit">Add agent</button>
           </div>
           <p id="add-error" class="error" hidden></p>
+        </form>
+      </details>
+      <details id="edit-panel">
+        <summary>Edit agent</summary>
+        <form id="edit-form">
+          <label class="wide">Agent <select name="agent"></select></label>
+          <fieldset>
+            <legend>Produces 1 unit every N steps (0 = never)</legend>
+            <label>Food <input name="prod_food" type="number" min="0" step="1" required></label>
+            <label>Water <input name="prod_water" type="number" min="0" step="1" required></label>
+            <label>Games <input name="prod_games" type="number" min="0" step="1" required></label>
+          </fieldset>
+          <fieldset>
+            <legend>Need growth per step (0–1)</legend>
+            <label>Hunger <input name="rate_hunger" type="number" min="0" max="1" step="0.001" required></label>
+            <label>Sleep <input name="rate_sleep" type="number" min="0" max="1" step="0.001" required></label>
+            <label>Thirst <input name="rate_thirst" type="number" min="0" max="1" step="0.001" required></label>
+            <label>Boredom <input name="rate_boredom" type="number" min="0" max="1" step="0.001" required></label>
+          </fieldset>
+          <div class="balance" data-for="edit-form"></div>
+          <div class="form-actions">
+            <button type="button" id="edit-reload">Revert</button>
+            <button type="submit">Save</button>
+          </div>
+          <p id="edit-status" class="error" hidden></p>
         </form>
       </details>
       <h2>Agents</h2>

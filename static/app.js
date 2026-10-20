@@ -8,6 +8,10 @@ const ui = {
   addForm: document.getElementById("add-form"),
   addDefaults: document.getElementById("add-defaults"),
   addError: document.getElementById("add-error"),
+  editPanel: document.getElementById("edit-panel"),
+  editForm: document.getElementById("edit-form"),
+  editReload: document.getElementById("edit-reload"),
+  editStatus: document.getElementById("edit-status"),
   interval: document.getElementById("interval"),
   intervalLabel: document.getElementById("interval-label"),
   agentCount: document.getElementById("agent-count"),
@@ -21,6 +25,8 @@ const ui = {
 const DOT_RADIUS = 6;
 const NEEDS = ["hunger", "sleep", "thirst", "boredom"];
 const RESOURCES = ["food", "water", "games"];
+const NEED_FOR = { food: "hunger", water: "thirst", games: "boredom" };
+const RELIEF_PER_UNIT = 0.1;
 
 let state = null;
 let selectedId = null;
@@ -65,6 +71,7 @@ function setPlaying(on) {
 function render(next) {
   state = next;
   ui.tick.textContent = state.tick;
+  syncEditAgents();
   draw();
   renderAgents();
   renderEvents();
@@ -161,7 +168,11 @@ function renderAgents() {
     const pos = document.createElement("span");
     pos.className = "pos";
     pos.textContent = `(${a.x.toFixed(0)}, ${a.y.toFixed(0)})`;
-    head.append(dot, name, pos);
+    const edit = document.createElement("button");
+    edit.className = "edit-btn";
+    edit.textContent = "Edit";
+    edit.onclick = (e) => { e.stopPropagation(); openEditor(a.id); };
+    head.append(dot, name, edit, pos);
 
     const stats = document.createElement("div");
     stats.className = "stats";
@@ -244,17 +255,95 @@ canvas.addEventListener("click", (e) => {
 ui.step.onclick = () => step(1);
 ui.run100.onclick = () => step(100);
 
+// Production / need-rate fields are shared by the add and edit forms.
+function fillRates(form, production, rates) {
+  for (const r of RESOURCES) form.elements[`prod_${r}`].value = production[r];
+  for (const n of NEEDS) form.elements[`rate_${n}`].value = rates[n];
+  updateBalance(form);
+}
+
+function readRates(form) {
+  return {
+    production: Object.fromEntries(RESOURCES.map(r => [r, Number(form.elements[`prod_${r}`].value)])),
+    rates: Object.fromEntries(NEEDS.map(n => [n, Number(form.elements[`rate_${n}`].value)])),
+  };
+}
+
+// Per resource: units used per step (need rate / 0.1) vs units made per step (1 / N).
+function updateBalance(form) {
+  const box = document.querySelector(`.balance[data-for="${form.id}"]`);
+  const { production, rates } = readRates(form);
+  box.innerHTML = "";
+  for (const r of RESOURCES) {
+    const used = rates[NEED_FOR[r]] / RELIEF_PER_UNIT;
+    const made = production[r] ? 1 / production[r] : 0;
+    const net = made - used;
+    const line = document.createElement("span");
+    line.className = Math.abs(net) < 1e-9 ? "" : net < 0 ? "short" : "surplus";
+    const verdict = Math.abs(net) < 1e-9 ? "balanced" : net < 0 ? `short ${(-net).toFixed(3)}/step` : `surplus ${net.toFixed(3)}/step`;
+    line.textContent = `${r}: uses ${used.toFixed(3)} · makes ${made.toFixed(3)} per step → ${verdict}`;
+    box.append(line);
+  }
+}
+
 function fillDefaults() {
   const d = state.defaults;
   const f = ui.addForm.elements;
-  for (const r of RESOURCES) {
-    f[r].value = d.inventory[r];
-    f[`prod_${r}`].value = d.production[r];
-  }
+  for (const r of RESOURCES) f[r].value = d.inventory[r];
   f.money.value = d.money;
   f.movement.value = "";
+  fillRates(ui.addForm, d.production, d.rates);
   ui.addError.hidden = true;
 }
+
+// The editor is only rebuilt when the agent list changes, so typing isn't
+// wiped out by the re-render on every step.
+let editAgentIds = "";
+function syncEditAgents() {
+  const ids = state.agents.map(a => a.id).join(",");
+  if (ids === editAgentIds) return;
+  editAgentIds = ids;
+  const select = ui.editForm.elements.agent;
+  const current = select.value;
+  select.innerHTML = "";
+  for (const a of state.agents) select.add(new Option(a.name, a.id));
+  if (current && state.agents.some(a => String(a.id) === current)) select.value = current;
+  loadEditor();
+}
+
+function loadEditor() {
+  const agent = state.agents.find(a => String(a.id) === ui.editForm.elements.agent.value);
+  if (!agent) return;
+  fillRates(ui.editForm, agent.modules.Production.intervals, agent.modules.NeedsDecay.rates);
+  ui.editStatus.hidden = true;
+}
+
+function openEditor(id) {
+  ui.editPanel.open = true;
+  ui.editForm.elements.agent.value = id;
+  selectedId = id;
+  loadEditor();
+  render(state);
+  ui.editPanel.scrollIntoView({ block: "nearest" });
+}
+
+ui.editForm.elements.agent.onchange = loadEditor;
+ui.editReload.onclick = loadEditor;
+ui.editForm.oninput = () => updateBalance(ui.editForm);
+ui.addForm.oninput = () => updateBalance(ui.addForm);
+ui.editForm.onsubmit = async (e) => {
+  e.preventDefault();
+  const id = ui.editForm.elements.agent.value;
+  try {
+    render(await api(`/api/agents/${id}`, readRates(ui.editForm)));
+    ui.editStatus.textContent = "Saved.";
+    ui.editStatus.className = "error ok";
+  } catch (err) {
+    ui.editStatus.textContent = err.message;
+    ui.editStatus.className = "error";
+  }
+  ui.editStatus.hidden = false;
+};
 
 ui.addDefaults.onclick = fillDefaults;
 ui.addForm.onsubmit = async (e) => {
@@ -262,7 +351,7 @@ ui.addForm.onsubmit = async (e) => {
   const f = ui.addForm.elements;
   const body = {
     inventory: Object.fromEntries(RESOURCES.map(r => [r, Number(f[r].value)])),
-    production: Object.fromEntries(RESOURCES.map(r => [r, Number(f[`prod_${r}`].value)])),
+    ...readRates(ui.addForm),
     money: Number(f.money.value),
     movement: f.movement.value === "" ? null : Number(f.movement.value),
   };
@@ -283,6 +372,7 @@ ui.interval.oninput = () => {
 ui.reset.onclick = async () => {
   setPlaying(false);
   selectedId = null;
+  editAgentIds = "";  // new world: reload the editor even if the ids are the same
   try {
     render(await api("/api/reset", { agents: Number(ui.agentCount.value), seed: ui.seed.value }));
   } catch (err) {
@@ -291,7 +381,7 @@ ui.reset.onclick = async () => {
 };
 ui.showRange.onchange = () => state && draw();
 document.addEventListener("keydown", (e) => {
-  if (e.target.tagName === "INPUT") return;
+  if (["INPUT", "SELECT", "BUTTON"].includes(e.target.tagName)) return;
   if (e.code === "Space") { e.preventDefault(); setPlaying(!playing); }
   if (e.code === "ArrowRight" && !playing) step(1);
 });

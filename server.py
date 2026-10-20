@@ -7,18 +7,23 @@ API
     GET  /api/state                 current world state
     POST /api/step   {"steps": n}   advance n ticks (default 1)
     POST /api/reset  {"agents": n, "seed": s}  rebuild the world
-    POST /api/agents {"inventory": {...}, "money": m, "production": {...}, "movement": n}
+    POST /api/agents {"inventory": {...}, "money": m, "production": {...},
+                      "rates": {...}, "movement": n}
                                     add one agent (any field omitted = default)
+    POST /api/agents/<id> {"production": {...}, "rates": {...}}
+                                    edit an existing agent
 """
 
 import argparse
 import json
+import re
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from simulation import World
 from simulation.economy import RESOURCES
+from simulation.modules import NeedsDecay
 
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_STEPS_PER_REQUEST = 1000
@@ -53,6 +58,14 @@ class Simulation:
             self.world.create_agent(**config)
             return self.world.to_dict()
 
+    def configure_agent(self, agent_id, config):
+        with self.lock:
+            agent = self.world.agent_by_id(agent_id)
+            if agent is None:
+                raise LookupError(f"no agent {agent_id}")
+            self.world.configure_agent(agent, **config)
+            return self.world.to_dict()
+
     def state(self):
         with self.lock:
             return self.world.to_dict()
@@ -72,6 +85,14 @@ def parse_agent_config(body):
         if not isinstance(values, dict) or set(values) - set(RESOURCES):
             raise ValueError(f"{key} must map {', '.join(RESOURCES)} to numbers")
         config[key] = {r: _non_negative_int(v, f"{key}.{r}") for r, v in values.items()}
+    rates = body.get("rates") or {}
+    if not isinstance(rates, dict) or set(rates) - set(NeedsDecay.DEFAULT_RATES):
+        raise ValueError(f"rates must map {', '.join(NeedsDecay.DEFAULT_RATES)} to numbers")
+    config["rates"] = {}
+    for need, value in rates.items():
+        if isinstance(value, bool) or not 0 <= float(value) <= 1:
+            raise ValueError(f"rates.{need} must be between 0 and 1")
+        config["rates"][need] = float(value)
     if body.get("money") is not None:
         money = float(body["money"])
         if not money >= 0:
@@ -113,6 +134,12 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json(self.sim.reset(agents, seed))
             if self.path == "/api/agents":
                 return self._json(self.sim.add_agent(parse_agent_config(body)))
+            match = re.fullmatch(r"/api/agents/(\d+)", self.path)
+            if match:
+                config = {k: v for k, v in parse_agent_config(body).items() if k in ("production", "rates")}
+                return self._json(self.sim.configure_agent(int(match[1]), config))
+        except LookupError as exc:
+            return self._json({"error": str(exc)}, status=404)
         except (ValueError, TypeError) as exc:
             return self._json({"error": str(exc)}, status=400)
         self._json({"error": "not found"}, status=404)

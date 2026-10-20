@@ -17,7 +17,8 @@ Agents are dots living in a 1024×1024 box. Each one has:
 
 Every step each agent runs its modules in this order:
 
-1. **NeedsDecay** – needs rise (hunger +0.010, sleep +0.005, thirst +0.015, boredom +0.008).
+1. **NeedsDecay** – needs rise each step (defaults: hunger +0.010, sleep +0.005,
+   thirst +0.015, boredom +0.008; configurable per agent).
 2. **Production** – +1 food / water / games every N steps (default N = 10, configurable per agent).
 3. **Consume** – a need above **0.5** is fed from own stock until it is **below 0.3**.
    1 food = −0.1 hunger, 1 water = −0.1 thirst, 1 game = −0.1 boredom.
@@ -54,7 +55,11 @@ python3 server.py --agents 10 --seed 42 --port 9000
 In the page: **Step** (or →) for turn-based, **Play/Pause** (or Space) for
 timed steps at the chosen interval, **+100** to fast-forward, **Reset** to
 respawn agents at random positions. **Add agent** creates one more agent with
-editable starting food / water / games / money and production rates.
+editable starting food / water / games / money, production rates and need
+growth rates. **Edit agent** (or the *Edit* button on a card) changes an
+existing agent's production and need rates while the simulation runs. Both
+forms show, per resource, units used per step (need rate ÷ 0.1) vs units made
+(1 ÷ N), so you can see who will run short and who will have surplus to trade.
 To see trading quickly, add an agent with 0 food and 0 water.
 A dashed line shows who a seeking agent is heading for.
 
@@ -67,7 +72,8 @@ python3 -m unittest discover -s tests
 ### Layout
 
 ```
-server.py                 local HTTP server + JSON API (/api/state, /api/step, /api/reset, /api/agents)
+server.py                 local HTTP server + JSON API (/api/state, /api/step, /api/reset,
+                          /api/agents, /api/agents/<id>)
 simulation/agent.py       Agent class (properties, movement helper)
 simulation/inventory.py   Inventory class
 simulation/economy.py     resources, consumption and trading rules

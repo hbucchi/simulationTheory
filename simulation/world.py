@@ -48,10 +48,11 @@ class World:
         return agent
 
     def create_agent(self, *, inventory=None, money=economy.DEFAULT_MONEY, production=None,
-                     movement=None, needs=None, name=None):
+                     rates=None, movement=None, needs=None, name=None):
         """Create an agent at a random position with the standard modules.
 
         ``inventory`` / ``production`` override the defaults per resource;
+        ``rates`` overrides how fast each need grows per step;
         ``needs`` overrides starting need levels (otherwise random in [0, 0.5]).
         """
         x, y = self.random_position()
@@ -62,9 +63,18 @@ class World:
             money=money,
             movement=movement if movement is not None else self.rng.randint(5, 25),
             inventory=Inventory({**economy.DEFAULT_INVENTORY, **(inventory or {})}),
-            modules=[NeedsDecay(), Production(production), Consume(), Navigate()],
+            modules=[NeedsDecay(rates), Production(production), Consume(), Navigate()],
         )
         return self.add_agent(agent)
+
+    def configure_agent(self, agent, *, production=None, rates=None):
+        """Change an existing agent's production intervals and/or need growth rates."""
+        for module in agent.modules:
+            if isinstance(module, Production) and production:
+                module.set_intervals(production)
+            if isinstance(module, NeedsDecay) and rates:
+                module.rates.update(rates)
+        return agent
 
     def spawn_random_agents(self, count):
         for _ in range(count):
@@ -142,6 +152,7 @@ class World:
                 "inventory": economy.DEFAULT_INVENTORY,
                 "money": economy.DEFAULT_MONEY,
                 "production": economy.DEFAULT_PRODUCTION,
+                "rates": NeedsDecay.DEFAULT_RATES,
             },
             "agents": [a.to_dict() for a in self.agents],
             "contacts": [[a.id, b.id] for a, b in self.contacts()],

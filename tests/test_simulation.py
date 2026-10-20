@@ -90,6 +90,32 @@ class ProductionTests(unittest.TestCase):
         self.assertEqual(agent.inventory.to_dict(), {"food": 3})
 
 
+class ConfigurationTests(unittest.TestCase):
+    def test_create_agent_with_custom_rates_and_production(self):
+        world = bare_world()
+        agent = world.create_agent(rates={"thirst": 0.05}, production={"water": 2},
+                                   needs={"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0},
+                                   inventory={"food": 0, "water": 0, "games": 0})
+        for _ in range(4):
+            world.step()
+        self.assertAlmostEqual(agent.thirst, 0.2)
+        self.assertAlmostEqual(agent.hunger, 0.04)  # default rate untouched
+        self.assertEqual(agent.inventory.count("water"), 2)
+
+    def test_configure_existing_agent(self):
+        world = bare_world()
+        agent = world.create_agent(needs={"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0},
+                                   inventory={"food": 0, "water": 0, "games": 0})
+        world.configure_agent(agent, production={"food": 1, "games": 0}, rates={"hunger": 0})
+        for _ in range(5):
+            world.step()
+        self.assertEqual([agent.inventory.count(r) for r in ("food", "water", "games")], [5, 0, 0])
+        self.assertEqual(agent.hunger, 0)
+        modules = agent.to_dict()["modules"]
+        self.assertEqual(modules["Production"]["intervals"], {"food": 1, "water": 10, "games": 0})
+        self.assertEqual(modules["NeedsDecay"]["rates"]["hunger"], 0)
+
+
 class WorldTests(unittest.TestCase):
     def test_default_agent_resources(self):
         world = bare_world()

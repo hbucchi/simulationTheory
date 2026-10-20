@@ -12,6 +12,11 @@ class Production(Module):
         self.intervals = {**DEFAULT_PRODUCTION, **(intervals or {})}
         self.counters = {r: 0 for r in self.intervals}
 
+    def set_intervals(self, intervals):
+        self.intervals.update(intervals)
+        for resource in intervals:
+            self.counters.setdefault(resource, 0)
+
     def on_step(self, agent, world):
         for resource, every in self.intervals.items():
             if not every:
