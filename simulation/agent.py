@@ -63,6 +63,7 @@ class Agent:
         # Set by the Navigate module / the World; shown in the UI.
         self.activity = "wandering"
         self.sleeping = False  # set by the Rest module; a sleeping agent stays still
+        self.depressed = False  # set by the Mood module; halves speed and sleep recovery
         self.target_id = None
         self.depart_heading = 0.0  # radians
         self.depart_steps = 0
@@ -79,11 +80,11 @@ class Agent:
         return math.hypot(self.x - other.x, self.y - other.y)
 
     def move_towards(self, tx, ty, world):
-        """Move straight toward (tx, ty), at most ``movement`` pixels, staying in the box."""
+        """Move straight toward (tx, ty), at most ``speed`` pixels, staying in the box."""
         dx, dy = tx - self.x, ty - self.y
         dist = math.hypot(dx, dy)
-        if dist > self.movement:
-            dx, dy = dx / dist * self.movement, dy / dist * self.movement
+        if dist > self.speed:
+            dx, dy = dx / dist * self.speed, dy / dist * self.speed
         self.x, self.y = world.clamp_position(self.x + dx, self.y + dy)
 
     def depart(self, heading, steps):
@@ -96,6 +97,11 @@ class Agent:
         for module in self.modules:
             module.on_step(self, world)
 
+    @property
+    def speed(self):
+        """Pixels this agent can actually move per step: movement, halved while depressed."""
+        return max(1, self.movement // 2) if self.depressed else self.movement
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -105,6 +111,8 @@ class Agent:
             "needs": {k: round(v, 2) for k, v in self.needs.items()},
             "money": round(self.money, 2),
             "movement": self.movement,
+            "speed": self.speed,
+            "depressed": self.depressed,
             "inventory": self.inventory.to_dict(),
             "color": self.color,
             "activity": self.activity,

@@ -6,7 +6,7 @@ import random
 from . import economy
 from .agent import Agent
 from .inventory import Inventory
-from .modules import Consume, Navigate, NeedsDecay, Production, Rest
+from .modules import Consume, Mood, Navigate, NeedsDecay, Production, Rest
 
 AGENT_COLORS = ["#e4572e", "#29335c", "#f3a712", "#669bbc", "#a8c686", "#8e44ad", "#16a085", "#c0392b"]
 
@@ -70,7 +70,8 @@ class World:
             movement=movement if movement is not None else self.rng.randint(5, 25),
             inventory=Inventory({**economy.DEFAULT_INVENTORY, **(inventory or {})}),
             # Rest runs first so a resting agent's sleep never grows that step.
-            modules=[Rest(sleep_recovery), NeedsDecay(rates), Production(production), Consume(), Navigate()],
+            modules=[Rest(sleep_recovery), NeedsDecay(rates), Production(production), Consume(), Mood(),
+                     Navigate()],
         )
         return self.add_agent(agent)
 
@@ -141,12 +142,29 @@ class World:
         before the check ran.
         """
         self.tick += 1
-        for agent in self.agents:
+        for agent in list(self.agents):
+            if agent not in self.agents:
+                continue
             agent.step(self)
+            if self.check_death(agent):
+                continue
             for other in self.agents:
                 if (other is not agent and agent.distance_to(other) <= self.contact_distance
                         and not self.in_cooldown(agent, other)):
                     self.interact(agent, other)
+
+    def check_death(self, agent):
+        """Hunger or thirst at 1.00 (after eating/drinking what it had) kills the agent.
+
+        It disappears along with its inventory and money.
+        """
+        for need in ("hunger", "thirst"):
+            if getattr(agent, need) >= economy.CRITICAL_LEVEL:
+                self.remove_agent(agent)
+                cause = "hunger" if need == "hunger" else "thirst"
+                self.log(f"{agent.name} died of {cause}")
+                return True
+        return False
 
     def interact(self, a, b):
         """Two agents touched. If either needs something they trade, then walk apart.
@@ -156,10 +174,11 @@ class World:
         """
         if not (economy.is_needy(a) or economy.is_needy(b)):
             return  # a casual bump: nobody needs anything
-        deals = economy.trade(a, b)
+        prices = economy.market_prices(self.agents)
+        deals = economy.trade(a, b, prices)
         for buyer, seller, bought, paid in deals:
             self.log(f"{buyer.name} got {economy.describe(bought)} from {seller.name} "
-                     f"for {economy.describe(paid)}")
+                     f"for {economy.describe_payment(paid)}")
         for reason in economy.unmet(a, b) + economy.unmet(b, a):
             self.log(f"No trade: {reason}")
 
@@ -192,6 +211,11 @@ class World:
                 "production": economy.DEFAULT_PRODUCTION,
                 "rates": NeedsDecay.DEFAULT_RATES,
                 "sleep_recovery": Rest.DEFAULT_RECOVERY,
+            },
+            "market": {
+                "prices": economy.market_prices(self.agents),
+                "money": sum(a.money for a in self.agents),
+                "units": {r: sum(a.inventory.count(r) for a in self.agents) for r in economy.RESOURCES},
             },
             "agents": [a.to_dict() for a in self.agents],
             # Only pairs that can interact; pairs in cooldown just overlap.

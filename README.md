@@ -35,15 +35,33 @@ Every step each agent runs its modules in this order:
 
 Contacts are checked right after each agent moves (not once at the end of the
 tick). When two agents touch and at least one needs something, they **trade**
-at 1:1: each buys exactly enough to bring its needs below 0.3. The seller only
-sells what it doesn't need itself. The buyer pays with something the seller
-needs (barter), otherwise money, otherwise any other spare resource. If a need
-can't be met the log says why (e.g. *"No trade: Agent 4 still needs 7 water:
-Agent 2 has none"*). After a trade both walk **away from each other**, turned
-by a random angle in ±90° (a 180° window that never points back), for 15
-steps. Either way the pair ignores each other for 60 steps, so a needy agent
-moves on to the next-closest agent instead of retrying the same one. Agents
-that bump into each other without needing anything just carry on.
+at market prices: each buys exactly enough to bring its needs below 0.3. The
+seller only sells what it doesn't need itself. The buyer pays with something
+the seller needs (barter, with the price difference settled in money),
+otherwise money, otherwise any other spare resource. If a need can't be met
+the log says why (e.g. *"No trade: Agent 4 still needs 7 water: Agent 2 has
+none"*). After a trade both walk **away from each other**, turned by a random
+angle in ±90° (a 180° window that never points back), for 15 steps. Either
+way the pair ignores each other for 60 steps, so a needy agent moves on to the
+next-closest agent instead of retrying the same one. Agents that bump into
+each other without needing anything just carry on.
+
+### Prices
+
+Prices are recomputed from what everyone holds at the moment of each trade:
+
+    price(r) = total money / total units of all resources × (1 − share of r)
+    share of r = units of r / total units
+
+A scarce resource has a small share, so it costs more. The Overview tab shows
+the current prices. With no goods left at all, every price is 0.
+
+### Death and depression
+
+- **Hunger or thirst at 1.00** (after eating/drinking whatever it had) → the
+  agent **dies** and disappears with its inventory and money.
+- **Boredom at 1.00** → the agent becomes **depressed**: its movement and its
+  sleep recovery are halved. It recovers when boredom drops below 0.3.
 
 **Sleep** is recovered by standing still (`Rest` module). When sleep rises
 above 0.5 the agent stops where it is and recovers 0.05 per step

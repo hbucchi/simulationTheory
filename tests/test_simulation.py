@@ -55,29 +55,54 @@ class EconomyTests(unittest.TestCase):
         self.assertAlmostEqual(agent.thirst, 0.25)
         self.assertEqual(agent.inventory.count("water"), 5)
 
-    def test_trade_barters_what_the_other_needs(self):
-        a = Agent(0, 0, thirst=0.8, inventory=Inventory({"food": 20}))
-        b = Agent(0, 0, hunger=0.8, inventory=Inventory({"water": 20}))
-        economy.trade(a, b)
-        # Each needed 6 units and paid with the thing the other needed, 1:1.
+    def test_prices_follow_the_formula_and_scarcity(self):
+        a = Agent(0, 0, money=300, inventory=Inventory({"food": 60, "water": 10, "games": 30}))
+        prices = economy.market_prices([a])
+        # 300 money / 100 units = 3 per unit, times (1 - share)
+        self.assertAlmostEqual(prices["food"], 3 * 0.4)
+        self.assertAlmostEqual(prices["water"], 3 * 0.9)
+        self.assertAlmostEqual(prices["games"], 3 * 0.7)
+        self.assertGreater(prices["water"], prices["games"])  # scarcest is dearest
+
+    def test_no_goods_means_zero_prices(self):
+        self.assertEqual(economy.market_prices([Agent(0, 0, money=50)]),
+                         {"food": 0.0, "water": 0.0, "games": 0.0})
+
+    def test_barter_settles_the_price_difference_in_money(self):
+        a = Agent(0, 0, thirst=0.8, money=10, inventory=Inventory({"food": 20}))
+        b = Agent(0, 0, hunger=0.8, money=10, inventory=Inventory({"water": 20}))
+        prices = {"food": 1.0, "water": 1.5, "games": 1.0}
+        economy.trade(a, b, prices)
+        # a buys 6 water paying with food (what b needs), topping up 0.5 per unit since
+        # water is dearer. That covers b's hunger too, so b buys nothing back.
         self.assertEqual(a.inventory.to_dict(), {"food": 14})
         self.assertEqual(b.inventory.to_dict(), {"water": 14})
         self.assertAlmostEqual(a.thirst, 0.2)
         self.assertAlmostEqual(b.hunger, 0.2)
-        self.assertEqual((a.money, b.money), (0, 0))
+        self.assertAlmostEqual(a.money, 7)
+        self.assertAlmostEqual(b.money, 13)
 
-    def test_trade_falls_back_to_money(self):
+    def test_trade_falls_back_to_money_at_market_price(self):
         buyer = Agent(0, 0, hunger=0.7, money=10)
         seller = Agent(0, 0, inventory=Inventory({"food": 3}))
-        economy.trade(buyer, seller)
+        economy.trade(buyer, seller, {"food": 2.5, "water": 1, "games": 1})
         self.assertEqual(seller.inventory.count("food"), 0)  # only had 3 of the 5 wanted
-        self.assertEqual((buyer.money, seller.money), (7, 3))
+        self.assertAlmostEqual(buyer.money, 2.5)
+        self.assertAlmostEqual(seller.money, 7.5)
         self.assertAlmostEqual(buyer.hunger, 0.4)
+
+    def test_buyer_stops_when_it_cannot_afford_more(self):
+        buyer = Agent(0, 0, hunger=0.7, money=5)
+        seller = Agent(0, 0, inventory=Inventory({"food": 10}))
+        economy.trade(buyer, seller, {"food": 2, "water": 1, "games": 1})
+        self.assertEqual(buyer.inventory.count("food"), 0)  # bought 2, ate them
+        self.assertAlmostEqual(buyer.money, 1)
+        self.assertAlmostEqual(buyer.hunger, 0.5)
 
     def test_seller_keeps_what_it_needs_itself(self):
         buyer = Agent(0, 0, hunger=0.9, money=100)
         seller = Agent(0, 0, hunger=0.45, inventory=Inventory({"food": 5}))
-        economy.trade(buyer, seller)
+        economy.trade(buyer, seller, {"food": 1, "water": 1, "games": 1})
         self.assertEqual(seller.inventory.count("food"), 2)  # reserve for 0.45 -> below 0.3
 
 
@@ -164,6 +189,49 @@ class RestTests(unittest.TestCase):
         self.assertEqual((sleeper.x, sleeper.y), (500, 500))
 
 
+class LifeTests(unittest.TestCase):
+    def test_agent_dies_when_hunger_or_thirst_reaches_one(self):
+        for need in ("hunger", "thirst"):
+            world = bare_world()
+            doomed = world.create_agent(inventory={"food": 0, "water": 0}, needs={need: 0.99}, rates={need: 0.02})
+            survivor = world.create_agent(x=900, y=900)
+            survivor.x = 900  # far from doomed: no chance to trade first
+            doomed.x, doomed.y = 10, 10
+            world.step()
+            self.assertEqual(world.agents, [survivor])
+            self.assertIn(f"{doomed.name} died of {need}", world.events[-1]["message"])
+
+    def test_eating_in_time_prevents_death(self):
+        world = bare_world()
+        agent = world.create_agent(needs={"hunger": 0.99}, rates={"hunger": 0.02})
+        world.step()
+        self.assertIn(agent, world.agents)
+        self.assertLess(agent.hunger, 0.3)
+
+    def test_boredom_at_one_depresses_until_below_target(self):
+        world = bare_world()
+        agent = world.create_agent(inventory={"games": 0}, needs={"boredom": 0.99, "sleep": 0.9},
+                                   movement=21, sleep_recovery=0.1, rates={"boredom": 0.02, "sleep": 0})
+        world.step()
+        self.assertTrue(agent.depressed)
+        self.assertEqual(agent.speed, 10)
+        self.assertIn("became depressed", world.events[-1]["message"])
+        before = agent.sleep
+        world.step()                      # still resting: half of 0.1
+        self.assertAlmostEqual(before - agent.sleep, 0.05)
+        agent.inventory.add("games", 10)
+        world.step()                      # plays 8 games: boredom 1.0 -> 0.2
+        self.assertFalse(agent.depressed)
+        self.assertEqual(agent.speed, 21)
+
+    def test_depressed_agent_moves_at_half_speed(self):
+        world = bare_world()
+        agent = world.create_agent(movement=20, x=100, y=100)
+        agent.depressed = True
+        agent.move_towards(500, 100, world)
+        self.assertEqual(agent.x, 110)
+
+
 class EditingTests(unittest.TestCase):
     def test_update_every_field(self):
         world = bare_world()
@@ -229,7 +297,9 @@ class WorldTests(unittest.TestCase):
     def test_slow_seeker_always_reaches_faster_agent(self):
         for seed in range(20):
             world = World(seed=seed)
-            seeker = world.create_agent(inventory={"water": 0}, needs={"thirst": 0.9}, movement=5)
+            seeker = world.create_agent(inventory={"water": 0}, needs={"thirst": 0.6},
+                                        rates={"thirst": 0.005}, production={"water": 0},
+                                        movement=5)  # survives the 45-step chase
             runner = world.create_agent(movement=25)
             seeker.x, seeker.y, runner.x, runner.y = 50, 50, 1000, 1000
             for _ in range(60):  # 1344 px apart, closing at 30 px/step -> 45 steps

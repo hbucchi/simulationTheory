@@ -110,3 +110,9 @@ button.danger { color: #d1453b; }
 .activity .leaving { color: var(--accent); }
 .activity .meeting { color: #c97a10; }
 .activity .sleeping { color: #7a5cc4; }
+.activity .depressed { color: #555; }
+.market { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; font-size: 12px; }
+.market-title { color: var(--muted); margin-bottom: 6px; }
+.market-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.market-row b { font-size: 14px; font-variant-numeric: tabular-nums; }
+.market-row span { display: block; color: var(--muted); font-size: 11px; }

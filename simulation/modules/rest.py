@@ -8,7 +8,7 @@ class Rest(Module):
     When sleep rises above 0.5 the agent stops and recovers ``recovery`` per
     step until sleep is below 0.3, then gets moving again (same thresholds as
     the other needs). While resting, sleep doesn't grow and Navigate keeps
-    the agent in place.
+    the agent in place. A depressed agent recovers at half the rate.
     """
 
     DEFAULT_RECOVERY = 0.05
@@ -22,7 +22,7 @@ class Rest(Module):
         elif not agent.sleeping and agent.sleep > economy.SEEK_THRESHOLD:
             agent.sleeping = True
         if agent.sleeping:
-            agent.sleep -= self.recovery
+            agent.sleep -= self.recovery / 2 if agent.depressed else self.recovery
 
     def to_dict(self):
         return {"recovery": self.recovery}

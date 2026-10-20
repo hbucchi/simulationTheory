@@ -13,6 +13,7 @@ const ui = {
   reset: $("reset"),
   showRange: $("show-range"),
   agents: $("agents"),
+  market: $("market"),
   events: $("events"),
   tabs: document.querySelectorAll(".tabs button"),
   newAgent: $("new-agent"),
@@ -105,6 +106,7 @@ function render(next) {
   ui.tick.textContent = state.tick;
   draw();
   if (activeTab === "overview") {
+    renderMarket();
     renderAgents();
     renderEvents();
   } else {
@@ -159,13 +161,22 @@ function draw() {
       ctx.strokeStyle = agent.color + "55";
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.arc(agent.x, agent.y, agent.movement, 0, Math.PI * 2);
+      ctx.arc(agent.x, agent.y, agent.speed, 0, Math.PI * 2);
       ctx.fill(); ctx.stroke();
     }
     ctx.fillStyle = agent.color;
     ctx.beginPath();
     ctx.arc(agent.x, agent.y, DOT_RADIUS, 0, Math.PI * 2);
     ctx.fill();
+    if (agent.depressed) {
+      ctx.strokeStyle = "#555";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([2, 2]);
+      ctx.beginPath();
+      ctx.arc(agent.x, agent.y, DOT_RADIUS + 2, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
     if (agent.activity === "sleeping") {
       ctx.fillStyle = cssVar("--muted");
       ctx.font = "italic 12px system-ui, sans-serif";
@@ -192,6 +203,31 @@ function needColor(v) {
   // green (satisfied) -> amber -> red (desperate)
   const hue = 120 - v * 120;
   return `hsl(${hue} 60% 48%)`;
+}
+
+// Price of each resource: total money / total units * (1 - that resource's share of units).
+function renderMarket() {
+  const m = state.market;
+  const total = RESOURCES.reduce((sum, r) => sum + m.units[r], 0);
+  ui.market.innerHTML = "";
+  const title = document.createElement("div");
+  title.className = "market-title";
+  title.textContent = `Market · ${m.money.toFixed(2)} money / ${total} units = ${(total ? m.money / total : 0).toFixed(3)} per unit`;
+  ui.market.append(title);
+  const row = document.createElement("div");
+  row.className = "market-row";
+  for (const r of RESOURCES) {
+    const share = total ? m.units[r] / total : 0;
+    const cell = document.createElement("div");
+    const price = document.createElement("b");
+    price.textContent = m.prices[r].toFixed(3);
+    cell.append(`${r} `, price);
+    const detail = document.createElement("span");
+    detail.textContent = `${m.units[r]} units · ${(share * 100).toFixed(0)}% share`;
+    cell.append(detail);
+    row.append(cell);
+  }
+  ui.market.append(row);
 }
 
 function renderAgents() {
@@ -242,7 +278,7 @@ function renderAgents() {
     const fields = [
       ...RESOURCES.map(r => [r, a.inventory[r] ?? 0, production[r] ? `+1 / ${production[r]} steps` : "no production"]),
       ["money", a.money.toFixed(2)],
-      ["movement", `${a.movement} px`],
+      ["movement", a.depressed ? `${a.speed} px (halved, ${a.movement} normally)` : `${a.speed} px`],
     ];
     for (const [label, value, title] of fields) {
       const span = document.createElement("span");
@@ -262,7 +298,14 @@ function renderAgents() {
       : a.activity === "seeking" ? `seeking ${target.name} (needs ${a.wants.join(", ")})`
       : `meeting ${target.name}`;
     const prod = RESOURCES.map(r => production[r] ? `${r} 1/${production[r]}` : `${r} –`).join(" · ");
-    activity.append(act, ` · produces ${prod}`);
+    activity.append(act);
+    if (a.depressed) {
+      const sad = document.createElement("b");
+      sad.className = "depressed";
+      sad.textContent = "depressed";
+      activity.append(" · ", sad);
+    }
+    activity.append(` · produces ${prod}`);
 
     card.append(head, stats, meta, activity);
     ui.agents.append(card);

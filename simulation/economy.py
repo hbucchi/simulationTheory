@@ -6,7 +6,7 @@ Need scale reminder: 0.00 = satisfied, 1.00 = desperate.
 import math
 
 RESOURCES = ("food", "water", "games")
-# Which need each resource relieves. Sleep has no resource (yet).
+# Which need each resource relieves. Sleep is recovered by resting (modules/rest.py).
 NEED_FOR_RESOURCE = {"food": "hunger", "water": "thirst", "games": "boredom"}
 
 RELIEF_PER_UNIT = 0.1   # consuming 1 unit lowers its need by 0.1
@@ -17,7 +17,24 @@ DEFAULT_INVENTORY = {"food": 100, "water": 100, "games": 100}
 DEFAULT_MONEY = 100.0
 DEFAULT_PRODUCTION = {r: 10 for r in RESOURCES}  # 1 unit every N steps (0 = never)
 
-ASSETS = RESOURCES + ("money",)  # everything that can change hands, all at 1:1
+# A need reaching this level has consequences: hunger/thirst -> death, boredom -> depression.
+CRITICAL_LEVEL = 1.0
+
+
+def market_prices(agents):
+    """Money price of one unit of each resource, from what everyone holds right now.
+
+        price(r) = total money / total units of all resources * (1 - share of r)
+
+    where share of r = units of r / total units. The scarcer a resource
+    (smaller share), the higher its price. No goods at all -> every price is 0.
+    """
+    money = sum(a.money for a in agents)
+    units = {r: sum(a.inventory.count(r) for a in agents) for r in RESOURCES}
+    total = sum(units.values())
+    if total == 0:
+        return {r: 0.0 for r in RESOURCES}
+    return {r: money / total * (1 - units[r] / total) for r in RESOURCES}
 
 
 def units_to_satisfy(level):
@@ -28,17 +45,14 @@ def units_to_satisfy(level):
     return math.floor(round((level - TARGET_LEVEL) / RELIEF_PER_UNIT, 9)) + 1
 
 
-def holding(agent, asset):
-    return int(agent.money) if asset == "money" else agent.inventory.count(asset)
+def transfer(giver, receiver, resource, qty=1):
+    giver.inventory.remove(resource, qty)
+    receiver.inventory.add(resource, qty)
 
 
-def transfer(giver, receiver, asset, qty=1):
-    if asset == "money":
-        giver.money -= qty
-        receiver.money += qty
-    else:
-        giver.inventory.remove(asset, qty)
-        receiver.inventory.add(asset, qty)
+def pay(payer, payee, amount):
+    payer.money -= amount
+    payee.money += amount
 
 
 def consume(agent):
@@ -72,46 +86,66 @@ def demand(agent, resource):
     return max(0, units_to_satisfy(level) - agent.inventory.count(resource))
 
 
-def spare(agent, asset):
+def spare(agent, resource):
     """Units the agent can give away without hurting its own current needs."""
-    if asset == "money":
-        return int(agent.money)
-    reserve = units_to_satisfy(getattr(agent, NEED_FOR_RESOURCE[asset]))
-    return max(0, agent.inventory.count(asset) - reserve)
+    reserve = units_to_satisfy(getattr(agent, NEED_FOR_RESOURCE[resource]))
+    return max(0, agent.inventory.count(resource) - reserve)
 
 
-def _pick_payment(buyer, seller, buying):
-    """What the buyer hands over for one unit: something the seller needs, else money, else any surplus."""
-    candidates = [a for a in RESOURCES if a != buying and demand(seller, a) > 0]
-    candidates += ["money"]
-    candidates += [a for a in RESOURCES if a != buying and a not in candidates]
-    for asset in candidates:
-        if spare(buyer, asset) > 0:
-            return asset
+def _settle_one(buyer, seller, buying, prices):
+    """Buyer gets one unit of ``buying``. Returns (resource given in exchange or None, money buyer paid).
+
+    Payment preference: a resource the seller needs (barter), then money, then
+    any other spare resource. In a barter the price difference is settled in
+    money by whichever side got the cheaper deal. Returns None if the buyer
+    can't pay at all.
+    """
+    price = prices[buying]
+    needed_by_seller = [r for r in RESOURCES if r != buying and demand(seller, r) > 0]
+    others = [r for r in RESOURCES if r != buying and r not in needed_by_seller]
+    for option in needed_by_seller + ["money"] + others:
+        if option == "money":
+            if buyer.money >= price:
+                return None, price
+            continue
+        if spare(buyer, option) == 0:
+            continue
+        diff = price - prices[option]   # > 0: buyer tops up; < 0: seller gives change
+        payer = buyer if diff > 0 else seller
+        if payer.money >= abs(diff):
+            return option, diff
     return None
 
 
-def buy(buyer, seller):
-    """Buyer acquires what it needs from seller at 1:1. Returns (bought, paid) dicts."""
+def buy(buyer, seller, prices):
+    """Buyer acquires what it needs from seller at market prices.
+
+    Returns (bought, paid): bought = {resource: units}; paid = {resource: units,
+    "money": net money buyer -> seller (negative = buyer received change)}.
+    """
     bought, paid = {}, {}
     wants = sorted(RESOURCES, key=lambda r: getattr(buyer, NEED_FOR_RESOURCE[r]), reverse=True)
     for resource in wants:
         while demand(buyer, resource) > 0 and spare(seller, resource) > 0:
-            payment = _pick_payment(buyer, seller, resource)
-            if payment is None:
+            settled = _settle_one(buyer, seller, resource, prices)
+            if settled is None:
                 return bought, paid
+            given, money = settled
             transfer(seller, buyer, resource)
-            transfer(buyer, seller, payment)
+            if given:
+                transfer(buyer, seller, given)
+                paid[given] = paid.get(given, 0) + 1
+            pay(buyer, seller, money)
+            paid["money"] = paid.get("money", 0.0) + money
             bought[resource] = bought.get(resource, 0) + 1
-            paid[payment] = paid.get(payment, 0) + 1
     return bought, paid
 
 
-def trade(a, b):
+def trade(a, b, prices):
     """Both agents buy what they need from each other, then consume. Returns a list of deals."""
     deals = []
     for buyer, seller in ((a, b), (b, a)):
-        bought, paid = buy(buyer, seller)
+        bought, paid = buy(buyer, seller, prices)
         if bought:
             deals.append((buyer, seller, bought, paid))
     consume(a)
@@ -139,3 +173,16 @@ def unmet(buyer, seller):
 
 def describe(items):
     return " + ".join(f"{n} {k}" for k, n in items.items())
+
+
+def describe_payment(paid):
+    """e.g. '3.20 money', '2 food + 0.15 money', '2 food (got 0.40 money change)'."""
+    goods = {k: n for k, n in paid.items() if k != "money"}
+    money = round(paid.get("money", 0.0), 2)
+    parts = [describe(goods)] if goods else []
+    if money > 0:
+        parts.append(f"{money:.2f} money")
+    text = " + ".join(parts) or "nothing (free)"
+    if money < 0:
+        text += f" (got {-money:.2f} money change)"
+    return text
