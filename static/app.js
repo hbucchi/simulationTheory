@@ -91,11 +91,11 @@ function draw() {
   const inContact = new Set(state.contacts.flat());
   const byId = Object.fromEntries(state.agents.map(a => [a.id, a]));
 
-  // Dashed line from each seeking agent to the agent it is heading for.
+  // Dashed line from each seeking/meeting agent to the agent it is heading for.
   ctx.setLineDash([6, 6]);
   for (const agent of state.agents) {
     const target = byId[agent.target_id];
-    if (agent.activity !== "seeking" || !target) continue;
+    if (!target) continue;
     ctx.strokeStyle = agent.color + "aa";
     ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(agent.x, agent.y); ctx.lineTo(target.x, target.y); ctx.stroke();
@@ -204,7 +204,9 @@ function renderAgents() {
     const act = document.createElement("b");
     act.className = a.activity;
     const target = state.agents.find(o => o.id === a.target_id);
-    act.textContent = a.activity === "seeking" && target ? `seeking ${target.name}` : a.activity;
+    act.textContent = !target ? a.activity
+      : a.activity === "seeking" ? `seeking ${target.name} (needs ${a.wants.join(", ")})`
+      : `meeting ${target.name}`;
     const prod = RESOURCES.map(r => production[r] ? `${r} 1/${production[r]}` : `${r} –`).join(" · ");
     activity.append(act, ` · produces ${prod}`);
 

@@ -131,6 +131,48 @@ class WorldTests(unittest.TestCase):
         # They ignore each other for a while.
         self.assertTrue(world.in_cooldown(thirsty, near))
 
+    def test_slow_seeker_always_reaches_faster_agent(self):
+        for seed in range(20):
+            world = World(seed=seed)
+            seeker = world.create_agent(inventory={"water": 0}, needs={"thirst": 0.9}, movement=5)
+            runner = world.create_agent(movement=25)
+            seeker.x, seeker.y, runner.x, runner.y = 50, 50, 1000, 1000
+            for _ in range(60):  # 1344 px apart, closing at 30 px/step -> 45 steps
+                world.step()
+                if world.events:
+                    break
+            self.assertIn("got", world.events[-1]["message"], f"seed {seed}")
+
+    def test_sought_agent_walks_toward_its_seeker(self):
+        world = bare_world()
+        seeker = world.create_agent(inventory={"water": 0}, needs={"thirst": 0.9}, movement=5)
+        other = world.create_agent(movement=10, needs={"thirst": 0, "hunger": 0, "boredom": 0})
+        seeker.x, seeker.y, other.x, other.y = 100, 500, 900, 500
+        world.step()
+        self.assertEqual((seeker.activity, seeker.target_id), ("seeking", other.id))
+        self.assertEqual((other.activity, other.target_id), ("meeting", seeker.id))
+        self.assertEqual((seeker.x, other.x), (105, 890))
+
+    def test_seeker_keeps_its_target(self):
+        world = bare_world()
+        seeker = world.create_agent(inventory={"water": 0}, needs={"thirst": 0.9}, movement=5)
+        first = world.create_agent(movement=1)
+        second = world.create_agent(movement=1)
+        seeker.x, seeker.y = 500, 500
+        first.x, first.y = 600, 500     # nearest at the start
+        second.x, second.y = 390, 500   # becomes nearer after one step toward `first`
+        world.step()
+        world.step()
+        self.assertEqual(seeker.target_id, first.id)
+
+    def test_contact_counts_as_soon_as_an_agent_moves_onto_another(self):
+        world = bare_world()
+        seeker = world.create_agent(inventory={"water": 0}, needs={"thirst": 0.9}, movement=20)
+        target = world.create_agent(movement=20)
+        seeker.x, seeker.y, target.x, target.y = 100, 100, 115, 100
+        world.step()  # seeker moves first and lands on target; target hasn't moved away yet
+        self.assertIn(f"{seeker.name} got", world.events[0]["message"])
+
     def test_same_seed_is_reproducible(self):
         a, b = World(seed=3), World(seed=3)
         a.spawn_random_agents(3)

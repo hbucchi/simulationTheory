@@ -2,6 +2,7 @@
 
 import math
 
+from . import economy
 from .inventory import Inventory
 
 NEED_NAMES = ("hunger", "sleep", "thirst", "boredom")
@@ -107,5 +108,6 @@ class Agent:
             "color": self.color,
             "activity": self.activity,
             "target_id": self.target_id,
+            "wants": [r for r, n in economy.NEED_FOR_RESOURCE.items() if getattr(self, n) > economy.SEEK_THRESHOLD],
             "modules": {type(m).__name__: m.to_dict() for m in self.modules},
         }

@@ -21,10 +21,19 @@ Every step each agent runs its modules in this order:
 2. **Production** – +1 food / water / games every N steps (default N = 10, configurable per agent).
 3. **Consume** – a need above **0.5** is fed from own stock until it is **below 0.3**.
    1 food = −0.1 hunger, 1 water = −0.1 thirst, 1 game = −0.1 boredom.
-4. **Navigate** – *leaving* (just met someone) › *seeking* (a need is still above 0.5
-   because stock ran out: walk to the nearest agent it hasn't just met) › *wandering*.
+4. **Navigate** – in priority order:
+   - *leaving*: just met someone, walk away.
+   - *meeting*: another agent is seeking this one, walk toward that seeker.
+   - *seeking*: a need is still above 0.5 because stock ran out. Lock onto the
+     nearest agent it hasn't just met and walk to that agent's current position
+     every step until they touch.
+   - *wandering*: random walk.
 
-When two agents touch (centres ≤ 12 px apart) they **trade** at 1:1: each buys
+   Because the sought agent walks back toward its seeker, the gap shrinks by
+   both agents' movement every step, so they always touch.
+
+Contacts are checked right after each agent moves (not once at the end of the
+tick). When two agents touch (centres ≤ 12 px apart) they **trade** at 1:1: each buys
 exactly enough to bring its needs below 0.3. The seller only sells what it
 doesn't need itself. The buyer pays with something the seller needs (barter),
 otherwise money, otherwise any other spare resource. Afterwards both walk

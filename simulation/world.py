@@ -73,6 +73,14 @@ class World:
     def in_cooldown(self, a, b):
         return self.cooldowns.get(frozenset((a.id, b.id)), -1) >= self.tick
 
+    def agent_by_id(self, agent_id):
+        return next((a for a in self.agents if a.id == agent_id), None)
+
+    def seekers_of(self, agent):
+        """Agents currently seeking ``agent`` (and allowed to meet it)."""
+        return [o for o in self.agents
+                if o.activity == "seeking" and o.target_id == agent.id and not self.in_cooldown(agent, o)]
+
     def nearest_partner(self, agent):
         """Closest other agent that ``agent`` hasn't just met, or None."""
         others = [o for o in self.agents if o is not agent and not self.in_cooldown(agent, o)]
@@ -88,13 +96,20 @@ class World:
         return pairs
 
     def step(self):
-        """Advance the simulation by one tick: every agent acts, then contacts resolve."""
+        """Advance the simulation by one tick.
+
+        Agents act one after another, and contacts are checked right after
+        each agent moves. Checking only at the end of the tick would let a
+        seeker reach its target's spot and then see the target step away
+        before the check ran.
+        """
         self.tick += 1
         for agent in self.agents:
             agent.step(self)
-        for a, b in self.contacts():
-            if not self.in_cooldown(a, b):
-                self.interact(a, b)
+            for other in self.agents:
+                if (other is not agent and agent.distance_to(other) <= self.contact_distance
+                        and not self.in_cooldown(agent, other)):
+                    self.interact(agent, other)
 
     def interact(self, a, b):
         """Two agents touched: trade what they need, then walk apart."""
