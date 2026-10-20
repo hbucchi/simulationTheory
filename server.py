@@ -7,6 +7,8 @@ API
     GET  /api/state                 current world state
     POST /api/step   {"steps": n}   advance n ticks (default 1)
     POST /api/reset  {"agents": n, "seed": s}  rebuild the world
+    POST /api/agents {"inventory": {...}, "money": m, "production": {...}, "movement": n}
+                                    add one agent (any field omitted = default)
 """
 
 import argparse
@@ -16,10 +18,12 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from simulation import World
+from simulation.economy import RESOURCES
 
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_STEPS_PER_REQUEST = 1000
 MAX_AGENTS = 500
+MAX_MOVEMENT = 200
 
 
 class Simulation:
@@ -42,9 +46,43 @@ class Simulation:
                 self.world.step()
             return self.world.to_dict()
 
+    def add_agent(self, config):
+        with self.lock:
+            if len(self.world.agents) >= MAX_AGENTS:
+                raise ValueError(f"at most {MAX_AGENTS} agents")
+            self.world.create_agent(**config)
+            return self.world.to_dict()
+
     def state(self):
         with self.lock:
             return self.world.to_dict()
+
+
+def _non_negative_int(value, field):
+    if isinstance(value, bool) or int(value) != float(value) or int(value) < 0:
+        raise ValueError(f"{field} must be a whole number >= 0")
+    return int(value)
+
+
+def parse_agent_config(body):
+    """Validate the JSON body of POST /api/agents into World.create_agent kwargs."""
+    config = {}
+    for key in ("inventory", "production"):
+        values = body.get(key) or {}
+        if not isinstance(values, dict) or set(values) - set(RESOURCES):
+            raise ValueError(f"{key} must map {', '.join(RESOURCES)} to numbers")
+        config[key] = {r: _non_negative_int(v, f"{key}.{r}") for r, v in values.items()}
+    if body.get("money") is not None:
+        money = float(body["money"])
+        if not money >= 0:
+            raise ValueError("money must be >= 0")
+        config["money"] = money
+    if body.get("movement") is not None:
+        movement = _non_negative_int(body["movement"], "movement")
+        if not 1 <= movement <= MAX_MOVEMENT:
+            raise ValueError(f"movement must be between 1 and {MAX_MOVEMENT}")
+        config["movement"] = movement
+    return config
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -73,6 +111,8 @@ class Handler(SimpleHTTPRequestHandler):
                 seed = body.get("seed")
                 seed = None if seed in (None, "") else int(seed)
                 return self._json(self.sim.reset(agents, seed))
+            if self.path == "/api/agents":
+                return self._json(self.sim.add_agent(parse_agent_config(body)))
         except (ValueError, TypeError) as exc:
             return self._json({"error": str(exc)}, status=400)
         self._json({"error": "not found"}, status=404)

@@ -1,14 +1,25 @@
 """The World: a WIDTH x HEIGHT box holding agents and advancing time in steps."""
 
+import math
 import random
 
+from . import economy
 from .agent import Agent
-from .modules import NeedsDecay, Wander
+from .inventory import Inventory
+from .modules import Consume, Navigate, NeedsDecay, Production
 
 AGENT_COLORS = ["#e4572e", "#29335c", "#f3a712", "#669bbc", "#a8c686", "#8e44ad", "#16a085", "#c0392b"]
 
 
 class World:
+    # After two agents meet they walk apart for DEPART_STEPS and ignore each
+    # other for COOLDOWN_STEPS, so they don't instantly re-meet.
+    DEPART_STEPS = 15
+    COOLDOWN_STEPS = 60
+    # Departure = straight away from the partner, turned by a random angle in
+    # [-MAX_TURN, +MAX_TURN]: a 180-degree window that never points back at them.
+    MAX_TURN = math.radians(90)
+
     def __init__(self, width=1024, height=1024, contact_distance=12, seed=None):
         self.width = width
         self.height = height
@@ -20,6 +31,7 @@ class World:
         self.agents = []
         self.tick = 0
         self.events = []  # newest last; trimmed to keep the payload small
+        self.cooldowns = {}  # frozenset({id_a, id_b}) -> tick until which they ignore each other
 
     def clamp_position(self, x, y):
         return (min(max(x, 0.0), self.width), min(max(y, 0.0), self.height))
@@ -35,21 +47,36 @@ class World:
         self.agents.append(agent)
         return agent
 
+    def create_agent(self, *, inventory=None, money=economy.DEFAULT_MONEY, production=None,
+                     movement=None, needs=None, name=None):
+        """Create an agent at a random position with the standard modules.
+
+        ``inventory`` / ``production`` override the defaults per resource;
+        ``needs`` overrides starting need levels (otherwise random in [0, 0.5]).
+        """
+        x, y = self.random_position()
+        start_needs = {n: round(self.rng.uniform(0, 0.5), 2) for n in ("hunger", "sleep", "thirst", "boredom")}
+        start_needs.update(needs or {})
+        agent = Agent(
+            x, y, name=name, **start_needs,
+            money=money,
+            movement=movement if movement is not None else self.rng.randint(5, 25),
+            inventory=Inventory({**economy.DEFAULT_INVENTORY, **(inventory or {})}),
+            modules=[NeedsDecay(), Production(production), Consume(), Navigate()],
+        )
+        return self.add_agent(agent)
+
     def spawn_random_agents(self, count):
-        """Create ``count`` agents at random positions with random starting stats."""
         for _ in range(count):
-            x, y = self.random_position()
-            agent = Agent(
-                x, y,
-                hunger=round(self.rng.uniform(0, 0.5), 2),
-                sleep=round(self.rng.uniform(0, 0.5), 2),
-                thirst=round(self.rng.uniform(0, 0.5), 2),
-                leisure=round(self.rng.uniform(0, 0.5), 2),
-                money=round(self.rng.uniform(50, 200), 2),
-                movement=self.rng.randint(5, 25),
-            )
-            agent.add_module(NeedsDecay()).add_module(Wander())
-            self.add_agent(agent)
+            self.create_agent()
+
+    def in_cooldown(self, a, b):
+        return self.cooldowns.get(frozenset((a.id, b.id)), -1) >= self.tick
+
+    def nearest_partner(self, agent):
+        """Closest other agent that ``agent`` hasn't just met, or None."""
+        others = [o for o in self.agents if o is not agent and not self.in_cooldown(agent, o)]
+        return min(others, key=agent.distance_to, default=None)
 
     def contacts(self):
         """All pairs of agents currently close enough to interact."""
@@ -66,11 +93,24 @@ class World:
         for agent in self.agents:
             agent.step(self)
         for a, b in self.contacts():
-            self.interact(a, b)
+            if not self.in_cooldown(a, b):
+                self.interact(a, b)
 
     def interact(self, a, b):
-        """Hook for agent-to-agent interaction (trading comes later). Logs for now."""
-        self.log(f"{a.name} and {b.name} met at ({a.x:.0f}, {a.y:.0f})")
+        """Two agents touched: trade what they need, then walk apart."""
+        deals = economy.trade(a, b)
+        for buyer, seller, bought, paid in deals:
+            self.log(f"{buyer.name} got {economy.describe(bought)} from {seller.name} "
+                     f"for {economy.describe(paid)}")
+        if not deals:
+            self.log(f"{a.name} and {b.name} met (nothing to trade)")
+
+        self.cooldowns[frozenset((a.id, b.id))] = self.tick + self.COOLDOWN_STEPS
+        away = math.atan2(a.y - b.y, a.x - b.x)
+        if a.x == b.x and a.y == b.y:
+            away = self.rng.uniform(-math.pi, math.pi)
+        a.depart(away + self.rng.uniform(-self.MAX_TURN, self.MAX_TURN), self.DEPART_STEPS)
+        b.depart(away + math.pi + self.rng.uniform(-self.MAX_TURN, self.MAX_TURN), self.DEPART_STEPS)
 
     def log(self, message):
         self.events.append({"tick": self.tick, "message": message})
@@ -83,6 +123,11 @@ class World:
             "height": self.height,
             "contact_distance": self.contact_distance,
             "seed": self.seed,
+            "defaults": {
+                "inventory": economy.DEFAULT_INVENTORY,
+                "money": economy.DEFAULT_MONEY,
+                "production": economy.DEFAULT_PRODUCTION,
+            },
             "agents": [a.to_dict() for a in self.agents],
             "contacts": [[a.id, b.id] for a, b in self.contacts()],
             "events": self.events[-50:],

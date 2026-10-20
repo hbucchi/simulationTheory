@@ -4,6 +4,10 @@ const ui = {
   tick: document.getElementById("tick"),
   step: document.getElementById("step"),
   play: document.getElementById("play"),
+  run100: document.getElementById("run100"),
+  addForm: document.getElementById("add-form"),
+  addDefaults: document.getElementById("add-defaults"),
+  addError: document.getElementById("add-error"),
   interval: document.getElementById("interval"),
   intervalLabel: document.getElementById("interval-label"),
   agentCount: document.getElementById("agent-count"),
@@ -15,7 +19,8 @@ const ui = {
 };
 
 const DOT_RADIUS = 6;
-const NEEDS = ["hunger", "sleep", "thirst", "leisure"];
+const NEEDS = ["hunger", "sleep", "thirst", "boredom"];
+const RESOURCES = ["food", "water", "games"];
 
 let state = null;
 let selectedId = null;
@@ -34,11 +39,11 @@ async function api(path, body) {
   return data;
 }
 
-async function step() {
+async function step(steps = 1) {
   if (busy) return;
   busy = true;
   try {
-    render(await api("/api/step", { steps: 1 }));
+    render(await api("/api/step", { steps }));
   } catch (err) {
     console.error(err);
     setPlaying(false);
@@ -50,10 +55,11 @@ async function step() {
 function setPlaying(on) {
   playing = on;
   clearInterval(timer);
-  if (on) timer = setInterval(step, Number(ui.interval.value));
+  if (on) timer = setInterval(() => step(1), Number(ui.interval.value));
   ui.play.textContent = on ? "Pause" : "Play";
   ui.play.classList.toggle("active", on);
   ui.step.disabled = on;
+  ui.run100.disabled = on;
 }
 
 function render(next) {
@@ -84,6 +90,17 @@ function draw() {
 
   const inContact = new Set(state.contacts.flat());
   const byId = Object.fromEntries(state.agents.map(a => [a.id, a]));
+
+  // Dashed line from each seeking agent to the agent it is heading for.
+  ctx.setLineDash([6, 6]);
+  for (const agent of state.agents) {
+    const target = byId[agent.target_id];
+    if (agent.activity !== "seeking" || !target) continue;
+    ctx.strokeStyle = agent.color + "aa";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(agent.x, agent.y); ctx.lineTo(target.x, target.y); ctx.stroke();
+  }
+  ctx.setLineDash([]);
 
   for (const [a, b] of state.contacts) {
     ctx.strokeStyle = cssVar("--accent");
@@ -165,16 +182,33 @@ function renderAgents() {
       stats.append(label, bar, val);
     }
 
-    const items = Object.entries(a.inventory);
+    const production = a.modules.Production?.intervals || {};
     const meta = document.createElement("div");
     meta.className = "meta";
-    meta.innerHTML = `<span>money <b></b></span><span>movement <b></b></span><span>inventory <b></b></span>`;
-    const [money, movement, inventory] = meta.querySelectorAll("b");
-    money.textContent = a.money.toFixed(2);
-    movement.textContent = `${a.movement} px`;
-    inventory.textContent = items.length ? items.map(([k, n]) => `${k}×${n}`).join(", ") : "empty";
+    const fields = [
+      ...RESOURCES.map(r => [r, a.inventory[r] ?? 0, production[r] ? `+1 / ${production[r]} steps` : "no production"]),
+      ["money", a.money.toFixed(2)],
+      ["movement", `${a.movement} px`],
+    ];
+    for (const [label, value, title] of fields) {
+      const span = document.createElement("span");
+      const b = document.createElement("b");
+      b.textContent = value;
+      span.append(`${label} `, b);
+      if (title) span.title = title;
+      meta.append(span);
+    }
 
-    card.append(head, stats, meta);
+    const activity = document.createElement("div");
+    activity.className = "activity";
+    const act = document.createElement("b");
+    act.className = a.activity;
+    const target = state.agents.find(o => o.id === a.target_id);
+    act.textContent = a.activity === "seeking" && target ? `seeking ${target.name}` : a.activity;
+    const prod = RESOURCES.map(r => production[r] ? `${r} 1/${production[r]}` : `${r} –`).join(" · ");
+    activity.append(act, ` · produces ${prod}`);
+
+    card.append(head, stats, meta, activity);
     ui.agents.append(card);
   }
 }
@@ -205,7 +239,40 @@ canvas.addEventListener("click", (e) => {
   render(state);
 });
 
-ui.step.onclick = step;
+ui.step.onclick = () => step(1);
+ui.run100.onclick = () => step(100);
+
+function fillDefaults() {
+  const d = state.defaults;
+  const f = ui.addForm.elements;
+  for (const r of RESOURCES) {
+    f[r].value = d.inventory[r];
+    f[`prod_${r}`].value = d.production[r];
+  }
+  f.money.value = d.money;
+  f.movement.value = "";
+  ui.addError.hidden = true;
+}
+
+ui.addDefaults.onclick = fillDefaults;
+ui.addForm.onsubmit = async (e) => {
+  e.preventDefault();
+  const f = ui.addForm.elements;
+  const body = {
+    inventory: Object.fromEntries(RESOURCES.map(r => [r, Number(f[r].value)])),
+    production: Object.fromEntries(RESOURCES.map(r => [r, Number(f[`prod_${r}`].value)])),
+    money: Number(f.money.value),
+    movement: f.movement.value === "" ? null : Number(f.movement.value),
+  };
+  try {
+    render(await api("/api/agents", body));
+    ui.agentCount.value = state.agents.length;
+    ui.addError.hidden = true;
+  } catch (err) {
+    ui.addError.textContent = err.message;
+    ui.addError.hidden = false;
+  }
+};
 ui.play.onclick = () => setPlaying(!playing);
 ui.interval.oninput = () => {
   ui.intervalLabel.textContent = `${ui.interval.value} ms`;
@@ -224,7 +291,7 @@ ui.showRange.onchange = () => state && draw();
 document.addEventListener("keydown", (e) => {
   if (e.target.tagName === "INPUT") return;
   if (e.code === "Space") { e.preventDefault(); setPlaying(!playing); }
-  if (e.code === "ArrowRight" && !playing) step();
+  if (e.code === "ArrowRight" && !playing) step(1);
 });
 
-api("/api/state").then(s => { ui.agentCount.value = s.agents.length; render(s); });
+api("/api/state").then(s => { ui.agentCount.value = s.agents.length; render(s); fillDefaults(); });

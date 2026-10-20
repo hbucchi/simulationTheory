@@ -16,6 +16,7 @@
     <div class="group">
       <button id="step">Step</button>
       <button id="play">Play</button>
+      <button id="run100" title="Advance 100 steps at once">+100</button>
       <label>Interval
         <input id="interval" type="range" min="16" max="1000" value="200">
         <span id="interval-label">200 ms</span>
@@ -34,6 +35,30 @@
       <canvas id="world" width="1024" height="1024"></canvas>
     </div>
     <aside>
+      <details id="add-panel">
+        <summary>Add agent</summary>
+        <form id="add-form">
+          <fieldset>
+            <legend>Starting inventory</legend>
+            <label>Food <input name="food" type="number" min="0" step="1" required></label>
+            <label>Water <input name="water" type="number" min="0" step="1" required></label>
+            <label>Games <input name="games" type="number" min="0" step="1" required></label>
+            <label>Money <input name="money" type="number" min="0" step="0.01" required></label>
+          </fieldset>
+          <fieldset>
+            <legend>Produces 1 unit every N steps (0 = never)</legend>
+            <label>Food <input name="prod_food" type="number" min="0" step="1" required></label>
+            <label>Water <input name="prod_water" type="number" min="0" step="1" required></label>
+            <label>Games <input name="prod_games" type="number" min="0" step="1" required></label>
+          </fieldset>
+          <label class="wide">Movement (px/step) <input name="movement" type="number" min="1" max="200" step="1" placeholder="random 5–25"></label>
+          <div class="form-actions">
+            <button type="button" id="add-defaults">Defaults</button>
+            <button type="submit">Add agent</button>
+          </div>
+          <p id="add-error" class="error" hidden></p>
+        </form>
+      </details>
       <h2>Agents</h2>
       <div id="agents"></div>
       <h2>Events</h2>

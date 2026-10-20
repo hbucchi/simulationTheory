@@ -3,3 +3,7 @@ class Module:
 
     def on_step(self, agent, world):
         raise NotImplementedError
+
+    def to_dict(self):
+        """Settings worth showing in the UI."""
+        return {}

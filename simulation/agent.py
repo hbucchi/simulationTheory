@@ -4,7 +4,7 @@ import math
 
 from .inventory import Inventory
 
-NEED_NAMES = ("hunger", "sleep", "thirst", "leisure")
+NEED_NAMES = ("hunger", "sleep", "thirst", "boredom")
 
 
 def clamp(value, low, high):
@@ -21,13 +21,14 @@ class Need:
         return self if agent is None else getattr(agent, self.attr)
 
     def __set__(self, agent, value):
-        setattr(agent, self.attr, clamp(float(value), 0.0, 1.0))
+        # Rounding stops float noise (0.30000000000000004) from accumulating.
+        setattr(agent, self.attr, round(clamp(float(value), 0.0, 1.0), 6))
 
 
 class Agent:
     """A single simulated agent.
 
-    Needs (hunger, sleep, thirst, leisure) are scores in [0.00, 1.00] where
+    Needs (hunger, sleep, thirst, boredom) are scores in [0.00, 1.00] where
     0.00 means fully satisfied and 1.00 means desperate.
     ``money`` is an unbounded float. ``movement`` is an integer: the maximum
     number of pixels the agent can travel in one step.
@@ -40,10 +41,10 @@ class Agent:
     hunger = Need()
     sleep = Need()
     thirst = Need()
-    leisure = Need()
+    boredom = Need()
 
     def __init__(self, x, y, *, name=None, hunger=0.0, sleep=0.0, thirst=0.0,
-                 leisure=0.0, money=0.0, movement=10, inventory=None,
+                 boredom=0.0, money=0.0, movement=10, inventory=None,
                  color=None, modules=None):
         self.id = None  # assigned by the World when the agent is added
         self.name = name
@@ -52,12 +53,17 @@ class Agent:
         self.hunger = hunger
         self.sleep = sleep
         self.thirst = thirst
-        self.leisure = leisure
+        self.boredom = boredom
         self.money = float(money)
         self.movement = int(movement)
         self.inventory = inventory if inventory is not None else Inventory()
         self.color = color
         self.modules = list(modules or [])
+        # Set by the Navigate module / the World; shown in the UI.
+        self.activity = "wandering"
+        self.target_id = None
+        self.depart_heading = 0.0  # radians
+        self.depart_steps = 0
 
     @property
     def needs(self):
@@ -78,6 +84,12 @@ class Agent:
             dx, dy = dx / dist * self.movement, dy / dist * self.movement
         self.x, self.y = world.clamp_position(self.x + dx, self.y + dy)
 
+    def depart(self, heading, steps):
+        """Walk along ``heading`` (radians) for the next ``steps`` steps."""
+        self.depart_heading = heading
+        self.depart_steps = steps
+        self.activity = "leaving"
+
     def step(self, world):
         for module in self.modules:
             module.on_step(self, world)
@@ -93,5 +105,7 @@ class Agent:
             "movement": self.movement,
             "inventory": self.inventory.to_dict(),
             "color": self.color,
-            "modules": [type(m).__name__ for m in self.modules],
+            "activity": self.activity,
+            "target_id": self.target_id,
+            "modules": {type(m).__name__: m.to_dict() for m in self.modules},
         }

@@ -5,7 +5,9 @@ agent with ``agent.add_module(...)``; they run in order every step.
 """
 
 from .base import Module
+from .consume import Consume
+from .navigate import Navigate
 from .needs import NeedsDecay
-from .wander import Wander
+from .production import Production
 
-__all__ = ["Module", "NeedsDecay", "Wander"]
+__all__ = ["Module", "Consume", "Navigate", "NeedsDecay", "Production"]
