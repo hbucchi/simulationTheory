@@ -4,14 +4,18 @@
     python3 server.py --port 9000 --agents 5 --seed 42
 
 API
-    GET  /api/state                 current world state
-    POST /api/step   {"steps": n}   advance n ticks (default 1)
-    POST /api/reset  {"agents": n, "seed": s}  rebuild the world
-    POST /api/agents {"inventory": {...}, "money": m, "production": {...},
-                      "rates": {...}, "movement": n}
-                                    add one agent (any field omitted = default)
-    POST /api/agents/<id> {"production": {...}, "rates": {...}}
-                                    edit an existing agent
+    GET    /api/state                 current world state
+    POST   /api/step   {"steps": n}   advance n ticks (default 1)
+    POST   /api/reset  {"agents": n, "seed": s}  rebuild the world
+    POST   /api/agents      {...}     create an agent (any field omitted = default)
+    POST   /api/agents/<id> {...}     edit an agent (only the fields sent change)
+    DELETE /api/agents/<id>           remove an agent
+
+Agent fields: name, x, y, movement, money,
+              needs      {hunger, sleep, thirst, boredom: 0..1}   current levels
+              rates      {hunger, sleep, thirst, boredom: 0..1}   growth per step
+              inventory  {food, water, games: int >= 0}
+              production {food, water, games: int >= 0}          1 unit every N steps
 """
 
 import argparse
@@ -22,13 +26,14 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from simulation import World
+from simulation.agent import NEED_NAMES
 from simulation.economy import RESOURCES
-from simulation.modules import NeedsDecay
 
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_STEPS_PER_REQUEST = 1000
 MAX_AGENTS = 500
 MAX_MOVEMENT = 200
+AGENT_PATH = re.compile(r"/api/agents/(\d+)")
 
 
 class Simulation:
@@ -58,52 +63,68 @@ class Simulation:
             self.world.create_agent(**config)
             return self.world.to_dict()
 
-    def configure_agent(self, agent_id, config):
+    def update_agent(self, agent_id, config):
         with self.lock:
-            agent = self.world.agent_by_id(agent_id)
-            if agent is None:
-                raise LookupError(f"no agent {agent_id}")
-            self.world.configure_agent(agent, **config)
+            self.world.update_agent(self._get(agent_id), **config)
             return self.world.to_dict()
+
+    def remove_agent(self, agent_id):
+        with self.lock:
+            self.world.remove_agent(self._get(agent_id))
+            return self.world.to_dict()
+
+    def _get(self, agent_id):
+        agent = self.world.agent_by_id(agent_id)
+        if agent is None:
+            raise LookupError(f"no agent {agent_id}")
+        return agent
 
     def state(self):
         with self.lock:
             return self.world.to_dict()
 
 
-def _non_negative_int(value, field):
-    if isinstance(value, bool) or int(value) != float(value) or int(value) < 0:
-        raise ValueError(f"{field} must be a whole number >= 0")
-    return int(value)
+def _number(value, field, low, high, whole=False):
+    if isinstance(value, bool) or value is None:
+        raise ValueError(f"{field} must be a number")
+    number = float(value)
+    if not low <= number <= high:
+        raise ValueError(f"{field} must be between {low:g} and {high:g}")
+    if whole:
+        if number != int(number):
+            raise ValueError(f"{field} must be a whole number")
+        return int(number)
+    return number
+
+
+def _number_map(body, key, names, low, high, whole=False):
+    values = body.get(key)
+    if values is None:
+        return None
+    if not isinstance(values, dict) or set(values) - set(names):
+        raise ValueError(f"{key} must map {', '.join(names)} to numbers")
+    return {n: _number(v, f"{key}.{n}", low, high, whole) for n, v in values.items()}
 
 
 def parse_agent_config(body):
-    """Validate the JSON body of POST /api/agents into World.create_agent kwargs."""
-    config = {}
-    for key in ("inventory", "production"):
-        values = body.get(key) or {}
-        if not isinstance(values, dict) or set(values) - set(RESOURCES):
-            raise ValueError(f"{key} must map {', '.join(RESOURCES)} to numbers")
-        config[key] = {r: _non_negative_int(v, f"{key}.{r}") for r, v in values.items()}
-    rates = body.get("rates") or {}
-    if not isinstance(rates, dict) or set(rates) - set(NeedsDecay.DEFAULT_RATES):
-        raise ValueError(f"rates must map {', '.join(NeedsDecay.DEFAULT_RATES)} to numbers")
-    config["rates"] = {}
-    for need, value in rates.items():
-        if isinstance(value, bool) or not 0 <= float(value) <= 1:
-            raise ValueError(f"rates.{need} must be between 0 and 1")
-        config["rates"][need] = float(value)
-    if body.get("money") is not None:
-        money = float(body["money"])
-        if not money >= 0:
-            raise ValueError("money must be >= 0")
-        config["money"] = money
-    if body.get("movement") is not None:
-        movement = _non_negative_int(body["movement"], "movement")
-        if not 1 <= movement <= MAX_MOVEMENT:
-            raise ValueError(f"movement must be between 1 and {MAX_MOVEMENT}")
-        config["movement"] = movement
-    return config
+    """Validate a create/edit JSON body into World.create_agent / update_agent kwargs."""
+    world_size = 1024
+    config = {
+        "needs": _number_map(body, "needs", NEED_NAMES, 0, 1),
+        "rates": _number_map(body, "rates", NEED_NAMES, 0, 1),
+        "inventory": _number_map(body, "inventory", RESOURCES, 0, 1e9, whole=True),
+        "production": _number_map(body, "production", RESOURCES, 0, 1e6, whole=True),
+    }
+    if body.get("name") is not None:
+        name = str(body["name"]).strip()
+        if not 1 <= len(name) <= 40:
+            raise ValueError("name must be 1-40 characters")
+        config["name"] = name
+    for key, low, high, whole in (("x", 0, world_size, False), ("y", 0, world_size, False),
+                                  ("money", 0, 1e12, False), ("movement", 1, MAX_MOVEMENT, True)):
+        if body.get(key) is not None:
+            config[key] = _number(body[key], key, low, high, whole)
+    return {k: v for k, v in config.items() if v is not None}
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -112,37 +133,48 @@ class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
 
+    def end_headers(self):
+        # Always serve the latest page/JS after an update instead of a cached copy.
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
     def do_GET(self):
         if self.path == "/api/state":
             return self._json(self.sim.state())
         return super().do_GET()
 
     def do_POST(self):
-        try:
-            body = self._read_json()
+        def route(body):
             if self.path == "/api/step":
-                steps = int(body.get("steps", 1))
-                if not 1 <= steps <= MAX_STEPS_PER_REQUEST:
-                    raise ValueError(f"steps must be between 1 and {MAX_STEPS_PER_REQUEST}")
-                return self._json(self.sim.step(steps))
+                steps = _number(body.get("steps", 1), "steps", 1, MAX_STEPS_PER_REQUEST, whole=True)
+                return self.sim.step(steps)
             if self.path == "/api/reset":
-                agents = int(body.get("agents", 3))
-                if not 1 <= agents <= MAX_AGENTS:
-                    raise ValueError(f"agents must be between 1 and {MAX_AGENTS}")
+                agents = _number(body.get("agents", 3), "agents", 1, MAX_AGENTS, whole=True)
                 seed = body.get("seed")
-                seed = None if seed in (None, "") else int(seed)
-                return self._json(self.sim.reset(agents, seed))
+                return self.sim.reset(agents, None if seed in (None, "") else int(seed))
             if self.path == "/api/agents":
-                return self._json(self.sim.add_agent(parse_agent_config(body)))
-            match = re.fullmatch(r"/api/agents/(\d+)", self.path)
+                return self.sim.add_agent(parse_agent_config(body))
+            match = AGENT_PATH.fullmatch(self.path)
             if match:
-                config = {k: v for k, v in parse_agent_config(body).items() if k in ("production", "rates")}
-                return self._json(self.sim.configure_agent(int(match[1]), config))
+                return self.sim.update_agent(int(match[1]), parse_agent_config(body))
+            raise LookupError("not found")
+        self._handle(route)
+
+    def do_DELETE(self):
+        def route(body):
+            match = AGENT_PATH.fullmatch(self.path)
+            if not match:
+                raise LookupError("not found")
+            return self.sim.remove_agent(int(match[1]))
+        self._handle(route)
+
+    def _handle(self, route):
+        try:
+            self._json(route(self._read_json()))
         except LookupError as exc:
-            return self._json({"error": str(exc)}, status=404)
+            self._json({"error": str(exc)}, status=404)
         except (ValueError, TypeError) as exc:
-            return self._json({"error": str(exc)}, status=400)
-        self._json({"error": "not found"}, status=404)
+            self._json({"error": str(exc)}, status=400)
 
     def _read_json(self):
         length = int(self.headers.get("Content-Length") or 0)
@@ -158,7 +190,6 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)
 

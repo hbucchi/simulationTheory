@@ -23,6 +23,11 @@ class Inventory:
             del self.items[item]
         return True
 
+    def set(self, item, quantity):
+        if quantity < 0:
+            raise ValueError("quantity must be >= 0")
+        self.items[item] = quantity
+
     def count(self, item):
         return self.items.get(item, 0)
 

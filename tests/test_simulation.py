@@ -106,7 +106,7 @@ class ConfigurationTests(unittest.TestCase):
         world = bare_world()
         agent = world.create_agent(needs={"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0},
                                    inventory={"food": 0, "water": 0, "games": 0})
-        world.configure_agent(agent, production={"food": 1, "games": 0}, rates={"hunger": 0})
+        world.update_agent(agent, production={"food": 1, "games": 0}, rates={"hunger": 0})
         for _ in range(5):
             world.step()
         self.assertEqual([agent.inventory.count(r) for r in ("food", "water", "games")], [5, 0, 0])
@@ -114,6 +114,27 @@ class ConfigurationTests(unittest.TestCase):
         modules = agent.to_dict()["modules"]
         self.assertEqual(modules["Production"]["intervals"], {"food": 1, "water": 10, "games": 0})
         self.assertEqual(modules["NeedsDecay"]["rates"]["hunger"], 0)
+
+
+class EditingTests(unittest.TestCase):
+    def test_update_every_field(self):
+        world = bare_world()
+        agent = world.create_agent()
+        world.update_agent(agent, name="Bob", x=10, y=2000, needs={"sleep": 0.7}, inventory={"games": 3},
+                           money=12.5, movement=40, production={"water": 2}, rates={"boredom": 0.1})
+        d = agent.to_dict()
+        self.assertEqual((d["name"], d["x"], d["y"], d["needs"]["sleep"]), ("Bob", 10, 1024, 0.7))
+        self.assertEqual((d["inventory"]["games"], d["money"], d["movement"]), (3, 12.5, 40))
+        self.assertEqual(d["modules"]["Production"]["intervals"]["water"], 2)
+        self.assertEqual(d["modules"]["NeedsDecay"]["rates"]["boredom"], 0.1)
+
+    def test_remove_agent_keeps_ids_unique(self):
+        world = bare_world()
+        world.spawn_random_agents(3)
+        world.remove_agent(world.agents[0])
+        new = world.create_agent()
+        self.assertEqual([a.id for a in world.agents], [2, 3, 4])
+        self.assertEqual(new.name, "Agent 4")
 
 
 class WorldTests(unittest.TestCase):
@@ -179,17 +200,35 @@ class WorldTests(unittest.TestCase):
         self.assertEqual((other.activity, other.target_id), ("meeting", seeker.id))
         self.assertEqual((seeker.x, other.x), (105, 890))
 
-    def test_seeker_keeps_its_target(self):
+    def test_seeker_retargets_to_the_closest_agent_every_step(self):
         world = bare_world()
-        seeker = world.create_agent(inventory={"water": 0}, needs={"thirst": 0.9}, movement=5)
-        first = world.create_agent(movement=1)
-        second = world.create_agent(movement=1)
-        seeker.x, seeker.y = 500, 500
-        first.x, first.y = 600, 500     # nearest at the start
-        second.x, second.y = 390, 500   # becomes nearer after one step toward `first`
-        world.step()
+        seeker = world.create_agent(inventory={"water": 0}, needs={"thirst": 0.9}, movement=5, x=500, y=500)
+        first = world.create_agent(movement=1, x=600, y=500)    # closest at the start
+        second = world.create_agent(movement=1, x=600, y=500)
         world.step()
         self.assertEqual(seeker.target_id, first.id)
+        second.x, second.y = 480, 500                           # now another agent is closer
+        world.step()
+        self.assertEqual(seeker.target_id, second.id)
+        self.assertEqual(seeker.x, 500)                         # it turned around toward it
+
+    def test_bump_without_needs_is_ignored(self):
+        world = bare_world()
+        calm = {"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0}
+        world.create_agent(needs=calm, x=100, y=100, movement=1)
+        world.create_agent(needs=calm, x=105, y=100, movement=1)
+        world.step()
+        self.assertEqual(world.events, [])
+        self.assertEqual(world.cooldowns, {})
+
+    def test_failed_trade_explains_why_and_agents_do_not_leave(self):
+        world = bare_world()
+        a = world.create_agent(inventory={"water": 0}, needs={"thirst": 0.9}, x=100, y=100, movement=1)
+        b = world.create_agent(inventory={"water": 0}, x=105, y=100, movement=1)
+        world.step()
+        self.assertIn(f"No trade: {a.name} still needs 7 water: {b.name} has none", world.events[-1]["message"])
+        self.assertNotEqual(a.activity, "leaving")
+        self.assertTrue(world.in_cooldown(a, b))
 
     def test_contact_counts_as_soon_as_an_agent_moves_onto_another(self):
         world = bare_world()

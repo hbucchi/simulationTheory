@@ -32,6 +32,7 @@ class World:
         self.tick = 0
         self.events = []  # newest last; trimmed to keep the payload small
         self.cooldowns = {}  # frozenset({id_a, id_b}) -> tick until which they ignore each other
+        self.next_id = 1
 
     def clamp_position(self, x, y):
         return (min(max(x, 0.0), self.width), min(max(y, 0.0), self.height))
@@ -40,22 +41,25 @@ class World:
         return (self.rng.uniform(0, self.width), self.rng.uniform(0, self.height))
 
     def add_agent(self, agent):
-        agent.id = len(self.agents) + 1
+        agent.id = self.next_id
+        self.next_id += 1
         agent.name = agent.name or f"Agent {agent.id}"
         if agent.color is None:
-            agent.color = AGENT_COLORS[len(self.agents) % len(AGENT_COLORS)]
+            agent.color = AGENT_COLORS[(agent.id - 1) % len(AGENT_COLORS)]
         self.agents.append(agent)
         return agent
 
     def create_agent(self, *, inventory=None, money=economy.DEFAULT_MONEY, production=None,
-                     rates=None, movement=None, needs=None, name=None):
-        """Create an agent at a random position with the standard modules.
+                     rates=None, movement=None, needs=None, name=None, x=None, y=None):
+        """Create an agent with the standard modules.
 
         ``inventory`` / ``production`` override the defaults per resource;
         ``rates`` overrides how fast each need grows per step;
-        ``needs`` overrides starting need levels (otherwise random in [0, 0.5]).
+        ``needs`` overrides starting need levels (otherwise random in [0, 0.5]);
+        ``x`` / ``y`` default to a random position.
         """
-        x, y = self.random_position()
+        rx, ry = self.random_position()
+        x, y = self.clamp_position(rx if x is None else x, ry if y is None else y)
         start_needs = {n: round(self.rng.uniform(0, 0.5), 2) for n in ("hunger", "sleep", "thirst", "boredom")}
         start_needs.update(needs or {})
         agent = Agent(
@@ -67,14 +71,32 @@ class World:
         )
         return self.add_agent(agent)
 
-    def configure_agent(self, agent, *, production=None, rates=None):
-        """Change an existing agent's production intervals and/or need growth rates."""
+    def update_agent(self, agent, *, name=None, x=None, y=None, needs=None, inventory=None,
+                     money=None, movement=None, production=None, rates=None):
+        """Change any of an existing agent's settings; omitted fields stay as they are."""
+        if name:
+            agent.name = name
+        agent.x, agent.y = self.clamp_position(agent.x if x is None else x, agent.y if y is None else y)
+        for need, level in (needs or {}).items():
+            setattr(agent, need, level)
+        for resource, qty in (inventory or {}).items():
+            agent.inventory.set(resource, qty)
+        if money is not None:
+            agent.money = float(money)
+        if movement is not None:
+            agent.movement = int(movement)
         for module in agent.modules:
             if isinstance(module, Production) and production:
                 module.set_intervals(production)
             if isinstance(module, NeedsDecay) and rates:
                 module.rates.update(rates)
         return agent
+
+    def remove_agent(self, agent):
+        self.agents.remove(agent)
+        for other in self.agents:
+            if other.target_id == agent.id:
+                other.target_id = None
 
     def spawn_random_agents(self, count):
         for _ in range(count):
@@ -122,15 +144,26 @@ class World:
                     self.interact(agent, other)
 
     def interact(self, a, b):
-        """Two agents touched: trade what they need, then walk apart."""
+        """Two agents touched. If either needs something they trade, then walk apart.
+
+        Afterwards the pair ignores each other for COOLDOWN_STEPS, so a needy
+        agent moves on to the next-closest agent instead of retrying the same one.
+        """
+        if not (economy.is_needy(a) or economy.is_needy(b)):
+            return  # a casual bump: nobody needs anything
         deals = economy.trade(a, b)
         for buyer, seller, bought, paid in deals:
             self.log(f"{buyer.name} got {economy.describe(bought)} from {seller.name} "
                      f"for {economy.describe(paid)}")
-        if not deals:
-            self.log(f"{a.name} and {b.name} met (nothing to trade)")
+        for reason in economy.unmet(a, b) + economy.unmet(b, a):
+            self.log(f"No trade: {reason}")
 
         self.cooldowns[frozenset((a.id, b.id))] = self.tick + self.COOLDOWN_STEPS
+        if deals:
+            self.depart(a, b)
+
+    def depart(self, a, b):
+        """Send a and b off in roughly opposite directions."""
         away = math.atan2(a.y - b.y, a.x - b.x)
         if a.x == b.x and a.y == b.y:
             away = self.rng.uniform(-math.pi, math.pi)
@@ -155,6 +188,7 @@ class World:
                 "rates": NeedsDecay.DEFAULT_RATES,
             },
             "agents": [a.to_dict() for a in self.agents],
-            "contacts": [[a.id, b.id] for a, b in self.contacts()],
+            # Only pairs that can interact; pairs in cooldown just overlap.
+            "contacts": [[a.id, b.id] for a, b in self.contacts() if not self.in_cooldown(a, b)],
             "events": self.events[-50:],
         }

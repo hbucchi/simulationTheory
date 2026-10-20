@@ -119,5 +119,23 @@ def trade(a, b):
     return deals
 
 
+def unmet(buyer, seller):
+    """Why ``buyer`` still lacks something after dealing with ``seller`` (list of strings)."""
+    reasons = []
+    for resource in RESOURCES:
+        missing = demand(buyer, resource)
+        if not missing:
+            continue
+        stock = seller.inventory.count(resource)
+        if stock == 0:
+            why = f"{seller.name} has none"
+        elif spare(seller, resource) == 0:
+            why = f"{seller.name} keeps its {stock} for itself"
+        else:
+            why = "nothing left to pay with"
+        reasons.append(f"{buyer.name} still needs {missing} {resource}: {why}")
+    return reasons
+
+
 def describe(items):
     return " + ".join(f"{n} {k}" for k, n in items.items())

@@ -1,25 +1,30 @@
 const canvas = document.getElementById("world");
 const ctx = canvas.getContext("2d");
+const $ = (id) => document.getElementById(id);
 const ui = {
-  tick: document.getElementById("tick"),
-  step: document.getElementById("step"),
-  play: document.getElementById("play"),
-  run100: document.getElementById("run100"),
-  addForm: document.getElementById("add-form"),
-  addDefaults: document.getElementById("add-defaults"),
-  addError: document.getElementById("add-error"),
-  editPanel: document.getElementById("edit-panel"),
-  editForm: document.getElementById("edit-form"),
-  editReload: document.getElementById("edit-reload"),
-  editStatus: document.getElementById("edit-status"),
-  interval: document.getElementById("interval"),
-  intervalLabel: document.getElementById("interval-label"),
-  agentCount: document.getElementById("agent-count"),
-  seed: document.getElementById("seed"),
-  reset: document.getElementById("reset"),
-  showRange: document.getElementById("show-range"),
-  agents: document.getElementById("agents"),
-  events: document.getElementById("events"),
+  tick: $("tick"),
+  step: $("step"),
+  play: $("play"),
+  run100: $("run100"),
+  interval: $("interval"),
+  intervalLabel: $("interval-label"),
+  agentCount: $("agent-count"),
+  seed: $("seed"),
+  reset: $("reset"),
+  showRange: $("show-range"),
+  agents: $("agents"),
+  events: $("events"),
+  tabs: document.querySelectorAll(".tabs button"),
+  newAgent: $("new-agent"),
+  chips: $("agent-chips"),
+  form: $("agent-form"),
+  formTitle: $("form-title"),
+  formFields: $("form-fields"),
+  formRemove: $("form-remove"),
+  formRevert: $("form-revert"),
+  formSubmit: $("form-submit"),
+  formStatus: $("form-status"),
+  balance: document.querySelector("#agent-form .balance"),
 };
 
 const DOT_RADIUS = 6;
@@ -27,18 +32,42 @@ const NEEDS = ["hunger", "sleep", "thirst", "boredom"];
 const RESOURCES = ["food", "water", "games"];
 const NEED_FOR = { food: "hunger", water: "thirst", games: "boredom" };
 const RELIEF_PER_UNIT = 0.1;
+const cap = (w) => w[0].toUpperCase() + w.slice(1);
+
+// Every editable agent field. `path` is "field" or "group.key" (matches the API body),
+// `get` reads the current value from an agent in the state payload.
+const FIELD_GROUPS = [
+  { legend: "General", fields: [
+    { path: "name", label: "Name", type: "text", full: true, get: a => a.name, placeholder: "auto" },
+    { path: "movement", label: "Movement (px/step)", min: 1, max: 200, step: 1, get: a => a.movement, placeholder: "random 5–25" },
+    { path: "money", label: "Money", min: 0, step: 0.01, get: a => a.money },
+    { path: "x", label: "X", min: 0, max: 1024, step: 1, get: a => Math.round(a.x), placeholder: "random" },
+    { path: "y", label: "Y", min: 0, max: 1024, step: 1, get: a => Math.round(a.y), placeholder: "random" },
+  ]},
+  { legend: "Current needs (0 = satisfied, 1 = desperate)", fields: NEEDS.map(n => (
+    { path: `needs.${n}`, label: cap(n), min: 0, max: 1, step: 0.01, get: a => a.needs[n], placeholder: "random" }))},
+  { legend: "Need growth per step", fields: NEEDS.map(n => (
+    { path: `rates.${n}`, label: cap(n), min: 0, max: 1, step: 0.001, get: a => a.modules.NeedsDecay.rates[n] }))},
+  { legend: "Inventory", fields: RESOURCES.map(r => (
+    { path: `inventory.${r}`, label: cap(r), min: 0, step: 1, get: a => a.inventory[r] ?? 0 }))},
+  { legend: "Production: 1 unit every N steps (0 = never)", fields: RESOURCES.map(r => (
+    { path: `production.${r}`, label: cap(r), min: 0, step: 1, get: a => a.modules.Production.intervals[r] }))},
+];
+const FIELDS = FIELD_GROUPS.flatMap(g => g.fields);
 
 let state = null;
 let selectedId = null;
+let editingId = null;   // agent shown in the Manage form; null = creating a new one
+let activeTab = "overview";
 let playing = false;
 let busy = false;     // a request is in flight; skip timer ticks instead of queueing them
 let timer = null;
 
-async function api(path, body) {
-  const res = await fetch(path, body === undefined ? {} : {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+async function api(path, body, method = body === undefined ? "GET" : "POST") {
+  const res = await fetch(path, {
+    method,
+    headers: body === undefined ? {} : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || res.statusText);
@@ -70,12 +99,19 @@ function setPlaying(on) {
 
 function render(next) {
   state = next;
+  if (editingId !== null && !agentById(editingId)) editingId = null;
   ui.tick.textContent = state.tick;
-  syncEditAgents();
   draw();
-  renderAgents();
-  renderEvents();
+  if (activeTab === "overview") {
+    renderAgents();
+    renderEvents();
+  } else {
+    renderChips();
+    refreshForm();
+  }
 }
+
+const agentById = (id) => state.agents.find(a => a.id === id);
 
 function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -238,6 +274,171 @@ function renderEvents() {
   }
 }
 
+// ---------- Tabs ----------
+
+function showTab(name) {
+  activeTab = name;
+  for (const t of ui.tabs) t.classList.toggle("active", t.dataset.tab === name);
+  $("tab-overview").hidden = name !== "overview";
+  $("tab-manage").hidden = name !== "manage";
+  render(state);
+}
+for (const t of ui.tabs) t.onclick = () => showTab(t.dataset.tab);
+
+// ---------- Manage tab: one form for creating and editing ----------
+
+function buildForm() {
+  for (const group of FIELD_GROUPS) {
+    const fs = document.createElement("fieldset");
+    const legend = document.createElement("legend");
+    legend.textContent = group.legend;
+    fs.append(legend);
+    for (const f of group.fields) {
+      const label = document.createElement("label");
+      if (f.full) label.className = "full";
+      const input = document.createElement("input");
+      input.name = f.path;
+      input.type = f.type || "number";
+      for (const attr of ["min", "max", "step"]) if (f[attr] !== undefined) input[attr] = f[attr];
+      input.oninput = () => { input.classList.add("dirty"); updateBalance(); };
+      label.append(f.label, input);
+      fs.append(label);
+    }
+    ui.formFields.append(fs);
+  }
+}
+
+const input = (path) => ui.form.elements[path];
+
+function renderChips() {
+  ui.chips.innerHTML = "";
+  ui.newAgent.classList.toggle("active", editingId === null);
+  for (const a of state.agents) {
+    const chip = document.createElement("button");
+    chip.className = "chip" + (a.id === editingId ? " active" : "");
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    dot.style.background = a.color;
+    chip.append(dot, a.name);
+    chip.onclick = () => openEditor(a.id);
+    ui.chips.append(chip);
+  }
+}
+
+// Fill the form. Untouched ("clean") fields follow the live state; edited ones are left alone.
+function refreshForm(force = false) {
+  const agent = editingId === null ? null : agentById(editingId);
+  ui.formTitle.textContent = agent ? `Edit ${agent.name}` : "New agent";
+  ui.formSubmit.textContent = agent ? "Save changes" : "Create agent";
+  ui.formRemove.hidden = !agent;
+  for (const f of FIELDS) {
+    const el = input(f.path);
+    if ((el.classList.contains("dirty") || el === document.activeElement) && !force) continue;
+    el.classList.remove("dirty");
+    el.placeholder = agent ? "" : (f.placeholder || "");
+    el.value = agent ? f.get(agent) : defaultValue(f.path);
+  }
+  updateBalance();
+}
+
+function defaultValue(path) {
+  const d = state.defaults;
+  const [group, key] = path.split(".");
+  if (group === "inventory") return d.inventory[key];
+  if (group === "production") return d.production[key];
+  if (group === "rates") return d.rates[key];
+  if (group === "money") return d.money;
+  return "";  // name, movement, x, y, needs: blank = server picks (auto/random)
+}
+
+function openEditor(id) {
+  editingId = id;
+  selectedId = id;
+  setStatus("");
+  if (activeTab !== "manage") showTab("manage");
+  refreshForm(true);
+  render(state);
+}
+
+// Body for the API: when editing, only changed fields; when creating, every non-blank field.
+function formBody() {
+  const body = {};
+  for (const f of FIELDS) {
+    const el = input(f.path);
+    if (editingId !== null && !el.classList.contains("dirty")) continue;
+    if (el.value === "") {
+      if (editingId !== null) throw new Error(`${f.label} can't be empty`);
+      continue;
+    }
+    const value = f.type === "text" ? el.value : Number(el.value);
+    const [group, key] = f.path.split(".");
+    if (key) (body[group] ||= {})[key] = value;
+    else body[group] = value;
+  }
+  return body;
+}
+
+function setStatus(message, isError = false) {
+  ui.formStatus.hidden = !message;
+  ui.formStatus.textContent = message;
+  ui.formStatus.className = "status" + (isError ? " error" : "");
+}
+
+// Per resource: units used per step (need rate / 0.1) vs units made per step (1 / N).
+function updateBalance() {
+  ui.balance.innerHTML = "";
+  for (const r of RESOURCES) {
+    const used = Number(input(`rates.${NEED_FOR[r]}`).value) / RELIEF_PER_UNIT;
+    const every = Number(input(`production.${r}`).value);
+    const made = every ? 1 / every : 0;
+    const net = made - used;
+    const line = document.createElement("span");
+    const even = Math.abs(net) < 1e-9;
+    line.className = even ? "" : net < 0 ? "short" : "surplus";
+    const verdict = even ? "balanced" : net < 0 ? `short ${(-net).toFixed(3)}/step` : `surplus ${net.toFixed(3)}/step`;
+    line.textContent = `${r}: uses ${used.toFixed(3)} · makes ${made.toFixed(3)} per step → ${verdict}`;
+    ui.balance.append(line);
+  }
+}
+
+ui.newAgent.onclick = () => { editingId = null; setStatus(""); refreshForm(true); render(state); };
+ui.formRevert.onclick = () => { setStatus(""); refreshForm(true); };
+ui.formRemove.onclick = async () => {
+  const agent = agentById(editingId);
+  if (!agent || !confirm(`Remove ${agent.name}?`)) return;
+  try {
+    const next = await api(`/api/agents/${agent.id}`, undefined, "DELETE");
+    editingId = null;
+    refreshForm(true);
+    render(next);
+    ui.agentCount.value = state.agents.length;
+    setStatus(`Removed ${agent.name}.`);
+  } catch (err) {
+    setStatus(err.message, true);
+  }
+};
+ui.form.onsubmit = async (e) => {
+  e.preventDefault();
+  try {
+    const body = formBody();
+    if (editingId !== null && !Object.keys(body).length) return setStatus("Nothing changed.");
+    const path = editingId === null ? "/api/agents" : `/api/agents/${editingId}`;
+    const next = await api(path, body);
+    if (editingId === null) {
+      editingId = next.agents[next.agents.length - 1].id;  // switch to editing the new agent
+      setStatus(`Created ${next.agents[next.agents.length - 1].name}.`);
+    } else {
+      setStatus("Saved.");
+    }
+    state = next;
+    refreshForm(true);
+    render(next);
+    ui.agentCount.value = state.agents.length;
+  } catch (err) {
+    setStatus(err.message, true);
+  }
+};
+
 canvas.addEventListener("click", (e) => {
   if (!state) return;
   const rect = canvas.getBoundingClientRect();
@@ -248,122 +449,13 @@ canvas.addEventListener("click", (e) => {
     const d = Math.hypot(a.x - x, a.y - y);
     if (d < bestDist) { best = a; bestDist = d; }
   }
+  if (best && activeTab === "manage") return openEditor(best.id);
   selectedId = best ? best.id : null;
   render(state);
 });
 
 ui.step.onclick = () => step(1);
 ui.run100.onclick = () => step(100);
-
-// Production / need-rate fields are shared by the add and edit forms.
-function fillRates(form, production, rates) {
-  for (const r of RESOURCES) form.elements[`prod_${r}`].value = production[r];
-  for (const n of NEEDS) form.elements[`rate_${n}`].value = rates[n];
-  updateBalance(form);
-}
-
-function readRates(form) {
-  return {
-    production: Object.fromEntries(RESOURCES.map(r => [r, Number(form.elements[`prod_${r}`].value)])),
-    rates: Object.fromEntries(NEEDS.map(n => [n, Number(form.elements[`rate_${n}`].value)])),
-  };
-}
-
-// Per resource: units used per step (need rate / 0.1) vs units made per step (1 / N).
-function updateBalance(form) {
-  const box = document.querySelector(`.balance[data-for="${form.id}"]`);
-  const { production, rates } = readRates(form);
-  box.innerHTML = "";
-  for (const r of RESOURCES) {
-    const used = rates[NEED_FOR[r]] / RELIEF_PER_UNIT;
-    const made = production[r] ? 1 / production[r] : 0;
-    const net = made - used;
-    const line = document.createElement("span");
-    line.className = Math.abs(net) < 1e-9 ? "" : net < 0 ? "short" : "surplus";
-    const verdict = Math.abs(net) < 1e-9 ? "balanced" : net < 0 ? `short ${(-net).toFixed(3)}/step` : `surplus ${net.toFixed(3)}/step`;
-    line.textContent = `${r}: uses ${used.toFixed(3)} · makes ${made.toFixed(3)} per step → ${verdict}`;
-    box.append(line);
-  }
-}
-
-function fillDefaults() {
-  const d = state.defaults;
-  const f = ui.addForm.elements;
-  for (const r of RESOURCES) f[r].value = d.inventory[r];
-  f.money.value = d.money;
-  f.movement.value = "";
-  fillRates(ui.addForm, d.production, d.rates);
-  ui.addError.hidden = true;
-}
-
-// The editor is only rebuilt when the agent list changes, so typing isn't
-// wiped out by the re-render on every step.
-let editAgentIds = "";
-function syncEditAgents() {
-  const ids = state.agents.map(a => a.id).join(",");
-  if (ids === editAgentIds) return;
-  editAgentIds = ids;
-  const select = ui.editForm.elements.agent;
-  const current = select.value;
-  select.innerHTML = "";
-  for (const a of state.agents) select.add(new Option(a.name, a.id));
-  if (current && state.agents.some(a => String(a.id) === current)) select.value = current;
-  loadEditor();
-}
-
-function loadEditor() {
-  const agent = state.agents.find(a => String(a.id) === ui.editForm.elements.agent.value);
-  if (!agent) return;
-  fillRates(ui.editForm, agent.modules.Production.intervals, agent.modules.NeedsDecay.rates);
-  ui.editStatus.hidden = true;
-}
-
-function openEditor(id) {
-  ui.editPanel.open = true;
-  ui.editForm.elements.agent.value = id;
-  selectedId = id;
-  loadEditor();
-  render(state);
-  ui.editPanel.scrollIntoView({ block: "nearest" });
-}
-
-ui.editForm.elements.agent.onchange = loadEditor;
-ui.editReload.onclick = loadEditor;
-ui.editForm.oninput = () => updateBalance(ui.editForm);
-ui.addForm.oninput = () => updateBalance(ui.addForm);
-ui.editForm.onsubmit = async (e) => {
-  e.preventDefault();
-  const id = ui.editForm.elements.agent.value;
-  try {
-    render(await api(`/api/agents/${id}`, readRates(ui.editForm)));
-    ui.editStatus.textContent = "Saved.";
-    ui.editStatus.className = "error ok";
-  } catch (err) {
-    ui.editStatus.textContent = err.message;
-    ui.editStatus.className = "error";
-  }
-  ui.editStatus.hidden = false;
-};
-
-ui.addDefaults.onclick = fillDefaults;
-ui.addForm.onsubmit = async (e) => {
-  e.preventDefault();
-  const f = ui.addForm.elements;
-  const body = {
-    inventory: Object.fromEntries(RESOURCES.map(r => [r, Number(f[r].value)])),
-    ...readRates(ui.addForm),
-    money: Number(f.money.value),
-    movement: f.movement.value === "" ? null : Number(f.movement.value),
-  };
-  try {
-    render(await api("/api/agents", body));
-    ui.agentCount.value = state.agents.length;
-    ui.addError.hidden = true;
-  } catch (err) {
-    ui.addError.textContent = err.message;
-    ui.addError.hidden = false;
-  }
-};
 ui.play.onclick = () => setPlaying(!playing);
 ui.interval.oninput = () => {
   ui.intervalLabel.textContent = `${ui.interval.value} ms`;
@@ -372,9 +464,10 @@ ui.interval.oninput = () => {
 ui.reset.onclick = async () => {
   setPlaying(false);
   selectedId = null;
-  editAgentIds = "";  // new world: reload the editor even if the ids are the same
+  editingId = null;
   try {
     render(await api("/api/reset", { agents: Number(ui.agentCount.value), seed: ui.seed.value }));
+    refreshForm(true);
   } catch (err) {
     alert(err.message);
   }
@@ -386,4 +479,10 @@ document.addEventListener("keydown", (e) => {
   if (e.code === "ArrowRight" && !playing) step(1);
 });
 
-api("/api/state").then(s => { ui.agentCount.value = s.agents.length; render(s); fillDefaults(); });
+buildForm();
+api("/api/state").then(s => {
+  ui.agentCount.value = s.agents.length;
+  state = s;
+  refreshForm(true);
+  render(s);
+});

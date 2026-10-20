@@ -7,12 +7,12 @@ from .base import Module
 class Navigate(Module):
     """Decides where the agent walks each step. Priority:
 
-    1. leaving   - just met someone: walk along the departure heading.
-    2. meeting   - another agent is seeking this one: walk toward that seeker,
+    1. leaving   - just traded: walk along the departure heading.
+    2. seeking   - a need is above 0.5 and stock is gone: every step, find the
+                   closest available agent (it can't know who has what) and
+                   walk straight at its current position.
+    3. meeting   - another agent is seeking this one: walk toward that seeker,
                    so both close the gap and are guaranteed to touch.
-    3. seeking   - a need is above 0.5 and stock is gone: lock onto the nearest
-                   available agent (it can't know who has what) and walk to its
-                   current position every step until they touch.
     4. wandering - otherwise: random walk between random points.
     """
 
@@ -28,18 +28,16 @@ class Navigate(Module):
                                agent.y + math.sin(agent.depart_heading) * agent.movement, world)
             return
 
+        if economy.is_needy(agent):
+            partner = world.nearest_partner(agent)
+            if partner is not None:
+                self._go_to(agent, "seeking", partner, world)
+                return
+
         seekers = world.seekers_of(agent)
         if seekers:
             self._go_to(agent, "meeting", min(seekers, key=agent.distance_to), world)
             return
-
-        if economy.is_needy(agent):
-            partner = world.agent_by_id(agent.target_id) if agent.activity == "seeking" else None
-            if partner is None or world.in_cooldown(agent, partner):
-                partner = world.nearest_partner(agent)
-            if partner is not None:
-                self._go_to(agent, "seeking", partner, world)
-                return
 
         agent.activity = "wandering"
         agent.target_id = None
