@@ -32,15 +32,49 @@ const DOT_RADIUS = 6;
 const NEEDS = ["hunger", "sleep", "thirst", "boredom"];
 const RESOURCES = ["food", "water", "games"];
 const NEED_FOR = { food: "hunger", water: "thirst", games: "boredom" };
-const RELIEF_PER_UNIT = 0.1;
 const cap = (w) => w[0].toUpperCase() + w.slice(1);
+const getPath = (obj, path) => path.split(".").reduce((o, k) => o?.[k], obj);
+
+// A rule "spread" is a number (every agent gets it) or {dist, min, max, mean?, std?, skew?}.
+// Same meaning as simulation/distributions.py.
+function spreadMean(spec) {
+  if (typeof spec === "number") return spec;
+  return spec.dist === "uniform" ? (spec.min + spec.max) / 2 : spec.mean;
+}
+
+function gauss() {
+  let u = 0;
+  while (!u) u = Math.random();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random());
+}
+
+// Skew-normal draw rescaled to mean 0 / std 1.
+function skewNormal(alpha) {
+  const delta = alpha / Math.sqrt(1 + alpha * alpha);
+  const u0 = gauss(), v = gauss();
+  const u1 = delta * u0 + Math.sqrt(1 - delta * delta) * v;
+  const z = u0 >= 0 ? u1 : -u1;
+  const m = delta * Math.sqrt(2 / Math.PI);
+  return (z - m) / Math.sqrt(1 - m * m);
+}
+
+function sampleSpread(spec) {
+  if (typeof spec === "number") return spec;
+  const { min, max } = spec;
+  if (spec.dist === "uniform") return min + Math.random() * (max - min);
+  for (let i = 0; i < 100; i++) {
+    const v = spec.mean + spec.std * (spec.dist === "skewed" ? skewNormal(spec.skew) : gauss());
+    if (v >= min && v <= max) return v;
+  }
+  return Math.min(Math.max(spec.mean, min), max);
+}
 
 // Every editable agent field. `path` is "field" or "group.key" (matches the API body),
 // `get` reads the current value from an agent in the state payload.
 const FIELD_GROUPS = [
   { legend: "General", fields: [
     { path: "name", label: "Name", type: "text", full: true, get: a => a.name, placeholder: "auto" },
-    { path: "movement", label: "Movement (px/step)", min: 1, max: 200, step: 1, get: a => a.movement, placeholder: "random 5–25" },
+    { path: "movement", label: "Movement (px/step)", min: 1, max: 200, step: 1, get: a => a.movement, placeholder: "from rules" },
     { path: "money", label: "Money", min: 0, step: 0.01, get: a => a.money },
     { path: "x", label: "X", min: 0, max: 1024, step: 1, get: a => Math.round(a.x), placeholder: "random" },
     { path: "y", label: "Y", min: 0, max: 1024, step: 1, get: a => Math.round(a.y), placeholder: "random" },
@@ -385,21 +419,25 @@ function refreshForm(force = false) {
     const el = input(f.path);
     if ((el.classList.contains("dirty") || el === document.activeElement) && !force) continue;
     el.classList.remove("dirty");
-    el.placeholder = agent ? "" : (f.placeholder || "");
+    el.placeholder = agent ? "" : (f.placeholder || "from rules");
     el.value = agent ? f.get(agent) : defaultValue(f.path);
   }
   updateBalance();
 }
 
+// New agents start from the game's rules (set on the setup screen). A rule that is a
+// distribution shows blank: the server draws a value from it.
+const RULE_BACKED = ["inventory", "production", "rates", "money", "sleep_recovery", "movement"];
 function defaultValue(path) {
-  const d = state.defaults;
-  const [group, key] = path.split(".");
-  if (group === "inventory") return d.inventory[key];
-  if (group === "production") return d.production[key];
-  if (group === "rates") return d.rates[key];
-  if (group === "money") return d.money;
-  if (group === "sleep_recovery") return d.sleep_recovery;
-  return "";  // name, movement, x, y, needs: blank = server picks (auto/random)
+  if (!RULE_BACKED.includes(path.split(".")[0])) return "";  // name, x, y, needs: server picks
+  const spec = getPath(state.rules, path);
+  return typeof spec === "number" ? spec : "";
+}
+
+// A blank field counts as the rule's average (for the balance preview).
+function fieldValue(path) {
+  const value = input(path).value;
+  return value === "" ? spreadMean(getPath(state.rules, path)) : Number(value);
 }
 
 function openEditor(id) {
@@ -435,12 +473,12 @@ function setStatus(message, isError = false) {
   ui.formStatus.className = "status" + (isError ? " error" : "");
 }
 
-// Per resource: units used per step (need rate / 0.1) vs units made per step (1 / N).
+// Per resource: units used per step (need rate / relief per unit) vs units made per step (1 / N).
 function updateBalance() {
   ui.balance.innerHTML = "";
   for (const r of RESOURCES) {
-    const used = Number(input(`rates.${NEED_FOR[r]}`).value) / RELIEF_PER_UNIT;
-    const every = Number(input(`production.${r}`).value);
+    const used = fieldValue(`rates.${NEED_FOR[r]}`) / state.rules.relief_per_unit;
+    const every = fieldValue(`production.${r}`);
     const made = every ? 1 / every : 0;
     const net = made - used;
     const line = document.createElement("span");
@@ -452,8 +490,8 @@ function updateBalance() {
   }
   // Sleep rises at g while awake (0.3 -> 0.5) and falls at r while resting (0.5 -> 0.3),
   // so the agent spends g / (g + r) of its time asleep.
-  const g = Number(input("rates.sleep").value);
-  const r = Number(input("sleep_recovery").value);
+  const g = fieldValue("rates.sleep");
+  const r = fieldValue("sleep_recovery");
   const line = document.createElement("span");
   line.className = r ? "" : "short";
   line.textContent = r
@@ -535,7 +573,7 @@ ui.reset.onclick = async () => {
 };
 ui.showRange.onchange = () => state && draw();
 document.addEventListener("keydown", (e) => {
-  if (["INPUT", "SELECT", "BUTTON"].includes(e.target.tagName)) return;
+  if (["INPUT", "SELECT", "BUTTON"].includes(e.target.tagName) || document.body.classList.contains("setup-open")) return;
   if (e.code === "Space") { e.preventDefault(); setPlaying(!playing); }
   if (e.code === "ArrowRight" && !playing) step(1);
 });

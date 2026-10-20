@@ -10,7 +10,7 @@ class Navigate(Module):
     0. sleeping  - resting to recover sleep (Rest module): stay still. Others
                    can still walk up to it and trade.
     1. leaving   - just traded: walk along the departure heading.
-    2. seeking   - a need is above 0.5 and stock is gone: every step, find the
+    2. seeking   - a need is above the seek threshold and stock is gone: every step, find the
                    closest available agent (it can't know who has what) and
                    walk straight at its current position.
     3. meeting   - another agent is seeking this one: walk toward that seeker,
@@ -35,7 +35,7 @@ class Navigate(Module):
                                agent.y + math.sin(agent.depart_heading) * agent.movement, world)
             return
 
-        if economy.is_needy(agent):
+        if economy.is_needy(agent, world.rules):
             partner = world.nearest_partner(agent)
             if partner is not None:
                 self._go_to(agent, "seeking", partner, world)

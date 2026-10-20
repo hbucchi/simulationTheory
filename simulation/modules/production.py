@@ -1,4 +1,4 @@
-from ..economy import DEFAULT_PRODUCTION
+from ..rules import DEFAULT_RULES
 from .base import Module
 
 
@@ -9,7 +9,7 @@ class Production(Module):
     """
 
     def __init__(self, intervals=None):
-        self.intervals = {**DEFAULT_PRODUCTION, **(intervals or {})}
+        self.intervals = {**DEFAULT_RULES.production, **(intervals or {})}
         self.counters = {r: 0 for r in self.intervals}
 
     def set_intervals(self, intervals):

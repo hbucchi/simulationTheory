@@ -6,7 +6,10 @@
 API
     GET    /api/state                 current world state
     POST   /api/step   {"steps": n}   advance n ticks (default 1)
-    POST   /api/reset  {"agents": n, "seed": s}  rebuild the world
+    GET    /api/rules                 {"current": rules of this game, "factory": default rules}
+    POST   /api/reset  {"rules": {...}, "agents": n, "seed": s}
+                                      start a new game. Omitted rules keep the current game's
+                                      rules; "agents" overrides rules.agents.
     POST   /api/agents      {...}     create an agent (any field omitted = default)
     POST   /api/agents/<id> {...}     edit an agent (only the fields sent change)
     DELETE /api/agents/<id>           remove an agent
@@ -27,6 +30,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from simulation import World
+from simulation.rules import Rules
 from simulation.agent import NEED_NAMES
 from simulation.economy import RESOURCES
 
@@ -42,11 +46,12 @@ class Simulation:
 
     def __init__(self, agents, seed):
         self.lock = threading.Lock()
-        self.reset(agents, seed)
+        self.world = None
+        self.reset(Rules.from_dict({"agents": agents}), seed)
 
-    def reset(self, agents, seed):
-        world = World(seed=seed)
-        world.spawn_random_agents(agents)
+    def reset(self, rules, seed):
+        world = World(seed=seed, rules=rules)
+        world.spawn_random_agents()
         with self.lock:
             self.world = world
             return world.to_dict()
@@ -79,6 +84,10 @@ class Simulation:
         if agent is None:
             raise LookupError(f"no agent {agent_id}")
         return agent
+
+    def rules(self):
+        with self.lock:
+            return self.world.rules.to_dict()
 
     def state(self):
         with self.lock:
@@ -143,6 +152,8 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/state":
             return self._json(self.sim.state())
+        if self.path == "/api/rules":
+            return self._json({"current": self.sim.rules(), "factory": Rules().to_dict()})
         return super().do_GET()
 
     def do_POST(self):
@@ -151,9 +162,12 @@ class Handler(SimpleHTTPRequestHandler):
                 steps = _number(body.get("steps", 1), "steps", 1, MAX_STEPS_PER_REQUEST, whole=True)
                 return self.sim.step(steps)
             if self.path == "/api/reset":
-                agents = _number(body.get("agents", 3), "agents", 1, MAX_AGENTS, whole=True)
+                rules = body.get("rules")
+                rules = Rules.from_dict(rules) if rules is not None else Rules.from_dict(self.sim.rules())
+                if body.get("agents") is not None:
+                    rules.agents = _number(body["agents"], "agents", 1, MAX_AGENTS, whole=True)
                 seed = body.get("seed")
-                return self.sim.reset(agents, None if seed in (None, "") else int(seed))
+                return self.sim.reset(rules, None if seed in (None, "") else int(seed))
             if self.path == "/api/agents":
                 return self.sim.add_agent(parse_agent_config(body))
             match = AGENT_PATH.fullmatch(self.path)

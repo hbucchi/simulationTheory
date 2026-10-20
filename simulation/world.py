@@ -3,29 +3,29 @@
 import math
 import random
 
-from . import economy
+from . import distributions, economy
 from .agent import Agent
 from .inventory import Inventory
 from .modules import Consume, Mood, Navigate, NeedsDecay, Production, Rest
+from .rules import Rules
 
 AGENT_COLORS = ["#e4572e", "#29335c", "#f3a712", "#669bbc", "#a8c686", "#8e44ad", "#16a085", "#c0392b"]
 
 
 class World:
-    # After two agents meet they walk apart for DEPART_STEPS and ignore each
-    # other for COOLDOWN_STEPS, so they don't instantly re-meet.
-    DEPART_STEPS = 15
-    COOLDOWN_STEPS = 60
+    # After two agents meet they walk apart for rules.depart_steps and ignore
+    # each other for rules.cooldown_steps, so they don't instantly re-meet.
     # Departure = straight away from the partner, turned by a random angle in
     # [-MAX_TURN, +MAX_TURN]: a 180-degree window that never points back at them.
     MAX_TURN = math.radians(90)
 
-    def __init__(self, width=1024, height=1024, contact_distance=12, seed=None):
+    def __init__(self, width=1024, height=1024, seed=None, rules=None):
         self.width = width
         self.height = height
+        self.rules = rules or Rules()
         # Two agents are "in touch" (able to interact) when their centres are
         # at most this many pixels apart. 12 = two dots of radius 6 touching.
-        self.contact_distance = contact_distance
+        self.contact_distance = self.rules.contact_distance
         self.seed = seed
         self.rng = random.Random(seed)
         self.agents = []
@@ -49,30 +49,43 @@ class World:
         self.agents.append(agent)
         return agent
 
-    def create_agent(self, *, inventory=None, money=economy.DEFAULT_MONEY, production=None,
+    def create_agent(self, *, inventory=None, money=None, production=None,
                      rates=None, sleep_recovery=None, movement=None, needs=None, name=None,
                      x=None, y=None):
-        """Create an agent with the standard modules.
+        """Create an agent with the standard modules. Anything omitted comes from the rules.
 
-        ``inventory`` / ``production`` override the defaults per resource;
+        ``inventory`` / ``production`` override per resource;
         ``rates`` overrides how fast each need grows per step;
         ``sleep_recovery`` is how much sleep drops per step while resting;
-        ``needs`` overrides starting need levels (otherwise random in [0, 0.5]);
+        ``needs`` overrides starting need levels;
         ``x`` / ``y`` default to a random position.
+        Values not given are drawn from the rules' spreads (see distributions.py).
         """
+        r = self.rules
+
+        def draw(spec, whole=False):
+            return distributions.sample(spec, self.rng, whole)
+
         rx, ry = self.random_position()
         x, y = self.clamp_position(rx if x is None else x, ry if y is None else y)
-        start_needs = {n: round(self.rng.uniform(0, 0.5), 2) for n in ("hunger", "sleep", "thirst", "boredom")}
+        start_needs = {n: round(draw(r.start_needs), 2) for n in ("hunger", "sleep", "thirst", "boredom")}
         start_needs.update(needs or {})
+        # Rest runs first so a resting agent's sleep never grows that step.
+        modules = [Rest(draw(r.sleep_recovery) if sleep_recovery is None else sleep_recovery),
+                   NeedsDecay({**{n: draw(v) for n, v in r.rates.items()}, **(rates or {})}),
+                   Production({**{k: draw(v, True) for k, v in r.production.items()}, **(production or {})}),
+                   Consume()]
+        if r.depression_enabled:
+            modules.append(Mood())
+        modules.append(Navigate())
         agent = Agent(
             x, y, name=name, **start_needs,
-            money=money,
-            movement=movement if movement is not None else self.rng.randint(5, 25),
-            inventory=Inventory({**economy.DEFAULT_INVENTORY, **(inventory or {})}),
-            # Rest runs first so a resting agent's sleep never grows that step.
-            modules=[Rest(sleep_recovery), NeedsDecay(rates), Production(production), Consume(), Mood(),
-                     Navigate()],
+            money=round(draw(r.money), 2) if money is None else money,
+            movement=draw(r.movement, True) if movement is None else movement,
+            inventory=Inventory({**{k: draw(v, True) for k, v in r.inventory.items()}, **(inventory or {})}),
+            modules=modules,
         )
+        agent.depression_factor = r.depression_factor
         return self.add_agent(agent)
 
     def update_agent(self, agent, *, name=None, x=None, y=None, needs=None, inventory=None,
@@ -104,8 +117,8 @@ class World:
             if other.target_id == agent.id:
                 other.target_id = None
 
-    def spawn_random_agents(self, count):
-        for _ in range(count):
+    def spawn_random_agents(self, count=None):
+        for _ in range(self.rules.agents if count is None else count):
             self.create_agent()
 
     def in_cooldown(self, a, b):
@@ -156,8 +169,10 @@ class World:
     def check_death(self, agent):
         """Hunger or thirst at 1.00 (after eating/drinking what it had) kills the agent.
 
-        It disappears along with its inventory and money.
+        It disappears along with its inventory and money. Off when the rules disable death.
         """
+        if not self.rules.death_enabled:
+            return False
         for need in ("hunger", "thirst"):
             if getattr(agent, need) >= economy.CRITICAL_LEVEL:
                 self.remove_agent(agent)
@@ -169,20 +184,21 @@ class World:
     def interact(self, a, b):
         """Two agents touched. If either needs something they trade, then walk apart.
 
-        Afterwards the pair ignores each other for COOLDOWN_STEPS, so a needy
+        Afterwards the pair ignores each other for rules.cooldown_steps, so a needy
         agent moves on to the next-closest agent instead of retrying the same one.
         """
-        if not (economy.is_needy(a) or economy.is_needy(b)):
+        rules = self.rules
+        if not (economy.is_needy(a, rules) or economy.is_needy(b, rules)):
             return  # a casual bump: nobody needs anything
-        prices = economy.market_prices(self.agents)
-        deals = economy.trade(a, b, prices)
+        prices = economy.market_prices(self.agents, rules)
+        deals = economy.trade(a, b, prices, rules)
         for buyer, seller, bought, paid in deals:
             self.log(f"{buyer.name} got {economy.describe(bought)} from {seller.name} "
                      f"for {economy.describe_payment(paid)}")
-        for reason in economy.unmet(a, b) + economy.unmet(b, a):
+        for reason in economy.unmet(a, b, rules) + economy.unmet(b, a, rules):
             self.log(f"No trade: {reason}")
 
-        self.cooldowns[frozenset((a.id, b.id))] = self.tick + self.COOLDOWN_STEPS
+        self.cooldowns[frozenset((a.id, b.id))] = self.tick + rules.cooldown_steps
         if deals:
             self.depart(a, b)
 
@@ -191,8 +207,9 @@ class World:
         away = math.atan2(a.y - b.y, a.x - b.x)
         if a.x == b.x and a.y == b.y:
             away = self.rng.uniform(-math.pi, math.pi)
-        a.depart(away + self.rng.uniform(-self.MAX_TURN, self.MAX_TURN), self.DEPART_STEPS)
-        b.depart(away + math.pi + self.rng.uniform(-self.MAX_TURN, self.MAX_TURN), self.DEPART_STEPS)
+        steps = self.rules.depart_steps
+        a.depart(away + self.rng.uniform(-self.MAX_TURN, self.MAX_TURN), steps)
+        b.depart(away + math.pi + self.rng.uniform(-self.MAX_TURN, self.MAX_TURN), steps)
 
     def log(self, message):
         self.events.append({"tick": self.tick, "message": message})
@@ -205,19 +222,13 @@ class World:
             "height": self.height,
             "contact_distance": self.contact_distance,
             "seed": self.seed,
-            "defaults": {
-                "inventory": economy.DEFAULT_INVENTORY,
-                "money": economy.DEFAULT_MONEY,
-                "production": economy.DEFAULT_PRODUCTION,
-                "rates": NeedsDecay.DEFAULT_RATES,
-                "sleep_recovery": Rest.DEFAULT_RECOVERY,
-            },
+            "rules": self.rules.to_dict(),
             "market": {
-                "prices": economy.market_prices(self.agents),
+                "prices": economy.market_prices(self.agents, self.rules),
                 "money": sum(a.money for a in self.agents),
                 "units": {r: sum(a.inventory.count(r) for a in self.agents) for r in economy.RESOURCES},
             },
-            "agents": [a.to_dict() for a in self.agents],
+            "agents": [a.to_dict(self.rules) for a in self.agents],
             # Only pairs that can interact; pairs in cooldown just overlap.
             "contacts": [[a.id, b.id] for a, b in self.contacts() if not self.in_cooldown(a, b)],
             "events": self.events[-50:],

@@ -1,3 +1,4 @@
+from ..rules import DEFAULT_RULES
 from .base import Module
 
 
@@ -8,10 +9,8 @@ class NeedsDecay(Module):
     while the agent is resting (see Rest).
     """
 
-    DEFAULT_RATES = {"hunger": 0.010, "sleep": 0.005, "thirst": 0.015, "boredom": 0.008}
-
     def __init__(self, rates=None):
-        self.rates = {**self.DEFAULT_RATES, **(rates or {})}
+        self.rates = {**DEFAULT_RULES.rates, **(rates or {})}
 
     def on_step(self, agent, world):
         for need, rate in self.rates.items():

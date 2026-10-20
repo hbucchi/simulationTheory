@@ -9,7 +9,10 @@
 <body>
   <header>
     <h1>Agent Simulation</h1>
-    <div class="tick">Tick <span id="tick">0</span></div>
+    <div class="header-right">
+      <button id="open-setup">Game rules / New game</button>
+      <div class="tick">Tick <span id="tick">0</span></div>
+    </div>
   </header>
 
   <section class="controls">
@@ -25,7 +28,7 @@
     <div class="group">
       <label>Agents <input id="agent-count" type="number" min="1" max="500" value="3"></label>
       <label>Seed <input id="seed" type="number" placeholder="random"></label>
-      <button id="reset">Reset</button>
+      <button id="reset" title="Start over with the same rules">Restart</button>
     </div>
     <label class="toggle"><input id="show-range" type="checkbox" checked> Show movement range</label>
   </section>
@@ -69,6 +72,34 @@
     </aside>
   </main>
 
+  <section id="setup" class="setup" hidden>
+    <div class="setup-card">
+      <div class="setup-head">
+        <div>
+          <h1>Game rules</h1>
+          <p class="hint">These rules apply to the whole game. Every agent starts from them and can still be edited
+            individually later in <b>Manage agents</b>.</p>
+        </div>
+        <label>Preset <select id="setup-preset"></select></label>
+      </div>
+      <form id="setup-form" novalidate>
+        <div id="setup-sections" class="setup-grid"></div>
+        <div class="setup-preview">
+          <h2>What these rules mean</h2>
+          <div id="setup-preview"></div>
+        </div>
+        <p id="setup-status" class="status error" hidden></p>
+        <div class="form-actions">
+          <button type="button" id="setup-factory">Factory defaults</button>
+          <span class="spacer"></span>
+          <button type="button" id="setup-close">Back to current game</button>
+          <button type="submit" class="primary">Start new game</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
   <script src="app.js"></script>
+  <script src="setup.js"></script>
 </body>
 </html>

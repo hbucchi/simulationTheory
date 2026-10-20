@@ -4,6 +4,7 @@ import math
 
 from . import economy
 from .inventory import Inventory
+from .rules import DEFAULT_RULES
 
 NEED_NAMES = ("hunger", "sleep", "thirst", "boredom")
 
@@ -63,7 +64,8 @@ class Agent:
         # Set by the Navigate module / the World; shown in the UI.
         self.activity = "wandering"
         self.sleeping = False  # set by the Rest module; a sleeping agent stays still
-        self.depressed = False  # set by the Mood module; halves speed and sleep recovery
+        self.depressed = False  # set by the Mood module; slows movement and sleep recovery
+        self.depression_factor = 0.5  # set from the game rules by the World
         self.target_id = None
         self.depart_heading = 0.0  # radians
         self.depart_steps = 0
@@ -99,10 +101,10 @@ class Agent:
 
     @property
     def speed(self):
-        """Pixels this agent can actually move per step: movement, halved while depressed."""
-        return max(1, self.movement // 2) if self.depressed else self.movement
+        """Pixels this agent can actually move per step: movement, reduced while depressed."""
+        return max(1, int(self.movement * self.depression_factor)) if self.depressed else self.movement
 
-    def to_dict(self):
+    def to_dict(self, rules=DEFAULT_RULES):
         return {
             "id": self.id,
             "name": self.name,
@@ -117,6 +119,6 @@ class Agent:
             "color": self.color,
             "activity": self.activity,
             "target_id": self.target_id,
-            "wants": [r for r, n in economy.NEED_FOR_RESOURCE.items() if getattr(self, n) > economy.SEEK_THRESHOLD],
+            "wants": [r for r, n in economy.NEED_FOR_RESOURCE.items() if getattr(self, n) > rules.seek_threshold],
             "modules": {type(m).__name__: m.to_dict() for m in self.modules},
         }
