@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Simulation</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Agent Simulation</h1>
+    <div class="tick">Tick <span id="tick">0</span></div>
+  </header>
+
+  <section class="controls">
+    <div class="group">
+      <button id="step">Step</button>
+      <button id="play">Play</button>
+      <label>Interval
+        <input id="interval" type="range" min="16" max="1000" value="200">
+        <span id="interval-label">200 ms</span>
+      </label>
+    </div>
+    <div class="group">
+      <label>Agents <input id="agent-count" type="number" min="1" max="500" value="3"></label>
+      <label>Seed <input id="seed" type="number" placeholder="random"></label>
+      <button id="reset">Reset</button>
+    </div>
+    <label class="toggle"><input id="show-range" type="checkbox" checked> Show movement range</label>
+  </section>
+
+  <main>
+    <div class="world-wrap">
+      <canvas id="world" width="1024" height="1024"></canvas>
+    </div>
+    <aside>
+      <h2>Agents</h2>
+      <div id="agents"></div>
+      <h2>Events</h2>
+      <ol id="events" reversed></ol>
+    </aside>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
