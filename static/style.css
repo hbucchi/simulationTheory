@@ -109,3 +109,4 @@ button.danger { color: #d1453b; }
 .activity .seeking { color: #d1453b; }
 .activity .leaving { color: var(--accent); }
 .activity .meeting { color: #c97a10; }
+.activity .sleeping { color: #7a5cc4; }

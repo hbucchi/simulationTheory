@@ -7,6 +7,8 @@ from .base import Module
 class Navigate(Module):
     """Decides where the agent walks each step. Priority:
 
+    0. sleeping  - resting to recover sleep (Rest module): stay still. Others
+                   can still walk up to it and trade.
     1. leaving   - just traded: walk along the departure heading.
     2. seeking   - a need is above 0.5 and stock is gone: every step, find the
                    closest available agent (it can't know who has what) and
@@ -20,6 +22,11 @@ class Navigate(Module):
         self.wander_target = None
 
     def on_step(self, agent, world):
+        if agent.sleeping:
+            agent.activity = "sleeping"
+            agent.target_id = None
+            return
+
         if agent.depart_steps > 0:
             agent.activity = "leaving"
             agent.target_id = None

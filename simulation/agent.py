@@ -62,6 +62,7 @@ class Agent:
         self.modules = list(modules or [])
         # Set by the Navigate module / the World; shown in the UI.
         self.activity = "wandering"
+        self.sleeping = False  # set by the Rest module; a sleeping agent stays still
         self.target_id = None
         self.depart_heading = 0.0  # radians
         self.depart_steps = 0

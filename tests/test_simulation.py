@@ -116,6 +116,54 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(modules["NeedsDecay"]["rates"]["hunger"], 0)
 
 
+class RestTests(unittest.TestCase):
+    def test_tired_agent_stops_and_recovers_until_below_target(self):
+        world = bare_world()
+        agent = world.create_agent(needs={"sleep": 0.6, "hunger": 0, "thirst": 0, "boredom": 0}, x=500, y=500)
+        positions = set()
+        for _ in range(7):  # 0.6 -> 0.25 at 0.05/step
+            world.step()
+            positions.add((agent.x, agent.y))
+            self.assertEqual(agent.activity, "sleeping")
+        self.assertEqual(positions, {(500, 500)})
+        self.assertAlmostEqual(agent.sleep, 0.25)
+        world.step()
+        self.assertNotEqual(agent.activity, "sleeping")
+        self.assertNotEqual((agent.x, agent.y), (500, 500))
+
+    def test_sleep_does_not_start_until_above_threshold(self):
+        world = bare_world()
+        agent = world.create_agent(needs={"sleep": 0.45}, rates={"sleep": 0.02})
+        world.step()
+        self.assertFalse(agent.sleeping)  # 0.47
+        for _ in range(2):
+            world.step()                  # 0.49, 0.51
+        self.assertFalse(agent.sleeping)
+        world.step()                      # was 0.51 at the start of the step -> rests
+        self.assertTrue(agent.sleeping)
+        self.assertAlmostEqual(agent.sleep, 0.46)
+
+    def test_sleep_recovery_is_editable(self):
+        world = bare_world()
+        agent = world.create_agent(needs={"sleep": 0.9}, sleep_recovery=0.2)
+        world.step()
+        self.assertAlmostEqual(agent.sleep, 0.7)
+        world.update_agent(agent, sleep_recovery=0.1)
+        world.step()
+        self.assertAlmostEqual(agent.sleep, 0.6)
+        self.assertEqual(agent.to_dict()["modules"]["Rest"]["recovery"], 0.1)
+
+    def test_sleeping_agent_can_still_be_reached_and_trade(self):
+        world = bare_world()
+        sleeper = world.create_agent(needs={"sleep": 0.9}, x=500, y=500)
+        thirsty = world.create_agent(inventory={"water": 0}, needs={"thirst": 0.9, "sleep": 0}, x=400, y=500,
+                                     movement=20)
+        for _ in range(10):
+            world.step()
+        self.assertTrue(any(f"{thirsty.name} got" in e["message"] for e in world.events))
+        self.assertEqual((sleeper.x, sleeper.y), (500, 500))
+
+
 class EditingTests(unittest.TestCase):
     def test_update_every_field(self):
         world = bare_world()

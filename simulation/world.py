@@ -6,7 +6,7 @@ import random
 from . import economy
 from .agent import Agent
 from .inventory import Inventory
-from .modules import Consume, Navigate, NeedsDecay, Production
+from .modules import Consume, Navigate, NeedsDecay, Production, Rest
 
 AGENT_COLORS = ["#e4572e", "#29335c", "#f3a712", "#669bbc", "#a8c686", "#8e44ad", "#16a085", "#c0392b"]
 
@@ -50,11 +50,13 @@ class World:
         return agent
 
     def create_agent(self, *, inventory=None, money=economy.DEFAULT_MONEY, production=None,
-                     rates=None, movement=None, needs=None, name=None, x=None, y=None):
+                     rates=None, sleep_recovery=None, movement=None, needs=None, name=None,
+                     x=None, y=None):
         """Create an agent with the standard modules.
 
         ``inventory`` / ``production`` override the defaults per resource;
         ``rates`` overrides how fast each need grows per step;
+        ``sleep_recovery`` is how much sleep drops per step while resting;
         ``needs`` overrides starting need levels (otherwise random in [0, 0.5]);
         ``x`` / ``y`` default to a random position.
         """
@@ -67,12 +69,13 @@ class World:
             money=money,
             movement=movement if movement is not None else self.rng.randint(5, 25),
             inventory=Inventory({**economy.DEFAULT_INVENTORY, **(inventory or {})}),
-            modules=[NeedsDecay(rates), Production(production), Consume(), Navigate()],
+            # Rest runs first so a resting agent's sleep never grows that step.
+            modules=[Rest(sleep_recovery), NeedsDecay(rates), Production(production), Consume(), Navigate()],
         )
         return self.add_agent(agent)
 
     def update_agent(self, agent, *, name=None, x=None, y=None, needs=None, inventory=None,
-                     money=None, movement=None, production=None, rates=None):
+                     money=None, movement=None, production=None, rates=None, sleep_recovery=None):
         """Change any of an existing agent's settings; omitted fields stay as they are."""
         if name:
             agent.name = name
@@ -90,6 +93,8 @@ class World:
                 module.set_intervals(production)
             if isinstance(module, NeedsDecay) and rates:
                 module.rates.update(rates)
+            if isinstance(module, Rest) and sleep_recovery is not None:
+                module.recovery = sleep_recovery
         return agent
 
     def remove_agent(self, agent):
@@ -186,6 +191,7 @@ class World:
                 "money": economy.DEFAULT_MONEY,
                 "production": economy.DEFAULT_PRODUCTION,
                 "rates": NeedsDecay.DEFAULT_RATES,
+                "sleep_recovery": Rest.DEFAULT_RECOVERY,
             },
             "agents": [a.to_dict() for a in self.agents],
             # Only pairs that can interact; pairs in cooldown just overlap.

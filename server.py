@@ -16,6 +16,7 @@ Agent fields: name, x, y, movement, money,
               rates      {hunger, sleep, thirst, boredom: 0..1}   growth per step
               inventory  {food, water, games: int >= 0}
               production {food, water, games: int >= 0}          1 unit every N steps
+              sleep_recovery  0..1                              sleep recovered per step at rest
 """
 
 import argparse
@@ -121,7 +122,8 @@ def parse_agent_config(body):
             raise ValueError("name must be 1-40 characters")
         config["name"] = name
     for key, low, high, whole in (("x", 0, world_size, False), ("y", 0, world_size, False),
-                                  ("money", 0, 1e12, False), ("movement", 1, MAX_MOVEMENT, True)):
+                                  ("money", 0, 1e12, False), ("movement", 1, MAX_MOVEMENT, True),
+                                  ("sleep_recovery", 0, 1, False)):
         if body.get(key) is not None:
             config[key] = _number(body[key], key, low, high, whole)
     return {k: v for k, v in config.items() if v is not None}

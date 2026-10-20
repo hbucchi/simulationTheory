@@ -45,7 +45,12 @@ steps. Either way the pair ignores each other for 60 steps, so a needy agent
 moves on to the next-closest agent instead of retrying the same one. Agents
 that bump into each other without needing anything just carry on.
 
-Sleep has no resource yet, so it only rises and never triggers seeking.
+**Sleep** is recovered by standing still (`Rest` module). When sleep rises
+above 0.5 the agent stops where it is and recovers 0.05 per step
+(*sleep recovery*, editable per agent) until sleep is below 0.3, then moves
+again. Sleep doesn't grow while resting. A resting agent doesn't seek or walk
+toward seekers, but others can still walk up to it and trade. It spends about
+`growth ÷ (growth + recovery)` of its time asleep, 9% with the defaults.
 
 ### Run it
 

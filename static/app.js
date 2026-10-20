@@ -48,6 +48,8 @@ const FIELD_GROUPS = [
     { path: `needs.${n}`, label: cap(n), min: 0, max: 1, step: 0.01, get: a => a.needs[n], placeholder: "random" }))},
   { legend: "Need growth per step", fields: NEEDS.map(n => (
     { path: `rates.${n}`, label: cap(n), min: 0, max: 1, step: 0.001, get: a => a.modules.NeedsDecay.rates[n] }))},
+  { legend: "Rest: sleep recovered per step while standing still", fields: [
+    { path: "sleep_recovery", label: "Sleep recovery", min: 0, max: 1, step: 0.01, get: a => a.modules.Rest.recovery }]},
   { legend: "Inventory", fields: RESOURCES.map(r => (
     { path: `inventory.${r}`, label: cap(r), min: 0, step: 1, get: a => a.inventory[r] ?? 0 }))},
   { legend: "Production: 1 unit every N steps (0 = never)", fields: RESOURCES.map(r => (
@@ -164,6 +166,11 @@ function draw() {
     ctx.beginPath();
     ctx.arc(agent.x, agent.y, DOT_RADIUS, 0, Math.PI * 2);
     ctx.fill();
+    if (agent.activity === "sleeping") {
+      ctx.fillStyle = cssVar("--muted");
+      ctx.font = "italic 12px system-ui, sans-serif";
+      ctx.fillText("z z", agent.x - 8, agent.y + DOT_RADIUS + 14);
+    }
     if (agent.id === selectedId || inContact.has(agent.id)) {
       ctx.strokeStyle = cssVar("--text");
       ctx.lineWidth = 2;
@@ -348,6 +355,7 @@ function defaultValue(path) {
   if (group === "production") return d.production[key];
   if (group === "rates") return d.rates[key];
   if (group === "money") return d.money;
+  if (group === "sleep_recovery") return d.sleep_recovery;
   return "";  // name, movement, x, y, needs: blank = server picks (auto/random)
 }
 
@@ -399,6 +407,16 @@ function updateBalance() {
     line.textContent = `${r}: uses ${used.toFixed(3)} · makes ${made.toFixed(3)} per step → ${verdict}`;
     ui.balance.append(line);
   }
+  // Sleep rises at g while awake (0.3 -> 0.5) and falls at r while resting (0.5 -> 0.3),
+  // so the agent spends g / (g + r) of its time asleep.
+  const g = Number(input("rates.sleep").value);
+  const r = Number(input("sleep_recovery").value);
+  const line = document.createElement("span");
+  line.className = r ? "" : "short";
+  line.textContent = r
+    ? `sleep: rises ${g.toFixed(3)} · recovers ${r.toFixed(3)} per step at rest → asleep ${(100 * g / (g + r || 1)).toFixed(0)}% of the time`
+    : "sleep: recovery is 0, so a tired agent stops forever";
+  ui.balance.append(line);
 }
 
 ui.newAgent.onclick = () => { editingId = null; setStatus(""); refreshForm(true); render(state); };
