@@ -31,6 +31,16 @@ const ui = {
   formSubmit: $("form-submit"),
   formStatus: $("form-status"),
   balance: document.querySelector("#agent-form .balance"),
+  govForm: $("gov-form"),
+  govRate: $("gov-rate"),
+  govRateRange: $("gov-rate-range"),
+  govRateLabel: $("gov-rate-label"),
+  govBuy: $("gov-buy"),
+  govBuyRange: $("gov-buy-range"),
+  govBuyLabel: $("gov-buy-label"),
+  govRevert: $("gov-revert"),
+  govStatus: $("gov-status"),
+  govStats: $("gov-stats"),
 };
 
 const DOT_RADIUS = 6;
@@ -173,6 +183,8 @@ function render(next) {
     renderMarket();
     renderAgents();
     renderEvents();
+  } else if (activeTab === "government") {
+    renderGovernment();
   } else {
     renderChips();
     refreshForm();
@@ -236,7 +248,7 @@ function draw() {
     ctx.arc(agent.x, agent.y, DOT_RADIUS, 0, Math.PI * 2);
     ctx.fill();
     if (agent.depressed) {
-      ctx.strokeStyle = "#555";
+      ctx.strokeStyle = cssVar("--muted");
       ctx.lineWidth = 2;
       ctx.setLineDash([2, 2]);
       ctx.beginPath();
@@ -246,7 +258,7 @@ function draw() {
     }
     if (agent.activity === "sleeping") {
       ctx.fillStyle = cssVar("--muted");
-      ctx.font = "italic 12px system-ui, sans-serif";
+      ctx.font = "italic 12px Inter, system-ui, sans-serif";
       ctx.fillText("z z", agent.x - 8, agent.y + DOT_RADIUS + 14);
     }
     if (agent.id === selectedId || inContact.has(agent.id)) {
@@ -257,7 +269,7 @@ function draw() {
       ctx.stroke();
     }
     ctx.fillStyle = cssVar("--muted");
-    ctx.font = "14px system-ui, sans-serif";
+    ctx.font = "500 14px Inter, system-ui, sans-serif";
     // Keep labels inside the box near the right/top edges.
     const labelWidth = ctx.measureText(agent.name).width;
     const lx = agent.x + DOT_RADIUS + 4 + labelWidth > width ? agent.x - DOT_RADIUS - 4 - labelWidth : agent.x + DOT_RADIUS + 4;
@@ -269,8 +281,8 @@ function draw() {
 
 function needColor(v) {
   // green (satisfied) -> amber -> red (desperate)
-  const hue = 120 - v * 120;
-  return `hsl(${hue} 60% 48%)`;
+  const hue = 150 - v * 145;
+  return `hsl(${hue} 55% 55%)`;
 }
 
 // Price of each resource: total money / total units * (1 - that resource's share of units).
@@ -293,7 +305,11 @@ function renderMarket() {
     const arrow = document.createElement("span");
     arrow.className = "price-move " + (mult > 1.02 ? "up" : mult < 0.98 ? "down" : "");
     arrow.textContent = mult > 1.02 ? "▲" : mult < 0.98 ? "▼" : "";
-    cell.append(`${r} `, price, arrow);
+    // Card header: resource name, then price and direction on one line.
+    const name = Object.assign(document.createElement("span"), { className: "res-name", textContent: r });
+    const priceLine = Object.assign(document.createElement("div"), { className: "price-line" });
+    priceLine.append(price, arrow);
+    cell.append(name, priceLine);
     // Demand pressure: base price x multiplier from buyers vs sellers.
     const pressure = document.createElement("span");
     pressure.className = "pressure";
@@ -547,12 +563,83 @@ function renderEvents() {
 
 function showTab(name) {
   activeTab = name;
-  for (const t of ui.tabs) t.classList.toggle("active", t.dataset.tab === name);
-  $("tab-overview").hidden = name !== "overview";
-  $("tab-manage").hidden = name !== "manage";
+  for (const t of ui.tabs) {
+    t.classList.toggle("active", t.dataset.tab === name);
+    $(`tab-${t.dataset.tab}`).hidden = t.dataset.tab !== name;
+  }
+  if (name === "government") fillGovernment(true);
   render(state);
 }
 for (const t of ui.tabs) t.onclick = () => showTab(t.dataset.tab);
+
+// ---------- Government tab ----------
+
+// The policy inputs only follow the live state until you start editing them.
+let govDirty = false;
+
+function fillGovernment(force = false) {
+  if (govDirty && !force) return;
+  govDirty = false;
+  const g = state.government;
+  setGovInputs(g.min_rate * 100, g.labor_purchase);
+}
+
+function setGovInputs(ratePct, buy) {
+  ui.govRate.value = +ratePct.toFixed(4);
+  ui.govRateRange.value = Math.min(ratePct, Number(ui.govRateRange.max));
+  ui.govBuy.value = buy;
+  ui.govBuyRange.value = Math.min(buy, Number(ui.govBuyRange.max));
+  ui.govRateLabel.textContent = `${(+ratePct).toFixed(2)}%`;
+  ui.govBuyLabel.textContent = `${buy}`;
+}
+
+function renderGovernment() {
+  fillGovernment();
+  const g = state.government;
+  const m = state.market;
+  const stats = [
+    ["Policy rate", `${(g.min_rate * 100).toFixed(2)}%`, "minimum return on assets"],
+    ["Labour bought", `${g.labor_purchase} / step`, "with newly created money"],
+    ["Money created", g.money_created.toFixed(1), `${g.last_spent.toFixed(2)} in the last step`],
+    ["Labour used up", g.labor_bought.toFixed(1), "in public works so far"],
+    ["Money in the economy", m.money.toFixed(1), "held by agents"],
+    ["Labour price", m.prices.labor.toFixed(3), `food ${m.prices.food.toFixed(3)} · water ${m.prices.water.toFixed(3)}`],
+  ];
+  ui.govStats.innerHTML = "";
+  for (const [label, value, note] of stats) {
+    const card = document.createElement("div");
+    card.className = "stat";
+    const l = Object.assign(document.createElement("div"), { className: "stat-label", textContent: label });
+    const v = Object.assign(document.createElement("div"), { className: "stat-value", textContent: value });
+    const n = Object.assign(document.createElement("div"), { className: "stat-note", textContent: note });
+    card.append(l, v, n);
+    ui.govStats.append(card);
+  }
+}
+
+ui.govRateRange.oninput = () => { govDirty = true; setGovInputs(Number(ui.govRateRange.value), Number(ui.govBuy.value)); };
+ui.govRate.oninput = () => { govDirty = true; ui.govRateLabel.textContent = `${Number(ui.govRate.value).toFixed(2)}%`;
+  ui.govRateRange.value = ui.govRate.value; };
+ui.govBuyRange.oninput = () => { govDirty = true; setGovInputs(Number(ui.govRate.value), Number(ui.govBuyRange.value)); };
+ui.govBuy.oninput = () => { govDirty = true; ui.govBuyLabel.textContent = ui.govBuy.value; ui.govBuyRange.value = ui.govBuy.value; };
+ui.govRevert.onclick = () => { ui.govStatus.hidden = true; fillGovernment(true); };
+ui.govForm.onsubmit = async (e) => {
+  e.preventDefault();
+  try {
+    const next = await api("/api/government", {
+      min_rate: Number(ui.govRate.value) / 100,
+      labor_purchase: Number(ui.govBuy.value),
+    });
+    govDirty = false;
+    render(next);
+    ui.govStatus.textContent = "Policy applied from the next step.";
+    ui.govStatus.className = "status";
+  } catch (err) {
+    ui.govStatus.textContent = err.message;
+    ui.govStatus.className = "status error";
+  }
+  ui.govStatus.hidden = false;
+};
 
 // ---------- Manage tab: one form for creating and editing ----------
 

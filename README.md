@@ -174,6 +174,21 @@ assets need labour:
   - hold **more than the stock cap** of that good: up to a quarter of those
     assets per deal.
 
+### Central government
+
+- **Minimum interest rate**: no asset is valued at a return below it. The
+  effective return of an asset is max(its own return, the policy rate), so
+  raising the rate makes every asset cheaper (price = output × good price ÷
+  return) and changes which asset investors prefer.
+- **Buying labour**: every step the government buys the chosen number of
+  labour units at the current labour price from agents with labour to spare
+  (in random order), paying with **newly created money**. The labour is used up
+  in public works. This is how money is injected into the economy.
+
+Both start from the setup screen (*Central government*) and can be changed
+while the game runs in the **Government** tab, which also shows money created,
+labour bought and the effect on prices.
+
 ### Stock band
 
 Agents keep between the floor (50) and the cap (100) units of each resource.

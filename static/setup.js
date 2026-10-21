@@ -117,6 +117,12 @@ const SETUP_SECTIONS = [
     { path: "min_investment", label: "Invest once spare cash ≥", kind: "float", min: 0.01, step: 1,
       enabledWhen: v => v.investing_enabled },
   ]},
+  { title: "Central government", hint: "A minimum interest rate that no asset's return can fall below (higher rates " +
+      "make assets cheaper), and labour bought every step with newly created money. Both can be changed during the game " +
+      "in the Government tab.", fields: [
+    { path: "gov_min_rate", label: "Minimum rate (0.01 = 1%)", kind: "float", min: 0, max: 10, step: 0.005 },
+    { path: "gov_labor_purchase", label: "Labour bought per step", kind: "float", min: 0, step: 0.5 },
+  ]},
   { title: "Need thresholds", hint: "When agents act on a need, and what consuming does.", fields: [
     { path: "seek_threshold", label: "Act above", kind: "float", min: 0, max: 1, step: 0.05 },
     { path: "target_level", label: "Until below", kind: "float", min: 0, max: 1, step: 0.05 },
@@ -638,6 +644,12 @@ function renderPreview(r, error) {
     line(`Assets: ${held.toFixed(2)} shares per agent on average. No new assets are ever made` +
          (held ? "; they only change hands between agents." : ", and with none to start nothing can be made."),
          held ? "" : "short");
+  }
+
+  if (r.gov_min_rate || r.gov_labor_purchase) {
+    line(`Government: no asset valued below ${(r.gov_min_rate * 100).toFixed(2)}% per step` +
+         (r.gov_labor_purchase ? `; buys ${r.gov_labor_purchase} labour per step with new money ` +
+          `(at starting prices about ${(r.gov_labor_purchase * 0.25).toFixed(2)}+ money created per step).` : "."));
   }
 
   const g = avg(r.rates.sleep), rec = avg(r.sleep_recovery);

@@ -4,52 +4,77 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Agent Simulation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
-    <h1>Agent Simulation</h1>
-    <div class="header-right">
-      <button id="open-setup">Game rules / New game</button>
-      <div class="tick">Tick <span id="tick">0</span></div>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <div>
+        <div class="brand-name">Agent Simulation</div>
+        <div class="brand-sub">An economy of agents, resources and assets</div>
+      </div>
+    </div>
+
+    <div class="playback">
+      <div class="segmented">
+        <button id="step" title="One step (→)">Step</button>
+        <button id="play" class="primary" title="Play / pause (Space)">Play</button>
+        <button id="run100" title="Advance 100 steps at once">+100</button>
+      </div>
+      <label class="speed" title="Time between steps while playing">
+        <span>Speed</span>
+        <input id="interval" type="range" min="16" max="1000" value="200">
+        <span id="interval-label" class="mono">200 ms</span>
+      </label>
+    </div>
+
+    <div class="topbar-right">
+      <div class="tick-pill">Step <span id="tick" class="mono">0</span></div>
+      <button id="open-setup" class="soft">Rules · New game</button>
     </div>
   </header>
 
-  <section class="controls">
-    <div class="group">
-      <button id="step">Step</button>
-      <button id="play">Play</button>
-      <button id="run100" title="Advance 100 steps at once">+100</button>
-      <label>Interval
-        <input id="interval" type="range" min="16" max="1000" value="200">
-        <span id="interval-label">200 ms</span>
-      </label>
-    </div>
-    <div class="group">
-      <label>Agents <input id="agent-count" type="number" min="1" max="500" value="3"></label>
-      <label>Seed <input id="seed" type="number" placeholder="random"></label>
-      <button id="reset" title="Start over with the same rules">Restart</button>
-    </div>
-    <label class="toggle"><input id="show-range" type="checkbox" checked> Show movement range</label>
-  </section>
+  <main class="layout">
+    <section class="card map-card">
+      <div class="card-head">
+        <div>
+          <h2 class="card-title">World</h2>
+          <p class="card-sub">Click a dot to select an agent. Dashed lines show who is heading where.</p>
+        </div>
+        <div class="map-tools">
+          <label class="switch"><input id="show-range" type="checkbox" checked><span></span> Movement range</label>
+          <div class="restart">
+            <label>Agents <input id="agent-count" type="number" min="1" max="500" value="3"></label>
+            <label>Seed <input id="seed" type="number" placeholder="random"></label>
+            <button id="reset" class="ghost" title="Start over with the same rules">Restart</button>
+          </div>
+        </div>
+      </div>
+      <div class="world-wrap">
+        <canvas id="world" width="1024" height="1024"></canvas>
+      </div>
+    </section>
 
-  <main>
-    <div class="world-wrap">
-      <canvas id="world" width="1024" height="1024"></canvas>
-    </div>
-    <aside>
+    <aside class="card side-card">
       <nav class="tabs" role="tablist">
         <button role="tab" data-tab="overview" class="active">Overview</button>
-        <button role="tab" data-tab="manage">Manage agents</button>
+        <button role="tab" data-tab="government">Government</button>
+        <button role="tab" data-tab="manage">Agents</button>
       </nav>
 
       <section id="tab-overview" role="tabpanel">
         <div id="market" class="market"></div>
-        <h2>Events</h2>
-        <ol id="events" reversed></ol>
-        <h2>Agents <span id="agent-shown" class="count"></span></h2>
+
+        <h3 class="section-title">Events</h3>
+        <ol id="events" class="events" reversed></ol>
+
+        <h3 class="section-title">Agents <span id="agent-shown" class="count"></span></h3>
         <div class="agent-tools">
-          <input id="agent-search" type="search" placeholder="Search name…" aria-label="Search agents by name">
+          <input id="agent-search" type="search" placeholder="Search by name…" aria-label="Search agents by name">
           <select id="agent-filter" aria-label="Filter agents">
             <option value="all">All agents</option>
             <option value="needy">Needs something</option>
@@ -82,9 +107,47 @@
             <option value="reserve">Sort: stockpile reserve</option>
             <option value="assets">Sort: assets owned</option>
           </select>
-          <button id="agent-sort-dir" type="button" title="Toggle ascending / descending">↓ desc</button>
+          <button id="agent-sort-dir" type="button" class="ghost" title="Toggle ascending / descending">↓ desc</button>
         </div>
-        <div id="agents"></div>
+        <div id="agents" class="agent-list"></div>
+      </section>
+
+      <section id="tab-government" role="tabpanel" hidden>
+        <p class="hint">The central government sets a minimum interest rate for every asset and can inject money by
+          buying labour each step. Changes apply from the next step.</p>
+        <form id="gov-form" class="panel" novalidate>
+          <div class="field">
+            <div class="field-head">
+              <label for="gov-rate">Minimum interest rate</label>
+              <span class="field-value mono" id="gov-rate-label">0.00%</span>
+            </div>
+            <input id="gov-rate-range" type="range" min="0" max="10" step="0.05" value="0" aria-label="Minimum interest rate">
+            <div class="field-row">
+              <input id="gov-rate" type="number" min="0" max="1000" step="0.05" value="0"> <span class="unit">% per step</span>
+            </div>
+            <p class="field-help">No asset is valued below this return. Higher rates make assets cheaper
+              (price = output × good price ÷ rate).</p>
+          </div>
+          <div class="field">
+            <div class="field-head">
+              <label for="gov-buy">Labour bought each step</label>
+              <span class="field-value mono" id="gov-buy-label">0</span>
+            </div>
+            <input id="gov-buy-range" type="range" min="0" max="20" step="0.5" value="0" aria-label="Labour bought each step">
+            <div class="field-row">
+              <input id="gov-buy" type="number" min="0" step="0.5" value="0"> <span class="unit">units / step</span>
+            </div>
+            <p class="field-help">Bought at the market price from agents with labour to spare, paid with newly created
+              money. The labour is used up in public works.</p>
+          </div>
+          <div class="form-actions">
+            <button type="button" id="gov-revert" class="ghost">Revert</button>
+            <span class="spacer"></span>
+            <button type="submit" class="primary">Apply policy</button>
+          </div>
+          <p id="gov-status" class="status" hidden></p>
+        </form>
+        <div id="gov-stats" class="stat-grid"></div>
       </section>
 
       <section id="tab-manage" role="tabpanel" hidden>
@@ -92,16 +155,17 @@
           <button id="new-agent" class="chip">+ New agent</button>
           <span id="agent-chips"></span>
         </div>
-        <p class="hint">Pick an agent (or click its dot) to edit it. Fields you haven't touched keep updating live; only the fields you change are saved.</p>
-        <form id="agent-form" novalidate>
+        <p class="hint">Pick an agent (or click its dot) to edit it. Fields you haven't touched keep updating live;
+          only the fields you change are saved.</p>
+        <form id="agent-form" class="panel" novalidate>
           <h3 id="form-title">New agent</h3>
           <div id="form-fields"></div>
           <div class="balance"></div>
           <div class="form-actions">
             <button type="button" id="form-remove" class="danger">Remove</button>
             <span class="spacer"></span>
-            <button type="button" id="form-revert">Revert</button>
-            <button type="submit" id="form-submit">Create agent</button>
+            <button type="button" id="form-revert" class="ghost">Revert</button>
+            <button type="submit" id="form-submit" class="primary">Create agent</button>
           </div>
           <p id="form-status" class="status" hidden></p>
         </form>
@@ -115,9 +179,9 @@
         <div>
           <h1>Game rules</h1>
           <p class="hint">These rules apply to the whole game. Every agent starts from them and can still be edited
-            individually later in <b>Manage agents</b>.</p>
+            individually later in <b>Agents</b>.</p>
         </div>
-        <label>Preset <select id="setup-preset"></select></label>
+        <label class="preset">Preset <select id="setup-preset"></select></label>
       </div>
       <form id="setup-form" novalidate>
         <div id="setup-sections" class="setup-grid"></div>
@@ -126,10 +190,10 @@
           <div id="setup-preview"></div>
         </div>
         <p id="setup-status" class="status error" hidden></p>
-        <div class="form-actions">
-          <button type="button" id="setup-factory">Factory defaults</button>
+        <div class="form-actions sticky">
+          <button type="button" id="setup-factory" class="ghost">Factory defaults</button>
           <span class="spacer"></span>
-          <button type="button" id="setup-close">Back to current game</button>
+          <button type="button" id="setup-close" class="soft">Back to current game</button>
           <button type="submit" class="primary">Start new game</button>
         </div>
       </form>

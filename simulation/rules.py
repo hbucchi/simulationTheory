@@ -96,6 +96,11 @@ class Rules:
     stock_cap: int = 100
     restock_below: float = 0.5
 
+    # Central government (see government.py): a minimum interest rate that no asset's return
+    # may fall below, and units of labour bought every step with newly created money.
+    gov_min_rate: float = 0.0
+    gov_labor_purchase: float = 0.0
+
     # Prices
     price_mode: str = "scarcity"       # "scarcity": money/units*(1-share); "fixed": fixed_prices
     fixed_prices: dict = field(default_factory=lambda: {"food": 1.0, "water": 1.0, "games": 1.0, "labor": 1.0})
@@ -222,6 +227,8 @@ LIMITS = {
     "selling_enabled": (None, None, "bool"),
     "stock_cap": (1, 1e9, "int"),
     "restock_below": (0, 1, "float"),
+    "gov_min_rate": (0, 10, "float"),
+    "gov_labor_purchase": (0, 1e6, "float"),
     "purchase_min": (1, 10, "float"),
     "purchase_max": (1, 10, "float"),
     "price_mode": (PRICE_MODES, None, "choice"),

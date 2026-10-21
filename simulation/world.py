@@ -8,9 +8,11 @@ from . import distributions, economy
 from .agent import Agent
 from .inventory import Inventory
 from .modules import Consume, Invest, Mood, Navigate, NeedsDecay, Production, Rest
+from .government import Government
 from .rules import SPREADS, Rules
 
-AGENT_COLORS = ["#e4572e", "#29335c", "#f3a712", "#669bbc", "#a8c686", "#8e44ad", "#16a085", "#c0392b"]
+# Soft but distinguishable colours, matching the UI palette.
+AGENT_COLORS = ["#6c72f0", "#f08a6c", "#4fbf96", "#e9b949", "#a77de0", "#4aa3df", "#e77fa9", "#8cbf5f"]
 
 
 class World:
@@ -35,6 +37,7 @@ class World:
         self.events = []  # newest last; trimmed to keep the payload small
         self.cooldowns = {}  # frozenset({id_a, id_b}) -> tick until which they ignore each other
         self.labor_expired = 0.0     # labour that expired unused so far
+        self.government = Government(self.rules.gov_min_rate, self.rules.gov_labor_purchase)
         self.asset_trades = 0        # purchases of asset shares between agents
         self.asset_trade_money = 0.0
         # Units of each good one unit of labour makes right now (grows every step).
@@ -244,13 +247,15 @@ class World:
         return used * self.productivity_now[good]
 
     def asset_prices(self, prices=None):
-        """Price of one whole asset: output per step x commodity price / asset_return.
+        """Price of one whole asset: output per step x commodity price / effective return
+        (the asset's return, or the government's minimum rate if higher).
 
         So an asset always earns asset_return of its price per step, and its price
         rises and falls with the price of what it makes.
         """
         prices = prices or self.current_prices()
-        return {g: self.asset_output(g, 1) * prices[g] / self.rules.asset_return[g] for g in economy.GOODS}
+        return {g: self.asset_output(g, 1) * prices[g] / self.government.effective_return(self.rules, g)
+                for g in economy.GOODS}
 
     def nearest_buyer(self, agent, resource):
         """Closest agent (not just met) that wants ``resource`` and has money, or None.
@@ -295,6 +300,7 @@ class World:
         self.grow_assets()
         self.update_scarcity()
         self.update_demand()
+        self.government.buy_labor(self)
         for agent in self.agents:
             agent.inventory.now = self.tick
             self.labor_expired += agent.inventory.expire().get(economy.LABOR, 0)
@@ -378,6 +384,7 @@ class World:
             "contact_distance": self.contact_distance,
             "seed": self.seed,
             "rules": self.rules.to_dict(),
+            "government": self.government.to_dict(),
             "market": {
                 "prices": self.current_prices(),
                 "base_prices": economy.market_prices(self.agents, self.rules),

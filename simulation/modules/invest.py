@@ -100,7 +100,7 @@ def cash_needed(agent, prices, rules):
 def asset_yield(resource, world):
     """Money earned per step per money invested: asset_return (output at the asset's price)
     plus productivity growth (which raises its output and so its price)."""
-    return world.rules.asset_return[resource] + world.productivity_growth_per_step(resource)
+    return world.government.effective_return(world.rules, resource) + world.productivity_growth_per_step(resource)
 
 
 def ranked_assets(world):

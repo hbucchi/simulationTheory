@@ -13,6 +13,8 @@ API
     POST   /api/agents      {...}     create an agent (any field omitted = default)
     POST   /api/agents/<id> {...}     edit an agent (only the fields sent change)
     DELETE /api/agents/<id>           remove an agent
+    POST   /api/government {"min_rate": r, "labor_purchase": n}
+                                      change government policy while the game runs
 
 Agent fields: name, x, y, movement, money,
               needs      {hunger, sleep, thirst, boredom: 0..1}   current levels
@@ -73,6 +75,17 @@ class Simulation:
     def update_agent(self, agent_id, config):
         with self.lock:
             self.world.update_agent(self._get(agent_id), **config)
+            return self.world.to_dict()
+
+    def set_policy(self, min_rate, labor_purchase):
+        with self.lock:
+            gov = self.world.government
+            if min_rate is not None:
+                gov.min_rate = min_rate
+            if labor_purchase is not None:
+                gov.labor_purchase = labor_purchase
+            self.world.log(f"Government policy: minimum rate {gov.min_rate:.2%}, "
+                           f"buying {gov.labor_purchase:g} labour per step")
             return self.world.to_dict()
 
     def remove_agent(self, agent_id):
@@ -172,6 +185,11 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.sim.reset(rules, None if seed in (None, "") else int(seed))
             if self.path == "/api/agents":
                 return self.sim.add_agent(parse_agent_config(body))
+            if self.path == "/api/government":
+                rate = body.get("min_rate")
+                buy = body.get("labor_purchase")
+                return self.sim.set_policy(None if rate is None else _number(rate, "min_rate", 0, 10),
+                                           None if buy is None else _number(buy, "labor_purchase", 0, 1e6))
             match = AGENT_PATH.fullmatch(self.path)
             if match:
                 return self.sim.update_agent(int(match[1]), parse_agent_config(body))
