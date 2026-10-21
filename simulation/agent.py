@@ -69,6 +69,8 @@ class Agent:
         self.assets = {}  # good -> shares of productive assets owned
         self.labor_need = 0.0  # labour its assets use per step at full capacity (Production)
         self.output_capacity = {}  # good -> units its assets make per step when fully staffed
+        # This step's flows (income, produced, consumed, labour), reset by the World each step.
+        self.flow = {"income": 0.0, "produced": {}, "consumed": {}, "labor_made": 0.0, "labor_used": 0.0}
         self.target_id = None
         self.seeking_for = None  # resource it is going to buy from target_id (Navigate)
         self.depart_heading = 0.0  # radians

@@ -6,7 +6,7 @@ from simulation.rules import Rules
 
 CALM = {"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0}
 NO_ASSETS = {"food": 0, "water": 0, "games": 0}
-FIXED = {"price_mode": "fixed", "demand_pricing_enabled": False, "fixed_prices": {"food": 1, "water": 1, "games": 1}}
+FIXED = {"price_mode": "fixed", "demand_pricing_enabled": False, "fixed_prices": {"food": 1, "water": 1, "games": 1, "labor": 1}}
 
 
 def world_with(**rules):
@@ -79,7 +79,7 @@ class AssetTests(unittest.TestCase):
 class InvestTests(unittest.TestCase):
     def market(self):
         # Prices 1 -> liquidity 3 x 3 = 9 money; a whole food asset (1 unit/step at 1%) costs 100.
-        return world_with(liquidity_units=3, asset_labor={"food": 1, "water": 1, "games": 1}, **FIXED)
+        return world_with(liquidity_units=3, min_investment=10, asset_labor={"food": 1, "water": 1, "games": 1}, **FIXED)
 
     def test_buys_only_from_cash_short_owners_and_pays_them(self):
         world = self.market()
@@ -123,7 +123,8 @@ class InvestTests(unittest.TestCase):
             self.assertEqual(investor.assets, {})
 
     def test_prefers_the_asset_with_the_best_return(self):
-        world = world_with(liquidity_units=3, asset_return={"food": 0.01, "water": 0.02, "games": 0.01}, **FIXED)
+        world = world_with(liquidity_units=3, min_investment=10, asset_return={"food": 0.01, "water": 0.02, "games": 0.01},
+                           **FIXED)
         investor = world.create_agent(money=100, needs=CALM, inventory={"food": 10, "water": 10})
         world.create_agent(money=0, needs=CALM, assets={"food": 1, "water": 1})
         Invest().on_step(investor, world)

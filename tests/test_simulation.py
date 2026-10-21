@@ -267,7 +267,7 @@ class WorldTests(unittest.TestCase):
         world = bare_world()
         agent = world.create_agent()
         self.assertEqual(agent.inventory.to_dict(), {"food": 100, "water": 100, "games": 100, "labor": 0})
-        self.assertEqual(agent.money, 100.0)
+        self.assertEqual(agent.money, 10000.0)
 
     def test_agents_stay_in_box_and_within_movement(self):
         world = World(rules=no_invest(), seed=7)

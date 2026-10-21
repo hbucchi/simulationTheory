@@ -63,8 +63,11 @@ def transfer(giver, receiver, resource, qty=1):
 
 
 def pay(payer, payee, amount):
+    """Move money; whoever receives it (the payee, or the payer when it gets change) earns income."""
     payer.money -= amount
     payee.money += amount
+    receiver = payee if amount > 0 else payer
+    receiver.flow["income"] += abs(amount)
 
 
 def consume(agent, rules=DEFAULT_RULES):
@@ -81,6 +84,7 @@ def consume(agent, rules=DEFAULT_RULES):
         if units:
             agent.inventory.remove(resource, units)
             setattr(agent, need, level - units * rules.relief_per_unit)
+            agent.flow["consumed"][resource] = agent.flow["consumed"].get(resource, 0) + units
             eaten[resource] = units
     return eaten
 

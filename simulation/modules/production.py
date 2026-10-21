@@ -28,16 +28,19 @@ class Production(Module):
 
         if self.labor_rate > 0:
             agent.inventory.add(LABOR, self.labor_rate)
+            agent.flow["labor_made"] += self.labor_rate
         labor = agent.inventory.amount(LABOR)
         ratio = min(1.0, labor / agent.labor_need) if agent.labor_need else 1.0
         if agent.labor_need:
             agent.inventory.take(LABOR, agent.labor_need * ratio)
+            agent.flow["labor_used"] += agent.labor_need * ratio
 
         for good, employed in jobs.items():
             made = self.asset_progress.get(good, 0) + employed * ratio * world.productivity_now[good]
             whole = int(made + 1e-9)
             if whole:
                 agent.inventory.add(good, whole)
+                agent.flow["produced"][good] = agent.flow["produced"].get(good, 0) + whole
             self.asset_progress[good] = made - whole
 
     def to_dict(self):

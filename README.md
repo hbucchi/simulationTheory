@@ -174,6 +174,29 @@ assets need labour:
   - hold **more than the stock cap** of that good: up to a quarter of those
     assets per deal.
 
+### Report
+
+The **Report** view (top bar: *Simulation | Report*) is a dashboard of the
+current game over the last 100 / 250 / 500 / all recorded steps (the world
+keeps one snapshot per step, up to 2,000):
+
+- headline numbers: population and deaths, total wealth and its change,
+  wealth and income per agent, Gini of wealth, money and assets, top 10%
+  share, government money created;
+- prices of every resource over time, with now / min / avg / max / change;
+- production vs consumption of each good per step, with totals;
+- labour made, used, expired and bought by the government;
+- inequality over time (Gini) and Lorenz curves of who holds what now;
+- total wealth, income per step, the richest agents, trading activity and
+  population.
+
+Wealth = money + goods + assets at current prices. Income = money received
+from selling goods, labour or assets, and from the government.
+`GET /api/report?window=N` returns the same data.
+
+Money is counted in units 100× those of the goods (agents start with 10,000),
+so prices land roughly between 1 and 100 and are shown with two decimals.
+
 ### Central government
 
 - **Minimum interest rate**: no asset is valued at a return below it. The

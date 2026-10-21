@@ -9,6 +9,7 @@ from .agent import Agent
 from .inventory import Inventory
 from .modules import Consume, Invest, Mood, Navigate, NeedsDecay, Production, Rest
 from .government import Government
+from .report import Recorder
 from .rules import SPREADS, Rules
 
 # Soft but distinguishable colours, matching the UI palette.
@@ -38,6 +39,8 @@ class World:
         self.cooldowns = {}  # frozenset({id_a, id_b}) -> tick until which they ignore each other
         self.labor_expired = 0.0     # labour that expired unused so far
         self.government = Government(self.rules.gov_min_rate, self.rules.gov_labor_purchase)
+        self.recorder = Recorder()  # per-step snapshots for the Report view
+        self._dead_flows = []       # flows of agents that died this step (still counted)
         self.asset_trades = 0        # purchases of asset shares between agents
         self.asset_trade_money = 0.0
         # Units of each good one unit of labour makes right now (grows every step).
@@ -297,13 +300,17 @@ class World:
         before the check ran.
         """
         self.tick += 1
+        self.recorder.begin_step(self)
+        self._dead_flows = []
         self.grow_assets()
         self.update_scarcity()
         self.update_demand()
         self.government.buy_labor(self)
         for agent in self.agents:
             agent.inventory.now = self.tick
-            self.labor_expired += agent.inventory.expire().get(economy.LABOR, 0)
+            expired = agent.inventory.expire().get(economy.LABOR, 0)
+            self.labor_expired += expired
+            self.recorder.count("expired", expired)
         for agent in list(self.agents):
             if agent not in self.agents:
                 continue
@@ -314,6 +321,7 @@ class World:
                 if (other is not agent and agent.distance_to(other) <= self.contact_distance
                         and not self.in_cooldown(agent, other)):
                     self.interact(agent, other)
+        self.recorder.end_step(self, self._dead_flows)
 
     def check_death(self, agent):
         """Hunger or thirst at 1.00 (after eating/drinking what it had) kills the agent.
@@ -325,6 +333,8 @@ class World:
         for need in ("hunger", "thirst"):
             if getattr(agent, need) >= economy.CRITICAL_LEVEL:
                 self.remove_agent(agent)
+                self._dead_flows.append(agent.flow)
+                self.recorder.count("deaths")
                 cause = "hunger" if need == "hunger" else "thirst"
                 self.log(f"{agent.name} died of {cause}")
                 return True
@@ -346,6 +356,7 @@ class World:
         prices = self.current_prices()
         deals = economy.trade(a, b, prices, rules, self.rng, scarcity, self.unit_markups())
         for buyer, seller, bought, paid, stocked, unit_prices in deals:
+            self.recorder.count("labor_deals" if economy.LABOR in bought else "goods_deals")
             note = f" ({economy.describe(stocked)} to stockpile)" if stocked else ""
             rising = [f"{r} {lo:.2f}→{hi:.2f}" for r, (lo, hi) in unit_prices.items() if hi > lo + 1e-9]
             if rising:

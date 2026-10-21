@@ -7,6 +7,7 @@ API
     GET    /api/state                 current world state
     POST   /api/step   {"steps": n}   advance n ticks (default 1)
     GET    /api/rules                 {"current": rules of this game, "factory": default rules}
+    GET    /api/report?window=N       game report over the last N steps (all kept steps if omitted)
     POST   /api/reset  {"rules": {...}, "agents": n, "seed": s}
                                       start a new game. Omitted rules keep the current game's
                                       rules; "agents" overrides rules.agents.
@@ -33,6 +34,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from simulation import World
+from simulation.report import build_report
 from simulation.rules import Rules
 from simulation.agent import NEED_NAMES
 from simulation.economy import GOODS, RESOURCES
@@ -103,6 +105,10 @@ class Simulation:
         with self.lock:
             return self.world.rules.to_dict()
 
+    def report(self, window):
+        with self.lock:
+            return build_report(self.world, window)
+
     def state(self):
         with self.lock:
             return self.world.to_dict()
@@ -167,6 +173,10 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/state":
             return self._json(self.sim.state())
+        if self.path.startswith("/api/report"):
+            query = dict(p.split("=", 1) for p in self.path.partition("?")[2].split("&") if "=" in p)
+            window = query.get("window", "")
+            return self._json(self.sim.report(int(window) if window.isdigit() and int(window) > 0 else None))
         if self.path == "/api/rules":
             return self._json({"current": self.sim.rules(), "factory": Rules().to_dict()})
         return super().do_GET()

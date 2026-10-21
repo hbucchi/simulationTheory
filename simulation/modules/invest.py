@@ -1,9 +1,9 @@
 from .. import economy
 from .base import Module
 
-# Owners only sell to cover a cash shortfall of at least this much money, so agents a
-# fraction of a cent short don't sell dust-sized slivers of assets every step.
-MIN_SALE = 1.0
+# Owners only sell to cover a cash shortfall of at least this share of min_investment, so
+# agents a fraction of a cent short don't sell dust-sized slivers of assets every step.
+MIN_SALE_SHARE = 0.1
 # An owner holding more than the stock cap of a resource sells at most this share of its
 # assets of that resource per deal.
 SURPLUS_SELL_SHARE = 0.25
@@ -25,7 +25,7 @@ class Invest(Module):
     shares from going back and forth.) With the stock band off, any resource.
 
     Owners sell for two reasons:
-    - short of cash (by at least MIN_SALE): just enough shares to cover the gap,
+    - short of cash (by at least MIN_SALE_SHARE of min_investment): just enough shares to cover the gap,
       most cash-short first;
     - holding more than the stock cap of the resource: they don't need more of it,
       so they sell up to SURPLUS_SELL_SHARE of those assets per deal.
@@ -43,7 +43,8 @@ class Invest(Module):
         asset_prices = world.asset_prices(prices)
         # Owners short of cash, worked out once: {agent: shortfall}, most short first.
         short = {o: cash_needed(o, prices, rules) - o.money for o in world.agents if o is not agent and o.assets}
-        short = {o: gap for o, gap in sorted(short.items(), key=lambda kv: kv[0].money) if gap >= MIN_SALE}
+        min_sale = rules.min_investment * MIN_SALE_SHARE
+        short = {o: gap for o, gap in sorted(short.items(), key=lambda kv: kv[0].money) if gap >= min_sale}
         for resource in ranked_assets(world):
             price = asset_prices[resource]
             lacks = economy.wants_to_buy(agent, resource, rules, world.scarcity) or not rules.selling_enabled
@@ -65,6 +66,7 @@ class Invest(Module):
                 shares = money / price
                 transfer_shares(seller, agent, resource, shares)
                 seller.money += money
+                seller.flow["income"] += money
                 agent.money -= money
                 spare -= money
                 bought[seller.name] = shares

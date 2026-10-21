@@ -178,6 +178,8 @@ function render(next) {
   state = next;
   if (editingId !== null && !agentById(editingId)) editingId = null;
   ui.tick.textContent = state.tick;
+  if (typeof refreshReport === "function") refreshReport();
+  if (typeof reportVisible !== "undefined" && reportVisible) return;
   draw();
   if (activeTab === "overview") {
     renderMarket();
@@ -292,7 +294,7 @@ function renderMarket() {
   ui.market.innerHTML = "";
   const title = document.createElement("div");
   title.className = "market-title";
-  title.textContent = `Market · ${m.money.toFixed(2)} money / ${total} units = ${(total ? m.money / total : 0).toFixed(3)} per unit`;
+  title.textContent = `Market · ${m.money.toFixed(2)} money / ${total} units = ${(total ? m.money / total : 0).toFixed(2)} per unit`;
   ui.market.append(title);
   const row = document.createElement("div");
   row.className = "market-row";
@@ -300,7 +302,7 @@ function renderMarket() {
     const share = total ? m.units[r] / total : 0;
     const cell = document.createElement("div");
     const price = document.createElement("b");
-    price.textContent = m.prices[r].toFixed(3);
+    price.textContent = m.prices[r].toFixed(2);
     const mult = m.multiplier[r];
     const arrow = document.createElement("span");
     arrow.className = "price-move " + (mult > 1.02 ? "up" : mult < 0.98 ? "down" : "");
@@ -313,7 +315,7 @@ function renderMarket() {
     // Demand pressure: base price x multiplier from buyers vs sellers.
     const pressure = document.createElement("span");
     pressure.className = "pressure";
-    pressure.textContent = `base ${m.base_prices[r].toFixed(3)} × ${mult.toFixed(2)} ` +
+    pressure.textContent = `base ${m.base_prices[r].toFixed(2)} × ${mult.toFixed(2)} ` +
       `(demand ${m.pressure[r].toFixed(2)}: ${m.buyers[r]} want / ${m.sellers[r]} sell · ` +
       `concentration ${m.concentration_factor[r].toFixed(2)}: C ${m.concentration[r].toFixed(2)})` +
       (m.markups[r] ? ` · +${(m.markups[r] * 100).toFixed(0)}%/unit` : "");
@@ -603,7 +605,7 @@ function renderGovernment() {
     ["Money created", g.money_created.toFixed(1), `${g.last_spent.toFixed(2)} in the last step`],
     ["Labour used up", g.labor_bought.toFixed(1), "in public works so far"],
     ["Money in the economy", m.money.toFixed(1), "held by agents"],
-    ["Labour price", m.prices.labor.toFixed(3), `food ${m.prices.food.toFixed(3)} · water ${m.prices.water.toFixed(3)}`],
+    ["Labour price", m.prices.labor.toFixed(2), `food ${m.prices.food.toFixed(2)} · water ${m.prices.water.toFixed(2)}`],
   ];
   ui.govStats.innerHTML = "";
   for (const [label, value, note] of stats) {

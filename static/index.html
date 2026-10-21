@@ -33,12 +33,16 @@
     </div>
 
     <div class="topbar-right">
+      <nav class="view-switch segmented" aria-label="View">
+        <button data-view="simulation" class="active">Simulation</button>
+        <button data-view="report">Report</button>
+      </nav>
       <div class="tick-pill">Step <span id="tick" class="mono">0</span></div>
       <button id="open-setup" class="soft">Rules · New game</button>
     </div>
   </header>
 
-  <main class="layout">
+  <main class="layout" id="sim-view">
     <section class="card map-card">
       <div class="card-head">
         <div>
@@ -173,6 +177,97 @@
     </aside>
   </main>
 
+  <main id="report-view" class="report" hidden>
+    <div class="report-head">
+      <div>
+        <h1>Report</h1>
+        <p class="hint" id="report-range"></p>
+      </div>
+      <div class="segmented" id="report-window" aria-label="Window">
+        <button data-window="100" class="active">Last 100</button>
+        <button data-window="250">250</button>
+        <button data-window="500">500</button>
+        <button data-window="0">All</button>
+      </div>
+    </div>
+
+    <div id="report-kpis" class="kpi-grid"></div>
+
+    <div class="report-grid">
+      <section class="card report-card span-2">
+        <h2 class="card-title">Prices</h2>
+        <p class="card-sub">Price of one unit over time (money per unit).</p>
+        <div id="chart-prices"></div>
+      </section>
+      <section class="card report-card">
+        <h2 class="card-title">Price summary</h2>
+        <p class="card-sub">Over the selected window.</p>
+        <div id="table-prices"></div>
+      </section>
+
+      <section class="card report-card span-3">
+        <h2 class="card-title">Production and consumption</h2>
+        <p class="card-sub">Units per step of each good, <span class="avg-note"></span> (same scale on all three).</p>
+        <div class="small-multiples">
+          <div><h3 class="mini-title">Food</h3><div id="chart-flow-food"></div></div>
+          <div><h3 class="mini-title">Water</h3><div id="chart-flow-water"></div></div>
+          <div><h3 class="mini-title">Games</h3><div id="chart-flow-games"></div></div>
+          <div><h3 class="mini-title">Totals in this window</h3><div id="table-flows"></div></div>
+        </div>
+      </section>
+
+      <section class="card report-card span-2">
+        <h2 class="card-title">Labour</h2>
+        <p class="card-sub">Units per step (<span class="avg-note"></span>): made by agents, used by assets, expired unused,
+          bought by the government.</p>
+        <div id="chart-labor"></div>
+      </section>
+      <section class="card report-card">
+        <h2 class="card-title">Labour summary</h2>
+        <p class="card-sub">Totals in this window.</p>
+        <div id="table-labor"></div>
+      </section>
+
+      <section class="card report-card span-2">
+        <h2 class="card-title">Inequality over time</h2>
+        <p class="card-sub">Gini: 0 = everyone holds the same, 1 = one agent holds everything.</p>
+        <div id="chart-gini"></div>
+      </section>
+      <section class="card report-card">
+        <h2 class="card-title">Who holds what now</h2>
+        <p class="card-sub">Lorenz curves: share held by the poorest x% of agents. The dashed line is perfect equality.</p>
+        <div id="chart-lorenz"></div>
+      </section>
+
+      <section class="card report-card">
+        <h2 class="card-title">Total wealth</h2>
+        <p class="card-sub">Money + goods + assets at current prices.</p>
+        <div id="chart-wealth"></div>
+      </section>
+      <section class="card report-card">
+        <h2 class="card-title">Income</h2>
+        <p class="card-sub">Money all agents earned per step (<span class="avg-note"></span>).</p>
+        <div id="chart-income"></div>
+      </section>
+      <section class="card report-card">
+        <h2 class="card-title">Richest agents</h2>
+        <p class="card-sub">Share of all wealth.</p>
+        <div id="table-top"></div>
+      </section>
+
+      <section class="card report-card span-2">
+        <h2 class="card-title">Trading activity</h2>
+        <p class="card-sub">Deals per step (<span class="avg-note"></span>).</p>
+        <div id="chart-trades"></div>
+      </section>
+      <section class="card report-card">
+        <h2 class="card-title">Population</h2>
+        <p class="card-sub">Agents alive.</p>
+        <div id="chart-population"></div>
+      </section>
+    </div>
+  </main>
+
   <section id="setup" class="setup" hidden>
     <div class="setup-card">
       <div class="setup-head">
@@ -202,5 +297,6 @@
 
   <script src="app.js"></script>
   <script src="setup.js"></script>
+  <script src="report.js"></script>
 </body>
 </html>

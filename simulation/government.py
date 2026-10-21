@@ -44,6 +44,7 @@ class Government:
             seller.inventory.take(economy.LABOR, units)
             pay = units * price
             seller.money += pay
+            seller.flow["income"] += pay
             wanted -= units
             self.labor_bought += units
             self.money_created += pay

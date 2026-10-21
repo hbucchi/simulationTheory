@@ -157,11 +157,11 @@ const PRESETS = [
     inventory: { food: 10, water: 10, games: 10, labor: 0 }, stock_cap: 20 }],
   ["spread", "Spread ownership (everyone owns some assets)", { assets: Object.fromEntries(GOODS.map(g =>
     [g, { dist: "uniform", min: 0, max: 2 }])) }],
-  ["unequal", "Unequal wealth (1% hold 50% of money)", { money: { dist: "tiered", average: 100, tiers: EXAMPLE_TIERS } }],
+  ["unequal", "Unequal wealth (1% hold 50% of money)", { money: { dist: "tiered", average: 10000, tiers: EXAMPLE_TIERS } }],
   ["drought", "Drought (few water assets)", { inventory: { water: 30 }, assets: { water: { dist: "tiered", average: 0.4,
     tiers: [{ agents: 10, share: 100 }, { agents: 90, share: 0 }] } } }],
   ["easy", "Easy (no death or depression)", { death_enabled: false, depression_enabled: false }],
-  ["barter", "Barter (fixed 1:1 prices)", { price_mode: "fixed", fixed_prices: { food: 1, water: 1, games: 1 } }],
+  ["barter", "Barter (fixed 1:1 prices)", { price_mode: "fixed", fixed_prices: { food: 20, water: 20, games: 20, labor: 20 } }],
 ];
 
 let rulesInfo = null;   // {current, factory} from the server
@@ -646,10 +646,16 @@ function renderPreview(r, error) {
          held ? "" : "short");
   }
 
+  // Starting labour price from the scarcity formula (or the fixed price).
+  const startLaborPrice = () => {
+    if (r.price_mode === "fixed") return r.fixed_prices.labor;
+    const units = RESOURCES.reduce((sum, x) => sum + avg(r.inventory[x]), 0);
+    return units ? avg(r.money) / units * (1 - avg(r.inventory.labor) / units) : 0;
+  };
   if (r.gov_min_rate || r.gov_labor_purchase) {
     line(`Government: no asset valued below ${(r.gov_min_rate * 100).toFixed(2)}% per step` +
          (r.gov_labor_purchase ? `; buys ${r.gov_labor_purchase} labour per step with new money ` +
-          `(at starting prices about ${(r.gov_labor_purchase * 0.25).toFixed(2)}+ money created per step).` : "."));
+          `(about ${(r.gov_labor_purchase * startLaborPrice()).toFixed(2)} money created per step at the starting labour price).` : "."));
   }
 
   const g = avg(r.rates.sleep), rec = avg(r.sleep_recovery);
@@ -663,7 +669,7 @@ function renderPreview(r, error) {
     const total = stock.reduce((a, b) => a + b, 0);
     const money = avg(r.money);
     const prices = RESOURCES.map((x, i) => total ? (money / total) * (1 - stock[i] / total) : 0);
-    line(`Starting prices (roughly): ${RESOURCES.map((x, i) => `${x} ${prices[i].toFixed(3)}`).join(", ")}. ` +
+    line(`Starting prices (roughly): ${RESOURCES.map((x, i) => `${x} ${prices[i].toFixed(2)}`).join(", ")}. ` +
          "Scarcer resources get dearer as stocks change.");
   }
 }
