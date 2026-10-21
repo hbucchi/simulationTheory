@@ -116,8 +116,8 @@ const FIELD_GROUPS = [
     { path: `inventory.${r}`, label: cap(r), min: 0, step: 1, get: a => a.inventory[r] ?? 0 }))},
   { legend: "Production: 1 unit every N steps (0 = never)", fields: RESOURCES.map(r => (
     { path: `production.${r}`, label: cap(r), min: 0, step: 1, get: a => a.modules.Production.intervals[r] }))},
-  { legend: "Assets owned (each adds the asset return to production)", fields: RESOURCES.map(r => (
-    { path: `assets.${r}`, label: cap(r), min: 0, step: 1, get: a => a.assets[r] ?? 0 }))},
+  { legend: "Assets owned (shares; 1 = one whole asset)", fields: RESOURCES.map(r => (
+    { path: `assets.${r}`, label: cap(r), min: 0, step: 0.01, get: a => +(a.assets[r] ?? 0).toFixed(4) }))},
 ];
 const FIELDS = FIELD_GROUPS.flatMap(g => g.fields);
 
@@ -328,10 +328,11 @@ function renderMarket() {
   if (state.rules.investing_enabled) {
     const inv = document.createElement("div");
     inv.className = "market-title invest";
-    inv.textContent = `Assets · ${RESOURCES.map(r => `${r} ${m.assets[r]}`).join(" · ")} · ` +
+    inv.textContent = `Assets (value · shares · output/step) · ${RESOURCES.map(r =>
+      `${r} ${m.asset_value[r].toFixed(1)} · ${m.assets[r].toFixed(2)} · ${m.asset_output[r].toFixed(2)}`).join(" | ")} · ` +
       `builder holds ${m.builder_funds.toFixed(2)} (pays out ${(state.rules.builder_payout_rate * 100).toFixed(1)}%/step) · ` +
       `invested in new ${m.asset_spending.toFixed(0)}, paid back ${m.builder_paid_out.toFixed(0)} · ` +
-      `${m.asset_resales} bought from other agents (${m.asset_resale_money.toFixed(0)})`;
+      `${m.asset_resales} purchases from other agents (${m.asset_resale_money.toFixed(0)})`;
     inv.title = "Money paid for assets goes to the builder, which pays it back to all agents as income";
     ui.market.append(inv);
   }
@@ -472,8 +473,12 @@ function renderAgents() {
       ...RESOURCES.map(r => [r, a.inventory[r] ?? 0, production[r] ? `+1 / ${production[r]} steps` : "no production"]),
       ["money", a.money.toFixed(2)],
       ["movement", a.depressed ? `${a.speed} px (depressed, ${a.movement} normally)` : `${a.speed} px`],
-      ...RESOURCES.filter(r => a.assets[r]).map(r => [`${r} assets`, a.assets[r],
-        `Each adds ${(state.rules.asset_return[r] * 100).toFixed(1)}% to ${r} production`]),
+      ...RESOURCES.filter(r => a.assets[r]).map(r => {
+        const value = state.market.asset_value[r];
+        return [`${r} assets`, `${a.assets[r].toFixed(2)} (worth ${(a.assets[r] * value).toFixed(0)}, ` +
+          `${(a.assets[r] * value * state.rules.asset_return[r]).toFixed(2)}/step)`,
+          `One whole ${r} asset is worth ${value.toFixed(2)} now`];
+      }),
       // Reserve it wants to hold because the resource is becoming scarce.
       ...RESOURCES.filter(r => a.reserve?.[r]).map(r => [`${r} reserve`, a.reserve[r],
         "Wants to hold this much because it is becoming scarce"]),
@@ -497,9 +502,7 @@ function renderAgents() {
       : a.activity === "stockpiling" && target ? `stockpiling ${a.seeking_for} from ${target.name}`
       : a.activity === "searching" ? `searching: nobody has ${a.wants.join(" or ")} to sell`
       : a.activity;
-    const boost = (r) => (a.assets[r] || 0) * state.rules.asset_return[r];
-    const prod = RESOURCES.map(r => !production[r] ? `${r} –`
-      : `${r} 1/${production[r]}` + (boost(r) ? ` +${(boost(r) * 100).toFixed(0)}%` : "")).join(" · ");
+    const prod = RESOURCES.map(r => production[r] ? `${r} 1/${production[r]}` : `${r} –`).join(" · ");
     activity.append(act);
     if (a.depressed) {
       const sad = document.createElement("b");
@@ -647,7 +650,9 @@ function updateBalance() {
   for (const r of RESOURCES) {
     const used = fieldValue(`rates.${NEED_FOR[r]}`) / state.rules.relief_per_unit;
     const every = fieldValue(`production.${r}`);
-    const made = every ? 1 / every : 0;
+    // Own production plus what its asset shares make at the current asset value.
+    const assetOutput = fieldValue(`assets.${r}`) * state.market.asset_value[r] * state.rules.asset_return[r];
+    const made = (every ? 1 / every : 0) + assetOutput;
     const net = made - used;
     const line = document.createElement("span");
     const even = Math.abs(net) < 1e-9;

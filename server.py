@@ -19,7 +19,7 @@ Agent fields: name, x, y, movement, money,
               rates      {hunger, sleep, thirst, boredom: 0..1}   growth per step
               inventory  {food, water, games: int >= 0}
               production {food, water, games: int >= 0}          1 unit every N steps
-              assets     {food, water, games: int >= 0}          productive assets owned
+              assets     {food, water, games: >= 0}              shares of productive assets owned
               sleep_recovery  0..1                              sleep recovered per step at rest
 """
 
@@ -124,7 +124,7 @@ def parse_agent_config(body):
         "needs": _number_map(body, "needs", NEED_NAMES, 0, 1),
         "rates": _number_map(body, "rates", NEED_NAMES, 0, 1),
         "inventory": _number_map(body, "inventory", RESOURCES, 0, 1e9, whole=True),
-        "assets": _number_map(body, "assets", RESOURCES, 0, 1e9, whole=True),
+        "assets": _number_map(body, "assets", RESOURCES, 0, 1e9),
         "production": _number_map(body, "production", RESOURCES, 0, 1e6, whole=True),
     }
     if body.get("name") is not None:

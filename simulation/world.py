@@ -38,8 +38,10 @@ class World:
         self.builder_funds = 0.0     # held right now
         self.asset_spending = 0.0    # paid for assets so far
         self.builder_paid_out = 0.0  # paid back to agents so far
-        self.asset_resales = 0       # assets bought from other agents
+        self.asset_resales = 0       # purchases of shares from other agents
         self.asset_resale_money = 0.0
+        # Current value of one whole asset of each resource (grows every step).
+        self.asset_value = dict(self.rules.asset_value)
         # Average units per living agent of each resource, one entry per step, for the
         # last scarcity_window steps; scarcity = how much that average fell over the window.
         self.per_agent_history = {r: deque(maxlen=self.rules.scarcity_window + 1) for r in economy.RESOURCES}
@@ -109,7 +111,7 @@ class World:
             modules=modules,
         )
         agent.depression_factor = r.depression_factor
-        drawn = {k: draw(v, True, "assets") for k, v in r.assets.items()}
+        drawn = {k: draw(v, False, "assets") for k, v in r.assets.items()}
         agent.assets = {k: v for k, v in {**drawn, **(assets or {})}.items() if v}
         return self.add_agent(agent)
 
@@ -153,7 +155,7 @@ class World:
         money = distributions.allocate(r.money, n, self.rng, False, *SPREADS["money"][1:3])
         stock = {k: distributions.allocate(v, n, self.rng, True, *SPREADS["inventory"][1:3])
                  for k, v in r.inventory.items()}
-        assets = {k: distributions.allocate(v, n, self.rng, True, *SPREADS["assets"][1:3])
+        assets = {k: distributions.allocate(v, n, self.rng, False, *SPREADS["assets"][1:3])
                   for k, v in r.assets.items()}
         for i in range(n):
             self.create_agent(money=round(money[i], 2), inventory={k: v[i] for k, v in stock.items()},
@@ -216,6 +218,18 @@ class World:
         for r, price in self.current_prices().items():
             self.price_history[r].append(price)
 
+    def asset_growth_per_step(self, resource):
+        """Per-step growth so that value grows asset_growth over asset_growth_steps steps."""
+        return (1 + self.rules.asset_growth[resource]) ** (1 / self.rules.asset_growth_steps) - 1
+
+    def grow_assets(self):
+        for r in self.asset_value:
+            self.asset_value[r] *= 1 + self.asset_growth_per_step(r)
+
+    def asset_output(self, resource, shares):
+        """Units per step made by ``shares`` of a ``resource`` asset at its current value."""
+        return shares * self.asset_value[resource] * self.rules.asset_return[resource]
+
     def pay_builder(self, amount):
         self.builder_funds += amount
         self.asset_spending += amount
@@ -260,6 +274,7 @@ class World:
         before the check ran.
         """
         self.tick += 1
+        self.grow_assets()
         self.pay_out_builder()
         self.update_scarcity()
         self.update_demand()
@@ -345,6 +360,9 @@ class World:
                 "markups": self.unit_markups(),
                 "price_history": {r: list(h) for r, h in self.price_history.items()},
                 "assets": {r: sum(a.assets.get(r, 0) for a in self.agents) for r in economy.RESOURCES},
+                "asset_value": self.asset_value,
+                "asset_output": {r: self.asset_output(r, sum(a.assets.get(r, 0) for a in self.agents))
+                                 for r in economy.RESOURCES},
                 "asset_spending": self.asset_spending,
                 "builder_funds": self.builder_funds,
                 "builder_paid_out": self.builder_paid_out,

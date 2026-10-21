@@ -120,31 +120,29 @@ pressure* on the setup screen.
 
 ### Investment
 
-Each step an agent keeps **liquidity**: enough money to buy 3 units of every
-resource at current prices. Everything above that it spends on **assets**.
+Each resource has its own **asset**: food assets, water assets, games assets,
+each with its own value, return and growth (set on the setup screen).
 
-- One asset per resource type. Owning n assets of a resource raises the
-  owner's production of it by n × asset return (1% by default): e.g. 9 water
-  assets make water come 9% faster. Asset price and return are set per
-  resource on the setup screen (10 money and 1% by default).
-- The agent buys as many as it can afford of the asset that adds the most
-  income per money spent: return ÷ steps per unit × current price ÷ asset
-  price. Assets for a resource it doesn't produce add nothing, so they are
-  never bought.
-- Agents can start with assets: the *Starting agents* section has a row per
-  asset with the usual distributions (fixed, uniform, normal, tiered).
-- The buyer first buys existing assets from agents that are **short of cash**
-  (less than their liquidity plus the cost of what they need to buy right
-  now), most cash-short first, and pays them; a seller stops once it has the
-  cash it needs. Only the rest are new assets.
-- Money for new assets goes to the **asset builder**, which pays 1% of what it holds
-  back to all living agents each step, split evenly (like wages). Total money
-  stays constant, and the builder's money still counts toward the price level.
-  Agents reinvest the income, so production keeps growing.
+- One whole asset is worth `asset_value` (100) and makes value × `asset_return`
+  units per step: worth 100 at 1% → 1 unit of food per step.
+- Its value grows by `asset_growth` (5%) every `asset_growth_steps` (50) steps,
+  compounding a little each step: 105 after 50 steps (1.05 units/step),
+  ~110 after 100. Output grows with it.
+- Agents hold **shares** (fractions) of assets, so 0.5 of a food asset makes
+  half as much. They can start with some (*Starting agents*, any distribution).
+- Each step an agent keeps cash for what it needs to buy now plus 3 units of
+  every resource at current prices. Once at least `min_investment` (10) is
+  spare, it puts all of it into the asset with the best return per money:
+  return × current price of the resource + value growth per step.
+- It buys first from owners that are **short of cash**, most short first,
+  paying them the current value for just enough shares to cover the gap.
+  The rest are new shares; that money goes to the **asset builder**, which pays
+  1% of what it holds back to all living agents each step. Total money stays
+  constant, and the builder's money still counts toward the price level.
 
-The market panel shows assets owned, the builder's funds and the totals
-invested and paid back; cards show each agent's assets and production boost;
-*Manage agents* can edit assets.
+The market panel shows each asset's current value, shares owned and output;
+cards show each agent's shares, their worth and output; *Manage agents* can
+edit shares.
 
 ### Prices
 

@@ -54,18 +54,23 @@ class Rules:
     stockpile_steps: int = 100
     stockpile_budget: float = 0.5
 
-    # Investment: agents keep liquidity (money for liquidity_units of every resource at
-    # current prices) and spend the rest on assets. One asset of a resource costs
-    # asset_price[r] and adds asset_return[r] (0.01 = 1%) to the owner's production of it.
-    # An investor first buys existing assets from agents short of cash (below their own
-    # liquidity), paying them; only when nobody sells does the asset builder make a new one.
-    # The builder pays builder_payout_rate of what it holds back to all living agents each
-    # step, split evenly (like wages).
+    # Investment. Each resource has its own asset type. One whole asset is worth
+    # asset_value[r] at the start; its value grows by asset_growth[r] (0.05 = 5%) every
+    # asset_growth_steps steps, compounding a little each step. It produces
+    # value x asset_return[r] units of r per step (worth 100 at 1% -> 1 unit/step).
+    # Agents hold shares (fractions) of assets. They keep cash for their needs plus
+    # liquidity_units of every resource at current prices, and invest the rest once at least
+    # min_investment is spare. Investors buy first from owners short of cash, paying them;
+    # the rest are new shares whose money goes to the builder, which pays
+    # builder_payout_rate of its funds back to all living agents each step (like wages).
     investing_enabled: bool = True
-    builder_payout_rate: float = 0.01
-    asset_price: dict = field(default_factory=lambda: {"food": 10.0, "water": 10.0, "games": 10.0})
+    asset_value: dict = field(default_factory=lambda: {"food": 100.0, "water": 100.0, "games": 100.0})
     asset_return: dict = field(default_factory=lambda: {"food": 0.01, "water": 0.01, "games": 0.01})
+    asset_growth: dict = field(default_factory=lambda: {"food": 0.05, "water": 0.05, "games": 0.05})
+    asset_growth_steps: int = 50
     liquidity_units: float = 3
+    min_investment: float = 10
+    builder_payout_rate: float = 0.01
 
     # Prices
     price_mode: str = "scarcity"       # "scarcity": money/units*(1-share); "fixed": fixed_prices
@@ -145,7 +150,7 @@ class Rules:
 # Only amounts that can be shared out between agents (inventory, money) may be tiered.
 SPREADS = {
     "inventory": (RESOURCES, 0, 1e9, True, True),
-    "assets": (RESOURCES, 0, 1e9, True, True),
+    "assets": (RESOURCES, 0, 1e9, False, True),   # shares of assets: fractions allowed
     "money": (None, 0, 1e12, False, True),
     "movement": (None, 1, 200, True, False),
     "start_needs": (None, 0, 1, False, False),
@@ -173,8 +178,11 @@ LIMITS = {
     "price_cap": (1, 100, "float"),
     "unit_markup": (0, 1, "float"),
     "investing_enabled": (None, None, "bool"),
-    "asset_price": ((RESOURCES, 0.01, 1e9, False), None, "map"),
+    "asset_value": ((RESOURCES, 0.01, 1e9, False), None, "map"),
     "asset_return": ((RESOURCES, 0, 10, False), None, "map"),
+    "asset_growth": ((RESOURCES, -0.99, 100, False), None, "map"),
+    "asset_growth_steps": (1, 100000, "int"),
+    "min_investment": (0.01, 1e9, "float"),
     "liquidity_units": (0, 1e6, "float"),
     "builder_payout_rate": (0, 1, "float"),
     "purchase_min": (1, 10, "float"),
