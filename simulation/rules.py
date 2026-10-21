@@ -13,8 +13,9 @@ from dataclasses import asdict, dataclass, field, fields
 from . import distributions
 
 GOODS = ("food", "water", "games")   # consumed for needs; produced only by assets
-LABOR = "labor"                       # produced by every agent; used by assets to make goods
-RESOURCES = GOODS + (LABOR,)          # everything that is held and traded
+LABOR = "labor"                       # a capacity sold each step in the labour market; never held
+RESOURCES = GOODS                     # what agents hold and trade face to face
+PRICED = GOODS + (LABOR,)             # everything with a price (labour's price is the wage)
 NEEDS = ("hunger", "sleep", "thirst", "boredom")
 PRICE_MODES = ("scarcity", "fixed")
 
@@ -23,7 +24,7 @@ PRICE_MODES = ("scarcity", "fixed")
 class Rules:
     # Starting agents (spreads)
     agents: int = 3
-    inventory: dict = field(default_factory=lambda: {"food": 100, "water": 100, "games": 100, "labor": 0})
+    inventory: dict = field(default_factory=lambda: {"food": 100, "water": 100, "games": 100})
     # Starting asset shares: for each good, 10% of the agents own all its assets (10 shares each
     # on average), drawn separately per good, so about a quarter of the agents own something.
     # Most agents own none and live by selling labour.
@@ -33,14 +34,26 @@ class Rules:
     movement: object = field(default_factory=lambda: {"dist": "uniform", "min": 5, "max": 25})
     start_needs: object = field(default_factory=lambda: {"dist": "uniform", "min": 0.0, "max": 0.5})
 
-    # Labour: every agent makes labor_rate units of labour per step (spread). Labour expires
-    # labor_lifetime steps after it was made (0 = never) unless it is used by an asset or sold
-    # first. Goods are only made by assets worked by labour (see Investment). Owners buy labour
-    # to keep labor_buffer_steps steps of what their assets can employ; owning or using labour
-    # in production is the only reason anyone buys it.
-    labor_rate: object = 0.5
-    labor_lifetime: int = 10
-    labor_buffer_steps: int = 5
+    # Labour (see labor.py): every agent can work up to labor_capacity units per step (spread),
+    # scaled by its efficiency. Labour is never stored: it is sold each step in the labour
+    # market and anything unsold is lost. Goods are only made by assets worked by labour.
+    labor_capacity: object = 0.5
+    # Labour market: base wage = labor_share x value one unit of labour produces; an agent's
+    # general need = money_weight x (how far its money is below comfort_steps steps of cost of
+    # living) + (1 - money_weight) x its most pressing need. It offers
+    # participation_floor + (1 - participation_floor) x need of its free capacity and asks
+    # wage x (1 + bargaining_spread x (wellbeing - need)).
+    labor_share: float = 0.6
+    money_weight: float = 0.5
+    comfort_steps: int = 50
+    participation_floor: float = 0.2
+    bargaining_spread: float = 0.5
+    # Labour capacity module: efficiency = 1 - sum(weight x need) - depression penalty, at least
+    # min_efficiency. Wellbeing uses the same weights.
+    efficiency_weights: dict = field(default_factory=lambda: {"hunger": 0.3, "thirst": 0.3, "sleep": 0.2,
+                                                              "boredom": 0.1})
+    depression_penalty: float = 0.3
+    min_efficiency: float = 0.2
 
     # Consumption: how fast needs grow (spreads), and what consuming does
     rates: dict = field(default_factory=lambda: {"hunger": 0.010, "sleep": 0.005, "thirst": 0.015,
@@ -71,11 +84,11 @@ class Rules:
     # One whole asset employs up to asset_labor[g] units of labour per step, and each unit of
     # labour makes productivity[g] units of the good, so
     #     output = productivity x min(labour available, shares x asset_labor).
-    # Productivity grows by productivity_growth[g] (0.05 = 5%) every productivity_growth_steps
-    # steps, compounding a little each step.
-    # Asset price = full-capacity output per step x current price of g / asset_return[g], so an
-    # asset always earns asset_return (1%) of its price per step; its price moves with the
-    # good's price and with productivity.
+    # Every productivity_growth_steps steps productivity grows by productivity_growth[g]
+    # (0.05 = 5%) and the labour an asset needs falls by labor_saving[g] (0.03 = 3%), both
+    # compounding a little each step: industries get less labour-intensive over time.
+    # Asset price = profit per step at full capacity (output x price of g - labour x wage) /
+    # asset_return[g] (or the government's minimum rate if higher), never below 0.
     # Agents hold shares (fractions). They keep cash for their needs plus liquidity_units of
     # every resource at current prices, and once at least min_investment is spare they buy
     # shares from owners that are short of cash.
@@ -84,6 +97,7 @@ class Rules:
     productivity: dict = field(default_factory=lambda: {"food": 1.0, "water": 1.0, "games": 1.0})
     productivity_growth: dict = field(default_factory=lambda: {"food": 0.05, "water": 0.05, "games": 0.05})
     productivity_growth_steps: int = 50
+    labor_saving: dict = field(default_factory=lambda: {"food": 0.03, "water": 0.03, "games": 0.03})
     asset_return: dict = field(default_factory=lambda: {"food": 0.01, "water": 0.01, "games": 0.01})
     liquidity_units: float = 3
     min_investment: float = 1000
@@ -185,12 +199,12 @@ class Rules:
 # Per-agent values ("spreads"): key -> (sub-keys or None, low, high, whole number, tiered allowed).
 # Only amounts that can be shared out between agents (inventory, money) may be tiered.
 SPREADS = {
-    "inventory": (RESOURCES, 0, 1e9, True, True),
+    "inventory": (GOODS, 0, 1e9, True, True),
     "assets": (GOODS, 0, 1e9, False, True),   # shares of assets: fractions allowed
     "money": (None, 0, 1e12, False, True),
     "movement": (None, 1, 200, True, False),
     "start_needs": (None, 0, 1, False, False),
-    "labor_rate": (None, 0, 1e6, False, False),
+    "labor_capacity": (None, 0, 1e6, False, False),
     "rates": (NEEDS, 0, 1, False, False),
     "sleep_recovery": (None, 0, 1, False, False),
 }
@@ -208,8 +222,8 @@ LIMITS = {
     "stockpile_steps": (0, 5000, "int"),
     "stockpile_budget": (0, 1, "float"),
     "demand_pricing_enabled": (None, None, "bool"),
-    "price_elasticity": ((RESOURCES, 0, 3, False), None, "map"),
-    "concentration_weight": ((RESOURCES, 0, 10, False), None, "map"),
+    "price_elasticity": ((PRICED, 0, 3, False), None, "map"),
+    "concentration_weight": ((PRICED, 0, 10, False), None, "map"),
     "price_adjust_speed": (0.01, 1, "float"),
     "price_floor": (0.01, 1, "float"),
     "price_cap": (1, 100, "float"),
@@ -219,8 +233,15 @@ LIMITS = {
     "productivity": ((GOODS, 0, 1e6, False), None, "map"),
     "asset_return": ((GOODS, 0.0001, 10, False), None, "map"),
     "productivity_growth": ((GOODS, -0.99, 100, False), None, "map"),
-    "labor_buffer_steps": (1, 100000, "int"),
-    "labor_lifetime": (0, 100000, "int"),
+    "labor_saving": ((GOODS, -1, 0.99, False), None, "map"),
+    "labor_share": (0, 1, "float"),
+    "money_weight": (0, 1, "float"),
+    "comfort_steps": (0, 100000, "int"),
+    "participation_floor": (0, 1, "float"),
+    "bargaining_spread": (0, 2, "float"),
+    "efficiency_weights": ((NEEDS, 0, 5, False), None, "map"),
+    "depression_penalty": (0, 1, "float"),
+    "min_efficiency": (0, 1, "float"),
     "productivity_growth_steps": (1, 100000, "int"),
     "min_investment": (0.01, 1e9, "float"),
     "liquidity_units": (0, 1e6, "float"),
@@ -232,7 +253,7 @@ LIMITS = {
     "purchase_min": (1, 10, "float"),
     "purchase_max": (1, 10, "float"),
     "price_mode": (PRICE_MODES, None, "choice"),
-    "fixed_prices": ((RESOURCES, 0, 1e9, False), None, "map"),
+    "fixed_prices": ((PRICED, 0, 1e9, False), None, "map"),
     "death_enabled": (None, None, "bool"),
     "depression_enabled": (None, None, "bool"),
     "depression_factor": (0, 1, "float"),

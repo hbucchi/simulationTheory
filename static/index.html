@@ -101,7 +101,7 @@
             <option value="food">Sort: food</option>
             <option value="water">Sort: water</option>
             <option value="games">Sort: games</option>
-            <option value="labor">Sort: labour</option>
+            <option value="labor">Sort: labour sold</option>
             <option value="urgency">Sort: most urgent need</option>
             <option value="hunger">Sort: hunger</option>
             <option value="thirst">Sort: thirst</option>
@@ -218,14 +218,21 @@
 
       <section class="card report-card span-2">
         <h2 class="card-title">Labour</h2>
-        <p class="card-sub">Units per step (<span class="avg-note"></span>): made by agents, used by assets, expired unused,
-          bought by the government.</p>
+        <p class="card-sub">Units per step (<span class="avg-note"></span>): capacity, used on assets (own + hired),
+          hired by the government, and unused (not offered, or offered but not hired).</p>
         <div id="chart-labor"></div>
       </section>
       <section class="card report-card">
         <h2 class="card-title">Labour summary</h2>
         <p class="card-sub">Totals in this window.</p>
         <div id="table-labor"></div>
+      </section>
+
+      <section class="card report-card span-3">
+        <h2 class="card-title">Workers' condition</h2>
+        <p class="card-sub">Averages over all agents: efficiency (share of capacity they can give), wellbeing, and how much
+          they need a job (0 = not at all, 1 = desperately).</p>
+        <div id="chart-workers"></div>
       </section>
 
       <section class="card report-card span-2">

@@ -69,6 +69,18 @@ class Agent:
         self.assets = {}  # good -> shares of productive assets owned
         self.labor_need = 0.0  # labour its assets use per step at full capacity (Production)
         self.output_capacity = {}  # good -> units its assets make per step when fully staffed
+        # Labour (set each step by the labour market, labor.py).
+        self.labor_capacity = 0.5   # most labour it can give per step when fully efficient
+        self.efficiency = 1.0
+        self.wellbeing = 1.0
+        self.job_need = 0.0
+        self.capacity_now = 0.0     # labor_capacity x efficiency
+        self.offered = 0.0          # capacity offered to the market this step
+        self.asking_wage = 0.0
+        self.labor_available = 0.0  # labour working its assets this step (own + hired)
+        self.labor_sold = 0.0       # labour it sold this step
+        self.labor_bought = 0.0     # labour it hired this step
+        self.employers = {}         # who it worked for this step -> units
         # This step's flows (income, produced, consumed, labour), reset by the World each step.
         self.flow = {"income": 0.0, "produced": {}, "consumed": {}, "labor_made": 0.0, "labor_used": 0.0}
         self.target_id = None
@@ -122,6 +134,11 @@ class Agent:
             "speed": self.speed,
             "assets": dict(self.assets),
             "labor_need": round(self.labor_need, 4),
+            "labor": {"capacity": self.labor_capacity, "efficiency": round(self.efficiency, 3),
+                      "wellbeing": round(self.wellbeing, 3), "job_need": round(self.job_need, 3),
+                      "capacity_now": round(self.capacity_now, 4), "offered": round(self.offered, 4),
+                      "asking_wage": round(self.asking_wage, 2), "sold": round(self.labor_sold, 4),
+                      "bought": round(self.labor_bought, 4), "employers": {k: round(v, 3) for k, v in self.employers.items()}},
             "depressed": self.depressed,
             "inventory": self.inventory.to_dict(),
             "color": self.color,

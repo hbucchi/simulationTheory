@@ -18,7 +18,6 @@ class Navigate(Module):
     2b. stockpiling - not in need, but below its reserve of a resource that is
                    becoming scarce: go to the nearest agent with spare of it.
         restocking  - same, because its stock fell below the floor of its stock band.
-        hiring      - same, for labour its assets need.
     3. meeting   - another agent is seeking this one: walk toward that seeker,
                    so both close the gap and are guaranteed to touch.
     3b. selling  - holds more than the stock cap of a good, or labour beyond what its own
@@ -66,7 +65,7 @@ class Navigate(Module):
                 # Stockpiling: building a reserve because it is getting scarce. Restocking:
                 # back up to the cap after falling below the floor.
                 hoarding = economy.stockpile_shortfall(agent, resource, world.rules, world.scarcity) > 0
-                activity = "hiring" if resource == economy.LABOR else "stockpiling" if hoarding else "restocking"
+                activity = "stockpiling" if hoarding else "restocking"
                 self._go_to(agent, activity, seller, world)
                 return
         seekers = world.seekers_of(agent)

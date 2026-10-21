@@ -30,7 +30,7 @@ const SETUP_SECTIONS = [
   { title: "Prices", hint: "Scarcity: total money ÷ total units × (1 − share of that resource). Fixed: the prices below.", fields: [
     { path: "price_mode", label: "Price rule", kind: "choice", full: true,
       options: [["scarcity", "Scarcity (changes with supply)"], ["fixed", "Fixed prices"]] },
-    ...per(RESOURCES, r => ({ path: `fixed_prices.${r}`, label: `${cap(r)} price`, kind: "float", min: 0, step: 0.01,
+    ...per(PRICED, r => ({ path: `fixed_prices.${r}`, label: r === "labor" ? "Wage" : `${cap(r)} price`, kind: "float", min: 0, step: 0.01,
       enabledWhen: v => v.price_mode === "fixed" })),
   ]},
   { title: "Starting agents", wide: true,
@@ -42,15 +42,25 @@ const SETUP_SECTIONS = [
     { path: "movement", label: "Movement (px)", kind: "spread", whole: true, min: 1, max: 200 },
     { path: "start_needs", label: "Starting needs", kind: "spread", min: 0, max: 1, step: 0.05 },
   ]},
-  { title: "Labour", wide: true, hint: "Labour is the only thing agents make themselves. Food, water and games are only " +
-      "made by assets worked by labour, so agents without assets live by selling labour to owners. Labour expires if it " +
-      "isn't used in production or sold in time, so workers have to keep working.", fields: [
-    { path: "labor_rate", label: "Labour per step", kind: "spread", min: 0, step: 0.05 },
+  { title: "Labour capacity", wide: true, hint: "Labour is the only thing agents make themselves, and it is never stored: " +
+      "each step agents can work up to their capacity (scaled by efficiency) and sell it in the labour market. Anything " +
+      "unsold is lost. Food, water and games are only made by assets worked by labour.", fields: [
+    { path: "labor_capacity", label: "Capacity per step", kind: "spread", min: 0, step: 0.05 },
   ]},
-  { title: "Labour expiry", hint: "Unused labour is lost after this many steps (0 = never). Owners keep a smaller buffer " +
-      "than this so the labour they buy is used before it expires.", fields: [
-    { path: "labor_lifetime", label: "Labour lasts (steps)", kind: "int", min: 0, max: 100000 },
-    { path: "labor_buffer_steps", label: "Owners keep labour for (steps)", kind: "int", min: 1, max: 100000 },
+  { title: "Labour market", hint: "Base wage = labour share × value one unit of labour makes. The wage then follows " +
+      "labour wanted ÷ capacity offered (labour elasticity in Market dynamics). Agents offer more and ask less when they " +
+      "need a job more; healthy agents ask more.", fields: [
+    { path: "labor_share", label: "Labour share of output value", kind: "float", min: 0, max: 1, step: 0.05 },
+    { path: "participation_floor", label: "Offer at least (share of capacity)", kind: "float", min: 0, max: 1, step: 0.05 },
+    { path: "bargaining_spread", label: "Bargaining spread", kind: "float", min: 0, max: 2, step: 0.05 },
+    { path: "money_weight", label: "Need: weight of money (vs needs)", kind: "float", min: 0, max: 1, step: 0.05 },
+    { path: "comfort_steps", label: "Comfortable cash (steps of living)", kind: "int", min: 0, max: 100000 },
+  ]},
+  { title: "Efficiency and wellbeing", hint: "Efficiency = 1 − Σ weight × need − depression penalty (at least the minimum). " +
+      "It scales how much labour an agent can give. Wellbeing uses the same weights and raises its asking wage.", fields: [
+    ...per(NEEDS, n => ({ path: `efficiency_weights.${n}`, label: `${cap(n)} weight`, kind: "float", min: 0, max: 5, step: 0.05 })),
+    { path: "depression_penalty", label: "Depression penalty", kind: "float", min: 0, max: 1, step: 0.05 },
+    { path: "min_efficiency", label: "Minimum efficiency", kind: "float", min: 0, max: 1, step: 0.05 },
   ]},
   { title: "Resource consumption", wide: true, hint: "How fast each need grows per step, and how sleep recovers at rest.", fields: [
     ...per(NEEDS, n => ({ path: `rates.${n}`, label: `${cap(n)} / step`, kind: "spread", min: 0, max: 1, step: 0.001 })),
@@ -84,7 +94,7 @@ const SETUP_SECTIONS = [
       "concentration. Pressure = ((buyers+1) ÷ (sellers+1)) ^ elasticity. Concentration = 1 + weight × C, where C is 0 when the " +
       "sellable supply is spread evenly and 1 when one agent holds it all. Under pressure, each extra unit in a deal costs more.", fields: [
     { path: "demand_pricing_enabled", label: "Prices react to demand and concentration", kind: "bool", full: true },
-    ...per(RESOURCES, r => ({ path: `price_elasticity.${r}`, label: `${cap(r)} elasticity (0 = none)`, kind: "float",
+    ...per(PRICED, r => ({ path: `price_elasticity.${r}`, label: `${cap(r)} elasticity (0 = none)`, kind: "float",
       min: 0, max: 3, step: 0.1, enabledWhen: v => v.demand_pricing_enabled })),
     ...per(RESOURCES, r => ({ path: `concentration_weight.${r}`, label: `${cap(r)} concentration weight`, kind: "float",
       min: 0, max: 10, step: 0.1, enabledWhen: v => v.demand_pricing_enabled })),
@@ -109,6 +119,8 @@ const SETUP_SECTIONS = [
       step: 0.1 })),
     ...per(GOODS, r => ({ path: `productivity_growth.${r}`, label: `${cap(r)}: productivity growth (0.05 = 5%)`,
       kind: "float", min: -0.99, max: 100, step: 0.01 })),
+    ...per(GOODS, r => ({ path: `labor_saving.${r}`, label: `${cap(r)}: labour-saving (0.03 = −3% labour/asset)`,
+      kind: "float", min: -1, max: 0.99, step: 0.01 })),
     { path: "productivity_growth_steps", label: "… every (steps)", kind: "int", min: 1, max: 100000 },
     ...per(GOODS, r => ({ path: `asset_return.${r}`, label: `${cap(r)} asset return (0.01 = 1%)`, kind: "float",
       min: 0.0001, max: 10, step: 0.001, enabledWhen: v => v.investing_enabled })),
@@ -154,7 +166,7 @@ const PRESETS = [
   ["balanced", "Balanced (no shortages)", { rates: { thirst: 0.01 } }],
   // Small stocks: agents need each other (and owners need workers) from the start.
   ["lean", "Lean start (small stocks: lots of trading)", {
-    inventory: { food: 10, water: 10, games: 10, labor: 0 }, stock_cap: 20 }],
+    inventory: { food: 10, water: 10, games: 10 }, stock_cap: 20 }],
   ["spread", "Spread ownership (everyone owns some assets)", { assets: Object.fromEntries(GOODS.map(g =>
     [g, { dist: "uniform", min: 0, max: 2 }])) }],
   ["unequal", "Unequal wealth (1% hold 50% of money)", { money: { dist: "tiered", average: 10000, tiers: EXAMPLE_TIERS } }],
@@ -589,20 +601,15 @@ function renderPreview(r, error) {
       line(text, "short");
     }
   }
-  const supply = avg(r.labor_rate) * n;
+  const supply = avg(r.labor_capacity) * n;
   const jobs = GOODS.reduce((sum, g) => sum + sharesPerAgent(g) * n * r.asset_labor[g], 0);
   line(`Labour: agents make ${supply.toFixed(2)}/step and assets can employ ${jobs.toFixed(2)}/step → ` +
        (supply >= jobs ? `${(supply - jobs).toFixed(2)}/step more work than jobs (labour will be cheap).`
                        : `${(jobs - supply).toFixed(2)}/step more jobs than workers, so assets can't all run.`),
        supply >= jobs ? "" : "short");
-  if (r.labor_lifetime) {
-    line(`Labour expires ${r.labor_lifetime} steps after it is made unless used or sold; owners keep ` +
-         `${r.labor_buffer_steps} steps of their assets' labour.` +
-         (r.labor_buffer_steps >= r.labor_lifetime ? " Their buffer lasts as long as labour does or longer, so some bought labour will expire unused." : ""),
-         r.labor_buffer_steps >= r.labor_lifetime ? "short" : "");
-  } else {
-    line("Labour never expires: workers can save it up instead of selling it.");
-  }
+  line(`Labour is sold each step and never stored; owners first use their own. Over ${r.productivity_growth_steps} steps ` +
+       `each industry needs ${GOODS.map(g => `${g} ${(r.labor_saving[g] * 100).toFixed(0)}%`).join(", ")} less labour per asset ` +
+       `while each unit of labour makes ${GOODS.map(g => `${g} +${(r.productivity_growth[g] * 100).toFixed(0)}%`).join(", ")} more.`);
   const stock = RESOURCES.map(x => avg(r.inventory[x]));
   const needPerStep = Math.max(...GOODS.map(x => avg(r.rates[NEED_FOR[x]]) / r.relief_per_unit));
   const goodsStock = Math.min(...GOODS.map(x => avg(r.inventory[x])));
@@ -646,11 +653,12 @@ function renderPreview(r, error) {
          held ? "" : "short");
   }
 
-  // Starting labour price from the scarcity formula (or the fixed price).
+  // Starting wage: labour share x what one unit of labour makes at starting prices (or the fixed wage).
   const startLaborPrice = () => {
     if (r.price_mode === "fixed") return r.fixed_prices.labor;
     const units = RESOURCES.reduce((sum, x) => sum + avg(r.inventory[x]), 0);
-    return units ? avg(r.money) / units * (1 - avg(r.inventory.labor) / units) : 0;
+    const price = (x) => units ? avg(r.money) / units * (1 - avg(r.inventory[x]) / units) : 0;
+    return r.labor_share * GOODS.reduce((s, g) => s + r.productivity[g] * price(g), 0) / GOODS.length;
   };
   if (r.gov_min_rate || r.gov_labor_purchase) {
     line(`Government: no asset valued below ${(r.gov_min_rate * 100).toFixed(2)}% per step` +

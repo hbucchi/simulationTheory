@@ -60,7 +60,7 @@ def agent_values(world):
     asset_prices = world.asset_prices(prices)
     rows = []
     for a in world.agents:
-        goods = sum(a.inventory.amount(r) * prices[r] for r in economy.RESOURCES)
+        goods = sum(a.inventory.amount(r) * prices[r] for r in economy.GOODS)
         assets = sum(shares * asset_prices[g] for g, shares in a.assets.items())
         rows.append({"agent": a, "money": a.money, "assets": assets, "wealth": a.money + goods + assets})
     return rows
@@ -76,9 +76,7 @@ class Recorder:
     def begin_step(self, world):
         for a in world.agents:
             a.flow = new_flow()
-        self.step_counts = {"deaths": 0, "goods_deals": 0, "labor_deals": 0,
-                            "expired": 0.0, "asset_trades_before": world.asset_trades,
-                            "gov_labor_before": world.government.labor_bought}
+        self.step_counts = {"deaths": 0, "goods_deals": 0, "asset_trades_before": world.asset_trades}
 
     def count(self, key, amount=1):
         self.step_counts[key] = self.step_counts.get(key, 0) + amount
@@ -103,12 +101,20 @@ class Recorder:
             "top10_wealth": top_share([r["wealth"] for r in rows]),
             "produced": {g: sum(f["produced"].get(g, 0) for f in flows) for g in economy.GOODS},
             "consumed": {g: sum(f["consumed"].get(g, 0) for f in flows) for g in economy.GOODS},
-            "labor_made": sum(f["labor_made"] for f in flows),
-            "labor_used": sum(f["labor_used"] for f in flows),
-            "labor_expired": sc["expired"],
-            "labor_gov": world.government.labor_bought - sc["gov_labor_before"],
+            # Labour: capacity (after efficiency), used on assets (own + hired), hired by the
+            # government, unused (nobody bought it), and the wage.
+            "labor_made": world.labor.stats["capacity"],
+            "labor_used": world.labor.stats["own_use"] + world.labor.stats["hired"],
+            "labor_expired": world.labor.stats["unused"],
+            "labor_gov": world.labor.stats["gov_hired"],
+            "labor_offered": world.labor.stats["offered"],
+            "labor_wanted": world.labor.stats["wanted"],
+            "wage": world.labor.wage,
+            "efficiency": (sum(a.efficiency for a in world.agents) / len(world.agents)) if world.agents else 0.0,
+            "wellbeing": (sum(a.wellbeing for a in world.agents) / len(world.agents)) if world.agents else 0.0,
+            "job_need": (sum(a.job_need for a in world.agents) / len(world.agents)) if world.agents else 0.0,
             "goods_deals": sc["goods_deals"],
-            "labor_deals": sc["labor_deals"],
+            "labor_deals": world.labor.stats["hires"],
             "asset_trades": world.asset_trades - sc["asset_trades_before"],
             "gov_money": world.government.last_spent,
         })
@@ -143,7 +149,7 @@ def build_report(world, window=None):
     steps = len(history) or 1
     first, last = (history[0], history[-1]) if history else ({}, {})
     price_stats = {}
-    for r in economy.RESOURCES:
+    for r in economy.PRICED:
         values = [s["prices"][r] for s in history] or [0]
         start = first.get("prices", {}).get(r, 0)
         now = world.current_prices()[r]

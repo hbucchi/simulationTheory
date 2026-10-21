@@ -46,7 +46,8 @@ const ui = {
 const DOT_RADIUS = 6;
 const NEEDS = ["hunger", "sleep", "thirst", "boredom"];
 const GOODS = ["food", "water", "games"];   // consumed for needs; made only by assets
-const RESOURCES = [...GOODS, "labor"];      // everything held and traded
+const RESOURCES = GOODS;                    // what agents hold and trade face to face
+const PRICED = [...GOODS, "labor"];         // everything with a price (labour's is the wage)
 const NEED_FOR = { food: "hunger", water: "thirst", games: "boredom" };
 const cap = (w) => w[0].toUpperCase() + w.slice(1);
 const getPath = (obj, path) => path.split(".").reduce((o, k) => o?.[k], obj);
@@ -126,7 +127,7 @@ const FIELD_GROUPS = [
   { legend: "Inventory", fields: RESOURCES.map(r => (
     { path: `inventory.${r}`, label: cap(r), min: 0, step: 1, get: a => a.inventory[r] ?? 0 }))},
   { legend: "Labour", fields: [
-    { path: "labor_rate", label: "Labour made per step", min: 0, step: 0.05, get: a => a.modules.Production.labor_rate }]},
+    { path: "labor_capacity", label: "Labour capacity per step", min: 0, step: 0.05, get: a => a.labor.capacity }]},
   { legend: "Assets owned (shares; 1 = one whole asset)", fields: GOODS.map(r => (
     { path: `assets.${r}`, label: cap(r), min: 0, step: 0.01, get: a => +(a.assets[r] ?? 0).toFixed(4) }))},
 ];
@@ -356,13 +357,40 @@ function renderMarket() {
       `${m.asset_trades} trades between agents (${m.asset_trade_money.toFixed(2)} money)`;
     inv.title = "Asset price = output per step × resource price ÷ return. Assets only change hands between agents.";
     ui.market.append(inv);
-    const work = document.createElement("div");
-    work.className = "market-title invest";
-    work.textContent = `Labour · agents make ${m.labor_supply.toFixed(2)}/step · assets can employ ` +
-      `${m.labor_need.toFixed(2)}/step → ${m.labor_supply >= m.labor_need ? "more workers than jobs" : "more jobs than workers"}` +
-      (state.rules.labor_lifetime ? ` · ${m.labor_expired.toFixed(0)} expired unused so far` : "");
-    ui.market.append(work);
   }
+  renderLaborCard();
+}
+
+// Labour market: wage, capacity offered vs labour wanted, who got hired, workers' condition.
+function renderLaborCard() {
+  const L = state.market.labor;
+  const agents = state.agents;
+  const avg = (fn) => agents.length ? agents.reduce((s, a) => s + fn(a), 0) / agents.length : 0;
+  const card = document.createElement("div");
+  card.className = "labor-card";
+  const head = document.createElement("div");
+  head.className = "labor-head";
+  const name = Object.assign(document.createElement("span"), { className: "res-name", textContent: "Labour market" });
+  const wage = Object.assign(document.createElement("b"), { textContent: L.wage.toFixed(2) });
+  const unit = Object.assign(document.createElement("span"), { className: "unit", textContent: "wage per unit" });
+  head.append(name, wage, unit);
+  const rows = [
+    ["Wage", `base ${L.base_wage.toFixed(2)} × ${L.multiplier.toFixed(2)} (labour wanted ÷ offered → ${L.pressure.toFixed(2)})`],
+    ["Capacity", `${L.capacity.toFixed(2)}/step · own assets ${L.own_use.toFixed(2)} · offered ${L.offered.toFixed(2)}`],
+    ["Jobs", `${L.wanted.toFixed(2)} wanted · ${L.hired.toFixed(2)} hired (${L.workers_hired} workers)` +
+      (L.gov_hired ? ` · government ${L.gov_hired.toFixed(2)}` : "")],
+    ["Unused", `${L.unused.toFixed(2)}/step: ${L.withheld.toFixed(2)} not offered (no need to work) · ` +
+      `${L.idle.toFixed(2)} offered but not hired`],
+    ["Workers", `efficiency ${avg(a => a.labor.efficiency).toFixed(2)} · wellbeing ${avg(a => a.labor.wellbeing).toFixed(2)} · ` +
+      `need for a job ${avg(a => a.labor.job_need).toFixed(2)}`],
+  ];
+  const list = document.createElement("dl");
+  for (const [k, v] of rows) {
+    list.append(Object.assign(document.createElement("dt"), { textContent: k }),
+                Object.assign(document.createElement("dd"), { textContent: v }));
+  }
+  card.append(head, list);
+  ui.market.append(card);
 }
 
 // ---------- Overview: search, filter and sort agents ----------
@@ -378,6 +406,7 @@ const SORT_VALUE = {
   assets: a => GOODS.reduce((sum, r) => sum + (a.assets?.[r] || 0), 0),
   urgency: a => Math.max(...NEEDS.map(n => a.needs[n])),
   ...Object.fromEntries(RESOURCES.map(r => [r, a => a.inventory[r] ?? 0])),
+  labor: a => a.labor.sold,
   ...Object.fromEntries(NEEDS.map(n => [n, a => a.needs[n]])),
 };
 
@@ -493,7 +522,7 @@ function renderAgents() {
       stats.append(label, bar, val);
     }
 
-    const laborRate = a.modules.Production?.labor_rate ?? 0;
+    const lab = a.labor;
     const meta = document.createElement("div");
     meta.className = "meta";
     const fields = [
@@ -533,8 +562,13 @@ function renderAgents() {
       : a.activity === "searching" ? `searching: nobody has ${a.wants.join(" or ")} to sell`
       : a.activity;
     const owned = GOODS.filter(g => a.assets[g]);
-    const prod = `labour ${laborRate.toFixed(2)}/step` + (owned.length
-      ? ` · assets employ ${a.labor_need.toFixed(2)} labour/step` : " · no assets: lives by selling labour");
+    const worked = Object.entries(lab.employers).map(([who, u]) => `${u.toFixed(2)} for ${who}`).join(", ");
+    const prod = `labour ${lab.capacity_now.toFixed(2)}/step (capacity ${lab.capacity.toFixed(2)} × efficiency ` +
+      `${lab.efficiency.toFixed(2)}) · wellbeing ${lab.wellbeing.toFixed(2)} · need for a job ${lab.job_need.toFixed(2)}` +
+      (lab.offered ? ` · offers ${lab.offered.toFixed(2)} at ${lab.asking_wage.toFixed(2)}` : "") +
+      (worked ? ` · worked ${worked}` : "") +
+      (owned.length ? ` · its assets employ ${a.labor_need.toFixed(2)}/step` +
+        (lab.bought ? ` (hired ${lab.bought.toFixed(2)})` : "") : "");
     activity.append(act);
     if (a.depressed) {
       const sad = document.createElement("b");
@@ -542,7 +576,7 @@ function renderAgents() {
       sad.textContent = "depressed";
       activity.append(" · ", sad);
     }
-    activity.append(` · makes ${prod}`);
+    activity.append(` · ${prod}`);
 
     card.append(head, stats, meta, activity);
     ui.agents.append(card);
@@ -601,7 +635,7 @@ function renderGovernment() {
   const m = state.market;
   const stats = [
     ["Policy rate", `${(g.min_rate * 100).toFixed(2)}%`, "minimum return on assets"],
-    ["Labour bought", `${g.labor_purchase} / step`, "with newly created money"],
+    ["Labour hired", `${g.labor_purchase} / step`, "with newly created money"],
     ["Money created", g.money_created.toFixed(1), `${g.last_spent.toFixed(2)} in the last step`],
     ["Labour used up", g.labor_bought.toFixed(1), "in public works so far"],
     ["Money in the economy", m.money.toFixed(1), "held by agents"],
@@ -701,7 +735,7 @@ function refreshForm(force = false) {
 
 // New agents start from the game's rules (set on the setup screen). A rule that is a
 // distribution shows blank: the server draws a value from it.
-const RULE_BACKED = ["inventory", "assets", "labor_rate", "rates", "money", "sleep_recovery", "movement"];
+const RULE_BACKED = ["inventory", "assets", "labor_capacity", "rates", "money", "sleep_recovery", "movement"];
 function defaultValue(path) {
   if (!RULE_BACKED.includes(path.split(".")[0])) return "";  // name, x, y, needs: server picks
   const spec = getPath(state.rules, path);
@@ -762,8 +796,8 @@ function updateBalance() {
     line.textContent = `${r}: uses ${used.toFixed(3)} · its assets make ${made.toFixed(3)} per step when staffed → ${verdict}`;
     ui.balance.append(line);
   }
-  const jobs = GOODS.reduce((sum, g) => sum + fieldValue(`assets.${g}`) * state.rules.asset_labor[g], 0);
-  const work = fieldValue("labor_rate");
+  const jobs = GOODS.reduce((sum, g) => sum + fieldValue(`assets.${g}`) * state.market.asset_labor[g], 0);
+  const work = fieldValue("labor_capacity");
   const labourLine = document.createElement("span");
   labourLine.textContent = `labour: makes ${work.toFixed(3)} · its assets employ ${jobs.toFixed(3)} per step → ` +
     (work >= jobs ? `sells ${(work - jobs).toFixed(3)}/step` : `hires ${(jobs - work).toFixed(3)}/step`);

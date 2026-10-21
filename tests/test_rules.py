@@ -90,7 +90,7 @@ class DistributionTests(unittest.TestCase):
 class RulesTests(unittest.TestCase):
     def test_partial_rules_keep_defaults(self):
         rules = Rules.from_dict({"inventory": {"water": 5}, "rates": {"thirst": 0.02}})
-        self.assertEqual(rules.inventory, {"food": 100, "water": 5, "games": 100, "labor": 0})
+        self.assertEqual(rules.inventory, {"food": 100, "water": 5, "games": 100})
         self.assertEqual(rules.rates["hunger"], 0.01)
 
     def test_invalid_rules_are_rejected(self):
@@ -98,9 +98,9 @@ class RulesTests(unittest.TestCase):
                              ({"gravity": 1}, "unknown rule"),
                              ({"price_mode": "auction"}, "price_mode must be one of"),
                              ({"death_enabled": "yes"}, "true or false"),
-                             ({"labor_rate": -1}, "between"),
+                             ({"labor_capacity": -1}, "between"),
                              ({"purchase_min": 3, "purchase_max": 2}, "purchase_min can't be larger"),
-                             ({"labor_rate": {"dist": "tiered", "average": 1,
+                             ({"labor_capacity": {"dist": "tiered", "average": 1,
                                               "tiers": [{"agents": 100, "share": 100}]}},
                               "dist must be one of uniform, normal")]:
             with self.assertRaisesRegex(ValueError, message):
@@ -109,13 +109,13 @@ class RulesTests(unittest.TestCase):
     def test_world_draws_each_agent_from_the_spreads(self):
         rules = Rules.from_dict({
             "agents": 200,
-            "labor_rate": {"dist": "normal", "mean": 10, "std": 6, "limit": 3, "skew": 4},
+            "labor_capacity": {"dist": "normal", "mean": 10, "std": 6, "limit": 3, "skew": 4},
             "money": {"dist": "normal", "mean": 100, "std": 20, "limit": 3, "skew": 0},
             "movement": 7,
         })
         world = World(seed=2, rules=rules)
         world.spawn_random_agents()
-        labor = [next(m.labor_rate for m in a.modules if hasattr(m, "labor_rate")) for a in world.agents]
+        labor = [a.labor_capacity for a in world.agents]
         money = [a.money for a in world.agents]
         self.assertEqual(len(world.agents), 200)
         self.assertTrue(all(0 <= x <= 28 for x in labor))   # mean 10 +- 3 std, never below 0

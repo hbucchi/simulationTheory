@@ -25,12 +25,15 @@ class RecorderTests(unittest.TestCase):
     def test_snapshot_counts_production_consumption_and_income(self):
         world = World(seed=1, rules=Rules.from_dict({"investing_enabled": False, "selling_enabled": False,
                                                      "assets": {"food": 0, "water": 0, "games": 0},
-                                                     "asset_labor": {"food": 1}}))
-        owner = world.create_agent(needs={**CALM, "hunger": 0.6}, rates=CALM, labor_rate=1, assets={"food": 1},
-                                   inventory={"food": 0, "water": 50, "games": 50, "labor": 0})
+                                                     "asset_labor": {"food": 1},
+                                                     "labor_saving": {"food": 0, "water": 0, "games": 0},
+                                                     "efficiency_weights": {"hunger": 0, "thirst": 0, "sleep": 0,
+                                                                            "boredom": 0}}))
+        owner = world.create_agent(needs={**CALM, "hunger": 0.6}, rates=CALM, labor_capacity=1, assets={"food": 1},
+                                   inventory={"food": 0, "water": 50, "games": 50})
         world.step()
         snap = world.recorder.history[-1]
-        self.assertEqual(snap["produced"]["food"], 1)          # 1 labour x productivity 1
+        self.assertEqual(snap["produced"]["food"], 1)          # its own 1 labour x productivity 1
         self.assertEqual(snap["consumed"]["food"], 1)          # hungry: ate it straight away
         self.assertAlmostEqual(snap["labor_made"], 1)
         self.assertAlmostEqual(snap["labor_used"], 1)
@@ -49,7 +52,7 @@ class RecorderTests(unittest.TestCase):
         self.assertEqual(report["totals"]["steps"], 100)
         self.assertEqual(report["totals"]["from_tick"], 51)
         self.assertEqual(len(report["series"]), 100)
-        self.assertEqual(set(report["prices"]), set(economy.RESOURCES))
+        self.assertEqual(set(report["prices"]), set(economy.PRICED))
         self.assertLessEqual(len(report["top_agents"]), 5)
         self.assertEqual(len(build_report(world)["series"]), 150)
         for key in ("gini_money", "gini_assets", "gini_wealth"):

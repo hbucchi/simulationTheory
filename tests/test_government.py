@@ -27,31 +27,31 @@ class MinimumRateTests(unittest.TestCase):
 
 
 class LabourPurchaseTests(unittest.TestCase):
-    def test_buys_spare_labour_with_new_money(self):
-        world = world_with(gov_labor_purchase=3, labor_rate=0, **FIXED)
-        workers = [world.create_agent(needs=CALM, money=0, inventory={"labor": 2}) for _ in range(3)]
-        world.government.buy_labor(world)
-        self.assertAlmostEqual(sum(w.inventory.amount("labor") for w in workers), 3)   # 6 held, 3 bought
-        self.assertAlmostEqual(sum(w.money for w in workers), 6)                       # 3 units x price 2
-        self.assertAlmostEqual(world.government.money_created, 6)
+    def test_hires_spare_capacity_with_new_money(self):
+        world = world_with(gov_labor_purchase=3, **FIXED)
+        workers = [world.create_agent(needs=CALM, money=0, labor_capacity=2) for _ in range(3)]
+        world.labor.clear(world)
         self.assertAlmostEqual(world.government.labor_bought, 3)
+        self.assertAlmostEqual(sum(w.money for w in workers), world.government.money_created)
+        self.assertGreater(world.government.money_created, 0)
 
-    def test_buys_only_what_is_on_offer(self):
-        world = world_with(gov_labor_purchase=10, labor_rate=0, **FIXED)
-        world.create_agent(needs=CALM, money=0, inventory={"labor": 2})
-        world.government.buy_labor(world)
-        self.assertAlmostEqual(world.government.labor_bought, 2)
+    def test_hires_only_what_is_on_offer(self):
+        world = world_with(gov_labor_purchase=10, **FIXED)
+        world.create_agent(needs=CALM, money=0, labor_capacity=1)
+        world.labor.clear(world)
+        self.assertLessEqual(world.government.labor_bought, 1)
 
     def test_injection_grows_the_money_supply(self):
-        world = World(seed=2, rules=Rules.from_dict({"agents": 10, "gov_labor_purchase": 1}))
+        # No assets: no employers, so the government hires spare capacity every step.
+        world = World(seed=2, rules=Rules.from_dict({"agents": 10, "gov_labor_purchase": 1,
+                                                     "assets": {"food": 0, "water": 0, "games": 0}}))
         world.spawn_random_agents()
         start = sum(a.money for a in world.agents)
         for _ in range(100):
             world.step()
-        alive_money = sum(a.money for a in world.agents)
         self.assertGreater(world.government.money_created, 0)
         if len(world.agents) == 10:
-            self.assertAlmostEqual(alive_money, start + world.government.money_created, places=6)
+            self.assertAlmostEqual(sum(a.money for a in world.agents), start + world.government.money_created, places=6)
 
     def test_off_by_default(self):
         world = World(seed=2, rules=Rules.from_dict({"agents": 5}))

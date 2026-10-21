@@ -21,7 +21,7 @@ Agent fields: name, x, y, movement, money,
               needs      {hunger, sleep, thirst, boredom: 0..1}   current levels
               rates      {hunger, sleep, thirst, boredom: 0..1}   growth per step
               inventory  {food, water, games: int >= 0}
-              labor_rate >= 0                                     labour made per step
+              labor_capacity >= 0                                 most labour it can give per step
               assets     {food, water, games: >= 0}              shares of productive assets owned
               sleep_recovery  0..1                              sleep recovered per step at rest
 """
@@ -153,7 +153,7 @@ def parse_agent_config(body):
         config["name"] = name
     for key, low, high, whole in (("x", 0, world_size, False), ("y", 0, world_size, False),
                                   ("money", 0, 1e12, False), ("movement", 1, MAX_MOVEMENT, True),
-                                  ("sleep_recovery", 0, 1, False), ("labor_rate", 0, 1e6, False)):
+                                  ("sleep_recovery", 0, 1, False), ("labor_capacity", 0, 1e6, False)):
         if body.get(key) is not None:
             config[key] = _number(body[key], key, low, high, whole)
     return {k: v for k, v in config.items() if v is not None}

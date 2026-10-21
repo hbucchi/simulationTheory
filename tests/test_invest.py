@@ -10,11 +10,13 @@ FIXED = {"price_mode": "fixed", "demand_pricing_enabled": False, "fixed_prices":
 
 
 def world_with(**rules):
-    return World(seed=1, rules=Rules.from_dict({"assets": NO_ASSETS, **rules}))
+    # No labour-saving unless a test asks for it: these tests are about output and prices.
+    return World(seed=1, rules=Rules.from_dict({"assets": NO_ASSETS, "labor_saving": {"food": 0, "water": 0, "games": 0},
+                                                **rules}))
 
 
 class AssetTests(unittest.TestCase):
-    def test_productivity_grows_by_the_rate_over_the_period(self):
+    def test_productivity_grows_by_the_rate_over_the_period(self):  # labour per asset fixed here  # labour per asset fixed here
         world = world_with(asset_labor={"food": 1}, productivity_growth={"food": 0.05}, productivity_growth_steps=50)
         for _ in range(50):
             world.grow_assets()
@@ -24,44 +26,47 @@ class AssetTests(unittest.TestCase):
         self.assertAlmostEqual(world.asset_output("food", 1), 1.1025)     # compounding
         self.assertAlmostEqual(world.asset_output("food", 0.5), 0.55125)
 
-    def test_asset_price_is_output_times_commodity_price_over_return(self):
-        world = world_with(asset_labor={"food": 1}, asset_return={"food": 0.01}, **FIXED)
-        self.assertAlmostEqual(world.asset_prices()["food"], 100)          # 1 unit/step x 1 / 1%
+    def test_asset_price_is_profit_over_return(self):
+        world = world_with(asset_labor={"food": 1}, asset_return={"food": 0.01}, price_mode="fixed",
+                           demand_pricing_enabled=False, fixed_prices={"food": 1, "water": 1, "games": 1, "labor": 0.5})
+        world.labor.clear(world)                                          # sets the wage (fixed at 0.5)
+        self.assertAlmostEqual(world.asset_prices()["food"], 50)          # (1 x 1 - 1 x 0.5) / 1%
         world.rules.fixed_prices["food"] = 2
-        self.assertAlmostEqual(world.asset_prices()["food"], 200)          # commodity dearer -> asset dearer
+        self.assertAlmostEqual(world.asset_prices()["food"], 150)         # good dearer -> asset dearer
         for _ in range(50):
             world.grow_assets()
-        self.assertAlmostEqual(world.asset_prices()["food"], 210)          # output grew 5%
+        self.assertAlmostEqual(world.asset_prices()["food"], 160)         # productivity +5%: 1.05 x 2 - 0.5
+        world.rules.fixed_prices["labor"] = 5
+        world.labor.clear(world)
+        self.assertEqual(world.asset_prices()["food"], 0)                  # loses money: worth nothing
 
     def test_assets_produce_units_each_step(self):
         world = world_with(investing_enabled=False, selling_enabled=False, asset_labor={"food": 0.5},
                            productivity_growth={"food": 0, "water": 0, "games": 0})
-        agent = world.create_agent(inventory=NO_ASSETS, needs=CALM, rates=CALM,
+        agent = world.create_agent(inventory=NO_ASSETS, needs=CALM, rates=CALM, labor_capacity=1,
                                    assets={"food": 1})
         for _ in range(10):
             world.step()
-        self.assertEqual(agent.inventory.count("food"), 5)
+        self.assertEqual(agent.inventory.count("food"), 5)            # its own labour: 0.5 unit per step
         self.assertEqual(agent.inventory.count("water"), 0)
 
     def test_assets_need_labour(self):
-        world = world_with(investing_enabled=False, selling_enabled=False, asset_labor={"food": 1}, labor_lifetime=0,
+        world = world_with(investing_enabled=False, selling_enabled=False, asset_labor={"food": 1},
                            productivity_growth={"food": 0, "water": 0, "games": 0})
-        idle = world.create_agent(inventory={"food": 0}, needs=CALM, rates=CALM, labor_rate=0, assets={"food": 1})
-        half = world.create_agent(inventory={"food": 0}, needs=CALM, rates=CALM, labor_rate=0.5, assets={"food": 1})
-        hired = world.create_agent(inventory={"food": 0, "labor": 10}, needs=CALM, rates=CALM, labor_rate=0,
-                                   assets={"food": 1})
+        idle = world.create_agent(inventory={"food": 0}, needs=CALM, rates=CALM, labor_capacity=0, money=0,
+                                  assets={"food": 1})
+        half = world.create_agent(inventory={"food": 0}, needs=CALM, rates=CALM, labor_capacity=0.5, money=0,
+                                  assets={"food": 1})
         for _ in range(10):
             world.step()
-        self.assertEqual(idle.inventory.count("food"), 0)      # no labour, no output
-        self.assertEqual(half.inventory.count("food"), 5)      # half the labour it can employ
-        self.assertEqual(hired.inventory.count("food"), 10)    # 10 bought labour used up
-        self.assertEqual(hired.inventory.count("labor"), 0)
-        self.assertEqual(hired.labor_need, 1)
+        self.assertEqual(idle.inventory.count("food"), 0)      # no labour (and no money to hire): no output
+        self.assertEqual(half.inventory.count("food"), 5)      # half the labour its asset can employ
+        self.assertEqual(half.labor_need, 1)
 
     def test_productivity_raises_output_per_labour(self):
         world = world_with(investing_enabled=False, selling_enabled=False, asset_labor={"food": 1},
                            productivity={"food": 2}, productivity_growth={"food": 0, "water": 0, "games": 0})
-        agent = world.create_agent(inventory={"food": 0, "labor": 5}, needs=CALM, rates=CALM, labor_rate=0,
+        agent = world.create_agent(inventory={"food": 0}, needs=CALM, rates=CALM, labor_capacity=1,
                                    assets={"food": 1})
         for _ in range(5):
             world.step()
@@ -87,14 +92,14 @@ class InvestTests(unittest.TestCase):
         poor = world.create_agent(money=0, needs=CALM, assets={"food": 1}, x=900, y=900)
         rich = world.create_agent(money=500, needs=CALM, assets={"food": 1}, x=500, y=900)
         Invest().on_step(investor, world)
-        # Cash kept: 3 units of food, water, games and labour at 1 = 12. 37 spare, but the only
-        # seller is 12 short: it sells 0.12 for 12. Nothing is created.
-        self.assertAlmostEqual(investor.assets["food"], 0.12)
-        self.assertAlmostEqual((poor.assets["food"], poor.money), (0.88, 12))
-        self.assertAlmostEqual(investor.money, 37)
+        # Cash kept: 3 units of food, water and games at 1 = 9. 40 spare, but the only
+        # seller is 9 short: it sells 0.09 for 9. Nothing is created.
+        self.assertAlmostEqual(investor.assets["food"], 0.09)
+        self.assertAlmostEqual((poor.assets["food"], poor.money), (0.91, 9))
+        self.assertAlmostEqual(investor.money, 40)
         self.assertEqual(rich.assets["food"], 1)
         self.assertAlmostEqual(sum(a.assets.get("food", 0) for a in world.agents), 2)   # still 2 assets
-        self.assertIn("0.12 from", world.events[-1]["message"])
+        self.assertIn("0.09 from", world.events[-1]["message"])
 
     def test_no_seller_means_no_purchase(self):
         world = self.market()

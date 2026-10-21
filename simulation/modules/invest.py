@@ -94,7 +94,7 @@ def transfer_shares(seller, buyer, resource, shares):
 
 def cash_needed(agent, prices, rules):
     """Money an agent wants on hand: its liquidity plus the cost of what it needs to buy now."""
-    liquidity = rules.liquidity_units * sum(prices.values())
+    liquidity = rules.liquidity_units * sum(prices[g] for g in economy.GOODS)
     shopping = sum(economy.demand(agent, r, rules) * prices[r] for r in economy.RESOURCES)
     return liquidity + shopping
 

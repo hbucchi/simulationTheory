@@ -5,7 +5,7 @@ Need scale reminder: 0.00 = satisfied, 1.00 = desperate.
 
 import math
 
-from .rules import DEFAULT_RULES, GOODS, LABOR, RESOURCES
+from .rules import DEFAULT_RULES, GOODS, LABOR, PRICED, RESOURCES
 
 # Which need each good relieves. Sleep is recovered by resting (modules/rest.py). Labour
 # relieves no need: it is bought by asset owners to make goods.
@@ -94,24 +94,13 @@ def is_needy(agent, rules=DEFAULT_RULES):
     return any(getattr(agent, need) > rules.seek_threshold for need in NEED_FOR_RESOURCE.values())
 
 
-def labor_target(agent, rules=DEFAULT_RULES):
-    """Labour an owner wants on hand: labor_buffer_steps steps of what its assets use."""
-    return math.ceil(round(agent.labor_need * rules.labor_buffer_steps, 9))
-
-
 def need_level(agent, resource):
     """How strong the need behind ``resource`` is (0 for labour, which has none)."""
     return getattr(agent, NEED_FOR_RESOURCE[resource]) if resource in NEED_FOR_RESOURCE else 0.0
 
 
 def demand(agent, resource, rules=DEFAULT_RULES):
-    """Units the agent wants to buy: enough to drop the need below the target, minus stock.
-
-    For labour: once its labour falls below half its labour target, enough to refill it.
-    """
-    if resource == LABOR:
-        target, stock = labor_target(agent, rules), agent.inventory.count(LABOR)
-        return target - stock if stock < target / 2 else 0
+    """Units the agent wants to buy: enough to drop the need below the target, minus stock."""
     level = getattr(agent, NEED_FOR_RESOURCE[resource])
     if level <= rules.seek_threshold:
         return 0
@@ -156,12 +145,7 @@ def restock_shortfall(agent, resource, rules=DEFAULT_RULES):
 
 
 def surplus(agent, resource, rules=DEFAULT_RULES, scarcity=None):
-    """Units above the stock cap (and above any reserve) that the agent goes out to sell.
-
-    Labour: everything beyond what its own assets will need, so workers always offer work.
-    """
-    if resource == LABOR:
-        return spare(agent, LABOR, rules)
+    """Units above the stock cap (and above any reserve) that the agent goes out to sell."""
     if not rules.selling_enabled:
         return 0
     keep = max(rules.stock_cap, stockpile_target(agent, resource, rules, scarcity),
@@ -180,19 +164,14 @@ def stockpile_shortfall(agent, resource, rules=DEFAULT_RULES, scarcity=None):
 
 
 def wants_anything(agent, rules=DEFAULT_RULES, scarcity=None):
-    """Needs something now, is below a stockpile reserve or its stock floor, or needs labour."""
-    return (is_needy(agent, rules) or demand(agent, LABOR, rules) > 0
+    """Needs something now, or is below a stockpile reserve or its stock floor."""
+    return (is_needy(agent, rules)
             or any(stockpile_shortfall(agent, r, rules, scarcity) or restock_shortfall(agent, r, rules)
                    for r in RESOURCES))
 
 
 def spare(agent, resource, rules=DEFAULT_RULES, scarcity=None):
-    """Units the agent can give away without hurting its needs, its reserve or its stock floor.
-
-    Labour: anything beyond the labour target of its own assets.
-    """
-    if resource == LABOR:
-        return max(0, agent.inventory.count(LABOR) - labor_target(agent, rules))
+    """Units the agent can give away without hurting its needs, its reserve or its stock floor."""
     reserve = max(units_to_satisfy(need_level(agent, resource), rules),
                   stockpile_target(agent, resource, rules, scarcity), math.ceil(stock_floor(rules)))
     return max(0, agent.inventory.count(resource) - reserve)
@@ -210,8 +189,7 @@ def _settle_one(buyer, seller, buying, prices, rules, scarcity=None, money_only=
     if money_only:
         return (None, price) if buyer.money >= price else None
     needed_by_seller = [r for r in RESOURCES if r != buying and demand(seller, r, rules) > 0]
-    # Labour is only offered to a seller that needs it: anyone else would just watch it expire.
-    others = [r for r in RESOURCES if r != buying and r not in needed_by_seller and r != LABOR]
+    others = [r for r in RESOURCES if r != buying and r not in needed_by_seller]
     for option in needed_by_seller + ["money"] + others:
         if option == "money":
             if buyer.money >= price:
@@ -235,8 +213,6 @@ def purchase_goal(buyer, resource, rules, rng=None):
     """
     if not demand(buyer, resource, rules):
         return 0
-    if resource == LABOR:
-        return labor_target(buyer, rules)   # refill the buffer; no stocking-up multiplier
     needed = units_to_satisfy(getattr(buyer, NEED_FOR_RESOURCE[resource]), rules)
     multiplier = rng.uniform(rules.purchase_min, rules.purchase_max) if rng else rules.purchase_min
     return math.ceil(round(needed * multiplier, 9))

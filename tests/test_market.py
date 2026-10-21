@@ -170,7 +170,7 @@ class DemandPricingTests(unittest.TestCase):
     def test_markup_only_applies_where_buyers_outnumber_sellers(self):
         world = self.make_world(thirsty=3, sellers=1)
         world.update_demand()
-        self.assertEqual(world.unit_markups(), {"food": 0, "water": 0.05, "games": 0, "labor": 0})
+        self.assertEqual(world.unit_markups(), {"food": 0, "water": 0.05, "games": 0})
 
 
 if __name__ == "__main__":

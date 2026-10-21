@@ -235,17 +235,17 @@ function renderReport(r) {
     kpi("Wealth inequality", c.gini_wealth.toFixed(2), `Gini · top 10% hold ${fmt.pct(c.top10_wealth)}`),
     kpi("Money inequality", c.gini_money.toFixed(2), "Gini of money held"),
     kpi("Asset concentration", c.gini_assets.toFixed(2), `Gini · ${c.owners} of ${c.population} agents own assets`),
-    kpi("Government money", fmt.money(t.gov_money), `created in this window · ${fmt.num(t.labor_gov, 1)} labour bought`),
+    kpi("Government money", fmt.money(t.gov_money), `created in this window · ${fmt.num(t.labor_gov, 1)} labour hired`),
   );
 
   // Prices.
   lineChart($("chart-prices"), { x, xLabel: "Step", title: "Prices", tipFormat: fmt.money,
-    series: RESOURCES.map((res, i) => ({ label: cap(res), color: SERIES[i], values: s.map(p => p.prices[res]) })) });
-  table($("table-prices"), ["", "Now", "Min", "Avg", "Max", "Change"], RESOURCES.map((res, i) => {
+    series: PRICED.map((res, i) => ({ label: res === "labor" ? "Wage" : cap(res), color: SERIES[i], values: s.map(p => p.prices[res]) })) });
+  table($("table-prices"), ["", "Now", "Min", "Avg", "Max", "Change"], PRICED.map((res, i) => {
     const p = r.prices[res];
     const change = Object.assign(document.createElement("span"), { className: p.change >= 0 ? "up" : "down",
       textContent: fmt.signedPct(p.change) });
-    return [swatchLabel(cap(res), SERIES[i]), fmt.money(p.now), fmt.money(p.min), fmt.money(p.avg), fmt.money(p.max), change];
+    return [swatchLabel(res === "labor" ? "Wage" : cap(res), SERIES[i]), fmt.money(p.now), fmt.money(p.min), fmt.money(p.avg), fmt.money(p.max), change];
   }));
 
   // Production vs consumption, one small chart per good (same scale for fair comparison).
@@ -266,17 +266,21 @@ function renderReport(r) {
 
   // Labour.
   lineChart($("chart-labor"), { x, xLabel: "Step", title: "Labour per step",
-    series: [{ label: "Made", color: SERIES[0], values: flow(p => p.labor_made) },
-             { label: "Used in production", color: SERIES[1], values: flow(p => p.labor_used) },
-             { label: "Expired", color: SERIES[2], values: flow(p => p.labor_expired) },
-             { label: "Bought by government", color: SERIES[3], values: flow(p => p.labor_gov) }] });
+    series: [{ label: "Capacity", color: SERIES[0], values: flow(p => p.labor_made) },
+             { label: "Used on assets", color: SERIES[1], values: flow(p => p.labor_used) },
+             { label: "Unused", color: SERIES[2], values: flow(p => p.labor_expired) },
+             { label: "Hired by government", color: SERIES[3], values: flow(p => p.labor_gov) }] });
   const made = t.labor_made || 1;
-  table($("table-labor"), ["Labour", "Units", "Share of made"], [
-    ["Made", fmt.num(t.labor_made, 1), "100%"],
-    ["Used in production", fmt.num(t.labor_used, 1), fmt.pct(t.labor_used / made)],
-    ["Expired unused", fmt.num(t.labor_expired, 1), fmt.pct(t.labor_expired / made)],
-    ["Bought by government", fmt.num(t.labor_gov, 1), fmt.pct(t.labor_gov / made)],
+  table($("table-labor"), ["Labour", "Units", "Share of capacity"], [
+    ["Capacity", fmt.num(t.labor_made, 1), "100%"],
+    ["Used on assets", fmt.num(t.labor_used, 1), fmt.pct(t.labor_used / made)],
+    ["Unused (not offered or not hired)", fmt.num(t.labor_expired, 1), fmt.pct(t.labor_expired / made)],
+    ["Hired by government", fmt.num(t.labor_gov, 1), fmt.pct(t.labor_gov / made)],
   ]);
+  lineChart($("chart-workers"), { x, xLabel: "Step", yMax: 1, yFormat: (v) => v.toFixed(2), title: "Workers' condition",
+    series: [{ label: "Efficiency", color: SERIES[0], values: s.map(p => p.efficiency) },
+             { label: "Wellbeing", color: SERIES[1], values: s.map(p => p.wellbeing) },
+             { label: "Need for a job", color: SERIES[2], values: s.map(p => p.job_need) }] });
 
   // Inequality.
   const gFmt = (v) => v.toFixed(2);
@@ -302,7 +306,7 @@ function renderReport(r) {
   // Activity.
   lineChart($("chart-trades"), { x, xLabel: "Step", title: "Trades per step",
     series: [{ label: "Goods deals", color: SERIES[0], values: flow(p => p.goods_deals) },
-             { label: "Labour deals", color: SERIES[1], values: flow(p => p.labor_deals) },
+             { label: "Labour hires", color: SERIES[1], values: flow(p => p.labor_deals) },
              { label: "Asset trades", color: SERIES[2], values: flow(p => p.asset_trades) }] });
   lineChart($("chart-population"), { x, xLabel: "Step", title: "Population",
     yFormat: (v) => `${Math.round(v)}`,

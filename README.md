@@ -132,41 +132,53 @@ sellers, C, an arrow and a price chart.
 
 ### Labour, assets and productivity
 
-**Labour is the only thing agents make themselves** (`labor_rate`, 0.5 per
-step by default). Food, water and games are made **only by assets**, and
-assets need labour:
+**Labour is a capacity, not a stock** (`simulation/labor.py`). Each step every
+agent can work up to `labor_capacity` (0.5 by default) × its efficiency. Labour
+is never stored: it is sold in the labour market that step, and anything nobody
+buys is lost. Food, water and games are made **only by assets**, worked by
+labour:
 
-    output of a good = productivity × min(labour available, shares × jobs per asset)
+    output of a good = productivity × min(labour available, shares × labour per asset)
 
-- One asset share can employ up to `asset_labor` (0.2) labour per step, and
-  each unit of labour makes `productivity` (1.0) units of the good. An asset
-  with no labour makes nothing.
-- Productivity grows by `productivity_growth` (5%) every
-  `productivity_growth_steps` (50) steps, compounding a little each step.
-- By default, for each good 10% of the agents own all its assets (drawn
-  separately per good), so about a quarter of the agents are **owners** and
-  most are **workers** who own nothing and live by selling labour.
-- **Labour expires** `labor_lifetime` (10) steps after it is made unless an
-  asset uses it or it is sold first (0 = never). Each step's labour is its own
-  batch: assets use the oldest first, sellers sell the oldest first, and
-  bought labour keeps its expiry date. So workers without assets have nothing
-  to fall back on unless they keep working and selling (or buy assets).
-- Owners keep labour for `labor_buffer_steps` (5) steps of what their assets
-  can employ and go out **hiring** when they fall below half of that; workers
-  go out **selling** their labour to owners who need it. Using it in
-  production is the only reason anyone buys labour, and labour is only
-  accepted as payment by a seller that needs it. Labour is a
-  tradable resource with its own price (same formula as the goods) but meets
-  no need and has no asset.
+**Labour market (clears once per step, before agents act)**
+- Owners first use their own labour on their own assets; the rest of the jobs
+  their assets offer (full capacity) is what they want to hire.
+- Every agent offers part of its free capacity:
+  `participation_floor + (1 − participation_floor) × need for a job`.
+- Market wage = base × multiplier. Base = `labor_share` (60%) × value one unit
+  of labour makes (units per labour × price of the good). The multiplier moves
+  toward `((labour wanted + 1) / (capacity offered + 1)) ^ labour elasticity`,
+  so more workers offering for the same jobs lower the wage.
+- Each worker asks `wage × (1 + bargaining_spread × (wellbeing − need))`.
+  Employers hire the cheapest workers first and pay cash (keeping enough for
+  their own needs). The government may then hire some of what is left with
+  newly created money.
+
+**Labour capacity module (efficiency, wellbeing, need)**
+- Efficiency = 1 − Σ weight × need level (hunger 0.3, thirst 0.3, sleep 0.2,
+  boredom 0.1) − depression penalty (0.3), at least `min_efficiency` (0.2).
+- Wellbeing = 1 − weighted average of needs − depression penalty.
+- Need for a job = `money_weight` × how far its money is below
+  `comfort_steps` (50) steps of its cost of living + the rest × its most
+  pressing need. Higher need → offers more labour and asks a lower wage.
+
+**Industries get less labour-intensive**: every `productivity_growth_steps`
+(50) steps productivity (units per labour) grows `productivity_growth` (5%) and
+the labour one asset needs falls `labor_saving` (3%).
+
+By default, for each good 10% of the agents own all its assets (drawn
+separately per good), so most agents are **workers** who live by selling
+labour.
 
 ### Investment
 
 - **No assets are created.** The only ones are the starting assets (*Starting
   agents*, any distribution). They only change hands between agents, as
   **shares** (0.5 of a food asset employs half as much labour).
-- **Asset price = full-capacity output per step × current price of the good
-  ÷ return** (1%). A dearer good, or higher productivity, makes its assets
-  dearer.
+- **Asset price = profit per step at full capacity ÷ return** (1%), where
+  profit = output × price of the good − labour × wage, never below 0. A dearer
+  good or higher productivity makes assets dearer; higher wages make them
+  cheaper.
 - Each step an agent keeps cash for what it needs to buy now plus 3 units of
   every resource. Once at least `min_investment` (10) is spare, it buys shares
   of the best-returning asset of a good it **lacks**, from owners that:

@@ -471,3 +471,12 @@ body.setup-open { overflow: hidden; }
 .data-table tr:last-child td { border-bottom: none; }
 .data-table .up, .data-table .down-bad { color: var(--bad); }
 .data-table .down, .data-table .up-good { color: var(--good); }
+
+/* Labour market card */
+.labor-card { background: var(--panel-2); border-radius: var(--radius); padding: 10px 12px; font-size: 12px; }
+.labor-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.labor-head b { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.labor-head .unit { color: var(--faint); font-size: 11px; }
+.labor-card dl { display: grid; grid-template-columns: 70px 1fr; gap: 3px 10px; margin: 0; }
+.labor-card dt { color: var(--faint); }
+.labor-card dd { margin: 0; color: var(--muted); font-variant-numeric: tabular-nums; }
