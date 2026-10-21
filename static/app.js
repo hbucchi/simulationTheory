@@ -328,12 +328,10 @@ function renderMarket() {
   if (state.rules.investing_enabled) {
     const inv = document.createElement("div");
     inv.className = "market-title invest";
-    inv.textContent = `Assets (value · shares · output/step) · ${RESOURCES.map(r =>
-      `${r} ${m.asset_value[r].toFixed(1)} · ${m.assets[r].toFixed(2)} · ${m.asset_output[r].toFixed(2)}`).join(" | ")} · ` +
-      `builder holds ${m.builder_funds.toFixed(2)} (pays out ${(state.rules.builder_payout_rate * 100).toFixed(1)}%/step) · ` +
-      `invested in new ${m.asset_spending.toFixed(0)}, paid back ${m.builder_paid_out.toFixed(0)} · ` +
-      `${m.asset_resales} purchases from other agents (${m.asset_resale_money.toFixed(0)})`;
-    inv.title = "Money paid for assets goes to the builder, which pays it back to all agents as income";
+    inv.textContent = `Assets (price · shares · output/step) · ${RESOURCES.map(r =>
+      `${r} ${m.asset_prices[r].toFixed(2)} · ${m.assets[r].toFixed(2)} · ${m.asset_output[r].toFixed(2)}`).join(" | ")} · ` +
+      `${m.asset_trades} trades between agents (${m.asset_trade_money.toFixed(2)} money)`;
+    inv.title = "Asset price = output per step × resource price ÷ return. Assets only change hands between agents.";
     ui.market.append(inv);
   }
 }
@@ -474,10 +472,10 @@ function renderAgents() {
       ["money", a.money.toFixed(2)],
       ["movement", a.depressed ? `${a.speed} px (depressed, ${a.movement} normally)` : `${a.speed} px`],
       ...RESOURCES.filter(r => a.assets[r]).map(r => {
-        const value = state.market.asset_value[r];
-        return [`${r} assets`, `${a.assets[r].toFixed(2)} (worth ${(a.assets[r] * value).toFixed(0)}, ` +
-          `${(a.assets[r] * value * state.rules.asset_return[r]).toFixed(2)}/step)`,
-          `One whole ${r} asset is worth ${value.toFixed(2)} now`];
+        const price = state.market.asset_prices[r];
+        return [`${r} assets`, `${a.assets[r].toFixed(2)} (worth ${(a.assets[r] * price).toFixed(2)}, ` +
+          `${(a.assets[r] * state.market.asset_output_each[r]).toFixed(2)}/step)`,
+          `One whole ${r} asset costs ${price.toFixed(2)} now`];
       }),
       // Reserve it wants to hold because the resource is becoming scarce.
       ...RESOURCES.filter(r => a.reserve?.[r]).map(r => [`${r} reserve`, a.reserve[r],
@@ -500,6 +498,8 @@ function renderAgents() {
     act.textContent = a.activity === "seeking" && target ? `seeking ${target.name} to buy ${a.seeking_for}`
       : a.activity === "meeting" && target ? `meeting ${target.name}`
       : a.activity === "stockpiling" && target ? `stockpiling ${a.seeking_for} from ${target.name}`
+      : a.activity === "restocking" && target ? `restocking ${a.seeking_for} from ${target.name}`
+      : a.activity === "selling" && target ? `selling ${a.seeking_for} to ${target.name}`
       : a.activity === "searching" ? `searching: nobody has ${a.wants.join(" or ")} to sell`
       : a.activity;
     const prod = RESOURCES.map(r => production[r] ? `${r} 1/${production[r]}` : `${r} –`).join(" · ");
@@ -651,7 +651,7 @@ function updateBalance() {
     const used = fieldValue(`rates.${NEED_FOR[r]}`) / state.rules.relief_per_unit;
     const every = fieldValue(`production.${r}`);
     // Own production plus what its asset shares make at the current asset value.
-    const assetOutput = fieldValue(`assets.${r}`) * state.market.asset_value[r] * state.rules.asset_return[r];
+    const assetOutput = fieldValue(`assets.${r}`) * state.market.asset_output_each[r];
     const made = (every ? 1 / every : 0) + assetOutput;
     const net = made - used;
     const line = document.createElement("span");

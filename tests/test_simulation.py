@@ -7,8 +7,10 @@ from simulation.modules import NeedsDecay, Production
 
 
 def no_invest():
-    """These tests check other mechanics; asset purchases would add log lines and spend money."""
-    return Rules.from_dict({"investing_enabled": False})
+    """These tests check other mechanics: no assets (their output would change needs), no
+    asset purchases (log lines, spent money) and no surplus selling (changes where agents walk)."""
+    return Rules.from_dict({"investing_enabled": False, "selling_enabled": False,
+                            "assets": {"food": 0, "water": 0, "games": 0}})
 
 
 def bare_world():
@@ -78,7 +80,7 @@ class EconomyTests(unittest.TestCase):
         a = Agent(0, 0, thirst=0.8, money=10, inventory=Inventory({"food": 20}))
         b = Agent(0, 0, hunger=0.8, money=10, inventory=Inventory({"water": 20}))
         prices = {"food": 1.0, "water": 1.5, "games": 1.0}
-        economy.trade(a, b, prices)
+        economy.trade(a, b, prices, no_invest())
         # a buys 6 water paying with food (what b needs), topping up 0.5 per unit since
         # water is dearer. That covers b's hunger too, so b buys nothing back.
         self.assertEqual(a.inventory.to_dict(), {"food": 14})
@@ -91,7 +93,7 @@ class EconomyTests(unittest.TestCase):
     def test_trade_falls_back_to_money_at_market_price(self):
         buyer = Agent(0, 0, hunger=0.7, money=10)
         seller = Agent(0, 0, inventory=Inventory({"food": 3}))
-        economy.trade(buyer, seller, {"food": 2.5, "water": 1, "games": 1})
+        economy.trade(buyer, seller, {"food": 2.5, "water": 1, "games": 1}, no_invest())
         self.assertEqual(seller.inventory.count("food"), 0)  # only had 3 of the 5 wanted
         self.assertAlmostEqual(buyer.money, 2.5)
         self.assertAlmostEqual(seller.money, 7.5)
@@ -100,7 +102,7 @@ class EconomyTests(unittest.TestCase):
     def test_buyer_stops_when_it_cannot_afford_more(self):
         buyer = Agent(0, 0, hunger=0.7, money=5)
         seller = Agent(0, 0, inventory=Inventory({"food": 10}))
-        economy.trade(buyer, seller, {"food": 2, "water": 1, "games": 1})
+        economy.trade(buyer, seller, {"food": 2, "water": 1, "games": 1}, no_invest())
         self.assertEqual(buyer.inventory.count("food"), 0)  # bought 2, ate them
         self.assertAlmostEqual(buyer.money, 1)
         self.assertAlmostEqual(buyer.hunger, 0.5)
@@ -108,7 +110,7 @@ class EconomyTests(unittest.TestCase):
     def test_seller_keeps_what_it_needs_itself(self):
         buyer = Agent(0, 0, hunger=0.9, money=100)
         seller = Agent(0, 0, hunger=0.45, inventory=Inventory({"food": 5}))
-        economy.trade(buyer, seller, {"food": 1, "water": 1, "games": 1})
+        economy.trade(buyer, seller, {"food": 1, "water": 1, "games": 1}, no_invest())
         self.assertEqual(seller.inventory.count("food"), 2)  # reserve for 0.45 -> below 0.3
 
 

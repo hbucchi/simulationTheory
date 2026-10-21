@@ -16,8 +16,11 @@ class Navigate(Module):
        searching - same, but nobody has any to sell: keep wandering.
     2b. stockpiling - not in need, but below its reserve of a resource that is
                    becoming scarce: go to the nearest agent with spare of it.
+        restocking  - same, because its stock fell below the floor of its stock band.
     3. meeting   - another agent is seeking this one: walk toward that seeker,
                    so both close the gap and are guaranteed to touch.
+    3b. selling  - holds more than the stock cap of a resource: go to the nearest
+                   agent that wants it and has money, to sell the surplus.
     4. wandering - otherwise: random walk between random points.
     """
 
@@ -50,13 +53,26 @@ class Navigate(Module):
             seller, resource = world.nearest_seller(agent, stockpile=True)
             if seller is not None:
                 agent.seeking_for = resource
-                self._go_to(agent, "stockpiling", seller, world)
+                # Stockpiling: building a reserve because it is getting scarce. Restocking:
+                # back up to the cap after falling below the floor.
+                hoarding = economy.stockpile_shortfall(agent, resource, world.rules, world.scarcity) > 0
+                self._go_to(agent, "stockpiling" if hoarding else "restocking", seller, world)
                 return
-
         seekers = world.seekers_of(agent)
         if seekers:
             self._go_to(agent, "meeting", min(seekers, key=agent.distance_to), world)
             return
+
+        if not needy:
+            for resource in sorted(economy.RESOURCES, reverse=True,
+                                   key=lambda r: economy.surplus(agent, r, world.rules, world.scarcity)):
+                if not economy.surplus(agent, resource, world.rules, world.scarcity):
+                    break
+                buyer = world.nearest_buyer(agent, resource)
+                if buyer is not None:
+                    agent.seeking_for = resource
+                    self._go_to(agent, "selling", buyer, world)
+                    return
 
         agent.activity = "searching" if needy else "wandering"
         agent.target_id = None

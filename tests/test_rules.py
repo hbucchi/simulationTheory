@@ -138,7 +138,7 @@ class RulesTests(unittest.TestCase):
         for seed in range(200):
             buyer = World(seed=seed).create_agent(inventory={"water": 0}, needs={"thirst": 0.8}, money=1000)
             seller = World(seed=seed).create_agent(inventory={"water": 1000}, needs={"thirst": 0})
-            economy.buy(buyer, seller, {"food": 1, "water": 1, "games": 1}, Rules(), random.Random(seed))
+            economy.buy(buyer, seller, {"food": 1, "water": 1, "games": 1}, Rules.from_dict({"selling_enabled": False}), random.Random(seed))
             bought.append(buyer.inventory.count("water"))
         need = economy.units_to_satisfy(0.8)          # 6
         self.assertTrue(all(need <= b <= 3 * need for b in bought))
@@ -148,7 +148,7 @@ class RulesTests(unittest.TestCase):
         buyer = World(seed=1).create_agent(inventory={"water": 0, "food": 0, "games": 0}, needs={"thirst": 0.8},
                                            money=4)  # nothing else to barter with
         seller = World(seed=1).create_agent(inventory={"water": 1000}, needs={"thirst": 0})
-        economy.buy(buyer, seller, {"food": 1, "water": 1, "games": 1}, Rules(), random.Random(1))
+        economy.buy(buyer, seller, {"food": 1, "water": 1, "games": 1}, Rules.from_dict({"selling_enabled": False}), random.Random(1))
         self.assertEqual(buyer.inventory.count("water"), 4)
 
     def test_world_rules_change_mechanics(self):

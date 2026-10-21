@@ -22,7 +22,9 @@ class Rules:
     # Starting agents (spreads)
     agents: int = 3
     inventory: dict = field(default_factory=lambda: {"food": 100, "water": 100, "games": 100})
-    assets: dict = field(default_factory=lambda: {"food": 0, "water": 0, "games": 0})
+    # Starting asset shares: random 0-2 of each, so agents specialise in different resources.
+    assets: dict = field(default_factory=lambda: {r: {"dist": "uniform", "min": 0.0, "max": 2.0}
+                                                   for r in ("food", "water", "games")})
     money: object = 100.0
     movement: object = field(default_factory=lambda: {"dist": "uniform", "min": 5, "max": 25})
     start_needs: object = field(default_factory=lambda: {"dist": "uniform", "min": 0.0, "max": 0.5})
@@ -54,23 +56,30 @@ class Rules:
     stockpile_steps: int = 100
     stockpile_budget: float = 0.5
 
-    # Investment. Each resource has its own asset type. One whole asset is worth
-    # asset_value[r] at the start; its value grows by asset_growth[r] (0.05 = 5%) every
-    # asset_growth_steps steps, compounding a little each step. It produces
-    # value x asset_return[r] units of r per step (worth 100 at 1% -> 1 unit/step).
-    # Agents hold shares (fractions) of assets. They keep cash for their needs plus
-    # liquidity_units of every resource at current prices, and invest the rest once at least
-    # min_investment is spare. Investors buy first from owners short of cash, paying them;
-    # the rest are new shares whose money goes to the builder, which pays
-    # builder_payout_rate of its funds back to all living agents each step (like wages).
+    # Investment. Each resource has its own asset type; the only assets are the starting
+    # ones (``assets`` above) and they only change hands between agents. One whole asset
+    # makes asset_output[r] units of r per step at the start; that output grows by
+    # asset_growth[r] (0.05 = 5%) every asset_growth_steps steps, compounding a little each step.
+    # Asset price = output per step x current price of r / asset_return[r], so an asset always
+    # earns asset_return (1%) of its price per step and its price moves with the commodity's.
+    # Agents hold shares (fractions). They keep cash for their needs plus liquidity_units of
+    # every resource at current prices, and once at least min_investment is spare they buy
+    # shares from owners that are short of cash.
     investing_enabled: bool = True
-    asset_value: dict = field(default_factory=lambda: {"food": 100.0, "water": 100.0, "games": 100.0})
+    asset_output: dict = field(default_factory=lambda: {"food": 0.1, "water": 0.1, "games": 0.1})
     asset_return: dict = field(default_factory=lambda: {"food": 0.01, "water": 0.01, "games": 0.01})
     asset_growth: dict = field(default_factory=lambda: {"food": 0.05, "water": 0.05, "games": 0.05})
     asset_growth_steps: int = 50
     liquidity_units: float = 3
     min_investment: float = 10
-    builder_payout_rate: float = 0.01
+
+    # Stock band: agents keep between stock_cap x restock_below and stock_cap units of each
+    # resource. Above the cap they go out to sell the surplus to agents that want it; below
+    # the floor they go out to buy back up to the cap (paid in money, within stockpile_budget).
+    # They never sell below the floor.
+    selling_enabled: bool = True
+    stock_cap: int = 100
+    restock_below: float = 0.5
 
     # Prices
     price_mode: str = "scarcity"       # "scarcity": money/units*(1-share); "fixed": fixed_prices
@@ -178,13 +187,15 @@ LIMITS = {
     "price_cap": (1, 100, "float"),
     "unit_markup": (0, 1, "float"),
     "investing_enabled": (None, None, "bool"),
-    "asset_value": ((RESOURCES, 0.01, 1e9, False), None, "map"),
-    "asset_return": ((RESOURCES, 0, 10, False), None, "map"),
+    "asset_output": ((RESOURCES, 0, 1e6, False), None, "map"),
+    "asset_return": ((RESOURCES, 0.0001, 10, False), None, "map"),
     "asset_growth": ((RESOURCES, -0.99, 100, False), None, "map"),
     "asset_growth_steps": (1, 100000, "int"),
     "min_investment": (0.01, 1e9, "float"),
     "liquidity_units": (0, 1e6, "float"),
-    "builder_payout_rate": (0, 1, "float"),
+    "selling_enabled": (None, None, "bool"),
+    "stock_cap": (1, 1e9, "int"),
+    "restock_below": (0, 1, "float"),
     "purchase_min": (1, 10, "float"),
     "purchase_max": (1, 10, "float"),
     "price_mode": (PRICE_MODES, None, "choice"),

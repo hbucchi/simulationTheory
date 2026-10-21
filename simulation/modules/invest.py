@@ -4,25 +4,31 @@ from .base import Module
 # Owners only sell to cover a cash shortfall of at least this much money, so agents a
 # fraction of a cent short don't sell dust-sized slivers of assets every step.
 MIN_SALE = 1.0
+# An owner holding more than the stock cap of a resource sells at most this share of its
+# assets of that resource per deal.
+SURPLUS_SELL_SHARE = 0.25
 
 
 class Invest(Module):
-    """Spends money above what the agent wants on hand on productive assets.
+    """Buys asset shares from other agents with money above what the agent wants on hand.
 
-    Each resource has its own asset type. Holdings are shares: 0.5 of a food
-    asset gets half its output. The current value of one whole asset is
-    world.asset_value[r] (it grows over time); one asset produces
-    value x asset_return[r] units of r per step (see Production).
+    No assets are created: the only ones are the starting assets, and shares only
+    move between agents. One whole asset of resource r costs
+    world.asset_prices()[r] = output per step x current price of r / asset_return[r].
 
     The agent keeps cash_needed (liquidity for rules.liquidity_units of every
-    resource at current prices, plus the cost of what it needs to buy now) and,
-    once at least rules.min_investment is spare, spends all of the spare on the
-    single best asset: the highest return per money per step, counting both its
-    output (asset_return x current price of the resource) and its value growth.
+    resource at current prices, plus the cost of what it needs to buy now). Once
+    at least rules.min_investment is spare, it buys shares of the best asset that
+    someone is selling (highest asset_return plus value growth per step), but
+    only of resources it lacks: needs now, or below the floor of its stock band.
+    (Owners sell above the cap, so the band between floor and cap keeps the same
+    shares from going back and forth.) With the stock band off, any resource.
 
-    It buys first from owners that are short of cash (most short first), paying
-    them the current value for just enough shares to cover their shortfall. The
-    rest are new shares from the builder.
+    Owners sell for two reasons:
+    - short of cash (by at least MIN_SALE): just enough shares to cover the gap,
+      most cash-short first;
+    - holding more than the stock cap of the resource: they don't need more of it,
+      so they sell up to SURPLUS_SELL_SHARE of those assets per deal.
     """
 
     def on_step(self, agent, world):
@@ -34,39 +40,47 @@ class Invest(Module):
         spare = agent.money - cash_needed(agent, prices, rules)
         if spare < rules.min_investment:
             return
-        best = best_asset(prices, world)
-        if best is None:
+        asset_prices = world.asset_prices(prices)
+        # Owners short of cash, worked out once: {agent: shortfall}, most short first.
+        short = {o: cash_needed(o, prices, rules) - o.money for o in world.agents if o is not agent and o.assets}
+        short = {o: gap for o, gap in sorted(short.items(), key=lambda kv: kv[0].money) if gap >= MIN_SALE}
+        for resource in ranked_assets(world):
+            price = asset_prices[resource]
+            lacks = economy.wants_to_buy(agent, resource, rules, world.scarcity) or not rules.selling_enabled
+            if price <= 0 or not lacks:
+                continue   # worthless, or it isn't short of this resource
+            # Cash-short owners first (they need the money most), then owners over the cap.
+            limits = {o: short[o] for o in short if o.assets.get(resource, 0) > 0}
+            for o in world.agents:
+                if (o is not agent and o not in limits and o.assets.get(resource, 0) > 0
+                        and economy.surplus(o, resource, rules, world.scarcity)):
+                    limits[o] = o.assets[resource] * SURPLUS_SELL_SHARE * price
+            if not limits:
+                continue
+            bought = {}
+            for seller, limit in limits.items():
+                if spare <= 1e-9:
+                    break
+                money = min(spare, limit, seller.assets[resource] * price)
+                shares = money / price
+                transfer_shares(seller, agent, resource, shares)
+                seller.money += money
+                agent.money -= money
+                spare -= money
+                bought[seller.name] = shares
+                world.asset_trades += 1
+                world.asset_trade_money += money
+            held = agent.assets[resource]
+            total = sum(bought.values())
+            # Name the three biggest sellers; the rest are counted.
+            top = sorted(bought.items(), key=lambda kv: kv[1], reverse=True)
+            sources = ", ".join(f"{n:.2f} from {name}" for name, n in top[:3])
+            if len(top) > 3:
+                sources += f" and {sum(n for _, n in top[3:]):.2f} from {len(top) - 3} others"
+            world.log(f"{agent.name} bought {total:.2f} {resource} asset(s) at {price:.2f} each for "
+                      f"{total * price:.2f} ({sources}); "
+                      f"now owns {held:.2f}, making {world.asset_output(resource, held):.2f} {resource}/step")
             return
-        value = world.asset_value[best]
-        bought_from = {}
-        sellers = sorted((o for o in world.agents if o is not agent and o.assets.get(best, 0) > 0
-                          and cash_needed(o, prices, rules) - o.money >= MIN_SALE), key=lambda o: o.money)
-        for seller in sellers:
-            if spare <= 1e-9:
-                break
-            shortfall = cash_needed(seller, prices, rules) - seller.money
-            money = min(spare, shortfall, seller.assets[best] * value)
-            shares = money / value
-            transfer_shares(seller, agent, best, shares)
-            seller.money += money
-            agent.money -= money
-            spare -= money
-            bought_from[seller.name] = bought_from.get(seller.name, 0) + shares
-            world.asset_resales += 1
-            world.asset_resale_money += money
-        new_shares = spare / value if spare > 1e-9 else 0
-        if new_shares:
-            agent.money -= spare
-            agent.assets[best] = agent.assets.get(best, 0) + new_shares
-            world.pay_builder(spare)
-        parts = [f"{n:.2f} from {name}" for name, n in bought_from.items()]
-        if new_shares:
-            parts.append(f"{new_shares:.2f} new from the builder")
-        total = sum(bought_from.values()) + new_shares
-        held = agent.assets[best]
-        world.log(f"{agent.name} invested {total * value:.2f} in {total:.2f} {best} asset(s) at {value:.2f} each "
-                  f"({', '.join(parts)}); now owns {held:.2f}, making {world.asset_output(best, held):.2f} "
-                  f"{best}/step")
 
 
 def transfer_shares(seller, buyer, resource, shares):
@@ -83,14 +97,12 @@ def cash_needed(agent, prices, rules):
     return liquidity + shopping
 
 
-def asset_yield(resource, prices, world):
-    """Money earned per step per money invested in ``resource`` assets: output + value growth."""
-    output = world.rules.asset_return[resource] * prices[resource]
-    return output + world.asset_growth_per_step(resource)
+def asset_yield(resource, world):
+    """Money earned per step per money invested: asset_return (output at the asset's price)
+    plus the growth of its output (which raises its price)."""
+    return world.rules.asset_return[resource] + world.asset_growth_per_step(resource)
 
 
-def best_asset(prices, world):
-    """Resource whose asset earns the most per money invested, or None."""
-    yields = {r: asset_yield(r, prices, world) for r in economy.RESOURCES}
-    best = max(yields, key=yields.get)
-    return best if yields[best] > 0 else None
+def ranked_assets(world):
+    """Resources ordered from the best asset to buy to the worst."""
+    return sorted(economy.RESOURCES, key=lambda r: asset_yield(r, world), reverse=True)

@@ -34,14 +34,10 @@ class World:
         self.tick = 0
         self.events = []  # newest last; trimmed to keep the payload small
         self.cooldowns = {}  # frozenset({id_a, id_b}) -> tick until which they ignore each other
-        # The asset builder: receives the money paid for assets and pays it back out as income.
-        self.builder_funds = 0.0     # held right now
-        self.asset_spending = 0.0    # paid for assets so far
-        self.builder_paid_out = 0.0  # paid back to agents so far
-        self.asset_resales = 0       # purchases of shares from other agents
-        self.asset_resale_money = 0.0
-        # Current value of one whole asset of each resource (grows every step).
-        self.asset_value = dict(self.rules.asset_value)
+        self.asset_trades = 0        # purchases of asset shares between agents
+        self.asset_trade_money = 0.0
+        # Units per step one whole asset of each resource makes right now (grows every step).
+        self.asset_output_now = dict(self.rules.asset_output)
         # Average units per living agent of each resource, one entry per step, for the
         # last scarcity_window steps; scarcity = how much that average fell over the window.
         self.per_agent_history = {r: deque(maxlen=self.rules.scarcity_window + 1) for r in economy.RESOURCES}
@@ -49,6 +45,7 @@ class World:
         # Demand pressure: buyers/sellers counted each step, the price multiplier they push
         # toward, and the last PRICE_HISTORY prices for the charts.
         self.buyers = {r: 0 for r in economy.RESOURCES}
+        self.buyer_agents = {r: [] for r in economy.RESOURCES}  # who wants each resource (this step)
         self.sellers = {r: 0 for r in economy.RESOURCES}
         self.price_multiplier = {r: 1.0 for r in economy.RESOURCES}
         self.price_history = {r: deque(maxlen=self.PRICE_HISTORY) for r in economy.RESOURCES}
@@ -181,7 +178,8 @@ class World:
         """
         if stockpile:
             wanted = [r for r in economy.RESOURCES
-                      if economy.stockpile_shortfall(agent, r, self.rules, self.scarcity) > 0]
+                      if economy.stockpile_shortfall(agent, r, self.rules, self.scarcity) > 0
+                      or economy.restock_shortfall(agent, r, self.rules) > 0]
             wanted.sort(key=lambda r: self.scarcity[r], reverse=True)
         else:
             wanted = [r for r in economy.RESOURCES if economy.demand(agent, r, self.rules) > 0]
@@ -207,8 +205,8 @@ class World:
         the demand-pressure target (a fraction price_adjust_speed of the way per step)."""
         rules = self.rules
         for r in economy.RESOURCES:
-            self.buyers[r] = sum(1 for a in self.agents if economy.demand(a, r, rules) > 0
-                                 or economy.stockpile_shortfall(a, r, rules, self.scarcity) > 0)
+            self.buyer_agents[r] = [a for a in self.agents if economy.wants_to_buy(a, r, rules, self.scarcity)]
+            self.buyers[r] = len(self.buyer_agents[r])
             self.sellers[r] = sum(1 for a in self.agents if economy.spare(a, r, rules, self.scarcity) > 0)
             if rules.demand_pricing_enabled:
                 target = economy.demand_multiplier_target(self.buyers[r], self.sellers[r], rules)
@@ -223,31 +221,36 @@ class World:
         return (1 + self.rules.asset_growth[resource]) ** (1 / self.rules.asset_growth_steps) - 1
 
     def grow_assets(self):
-        for r in self.asset_value:
-            self.asset_value[r] *= 1 + self.asset_growth_per_step(r)
+        for r in self.asset_output_now:
+            self.asset_output_now[r] *= 1 + self.asset_growth_per_step(r)
 
     def asset_output(self, resource, shares):
-        """Units per step made by ``shares`` of a ``resource`` asset at its current value."""
-        return shares * self.asset_value[resource] * self.rules.asset_return[resource]
+        """Units per step made by ``shares`` of a ``resource`` asset right now."""
+        return shares * self.asset_output_now[resource]
 
-    def pay_builder(self, amount):
-        self.builder_funds += amount
-        self.asset_spending += amount
+    def asset_prices(self, prices=None):
+        """Price of one whole asset: output per step x commodity price / asset_return.
 
-    def pay_out_builder(self):
-        """The builder pays builder_payout_rate of its funds to all living agents, evenly."""
-        if not self.agents or self.builder_funds <= 0:
-            return
-        payout = self.builder_funds * self.rules.builder_payout_rate
-        share = payout / len(self.agents)
-        for agent in self.agents:
-            agent.money += share
-        self.builder_funds -= payout
-        self.builder_paid_out += payout
+        So an asset always earns asset_return of its price per step, and its price
+        rises and falls with the price of what it makes.
+        """
+        prices = prices or self.current_prices()
+        return {r: self.asset_output_now[r] * prices[r] / self.rules.asset_return[r] for r in economy.RESOURCES}
+
+    def nearest_buyer(self, agent, resource):
+        """Closest agent (not just met) that wants ``resource`` and has money, or None.
+
+        Candidates come from this step's buyer list (update_demand) and are re-checked,
+        so the search doesn't scan every agent for every seller.
+        """
+        buyers = [o for o in self.buyer_agents[resource] if o is not agent and o in self.agents
+                  and not self.in_cooldown(agent, o) and o.money > 0
+                  and economy.wants_to_buy(o, resource, self.rules, self.scarcity)]
+        return min(buyers, key=agent.distance_to, default=None)
 
     def current_prices(self):
         """Base price (scarcity formula or fixed) x demand-pressure multiplier."""
-        base = economy.market_prices(self.agents, self.rules, self.builder_funds)
+        base = economy.market_prices(self.agents, self.rules)
         return {r: base[r] * self.price_multiplier[r] for r in economy.RESOURCES}
 
     def unit_markups(self):
@@ -275,7 +278,6 @@ class World:
         """
         self.tick += 1
         self.grow_assets()
-        self.pay_out_builder()
         self.update_scarcity()
         self.update_demand()
         for agent in list(self.agents):
@@ -353,27 +355,25 @@ class World:
             "rules": self.rules.to_dict(),
             "market": {
                 "prices": self.current_prices(),
-                "base_prices": economy.market_prices(self.agents, self.rules, self.builder_funds),
+                "base_prices": economy.market_prices(self.agents, self.rules),
                 "multiplier": self.price_multiplier,
                 "buyers": self.buyers,
                 "sellers": self.sellers,
                 "markups": self.unit_markups(),
                 "price_history": {r: list(h) for r, h in self.price_history.items()},
                 "assets": {r: sum(a.assets.get(r, 0) for a in self.agents) for r in economy.RESOURCES},
-                "asset_value": self.asset_value,
+                "asset_prices": self.asset_prices(),
+                "asset_output_each": self.asset_output_now,
                 "asset_output": {r: self.asset_output(r, sum(a.assets.get(r, 0) for a in self.agents))
                                  for r in economy.RESOURCES},
-                "asset_spending": self.asset_spending,
-                "builder_funds": self.builder_funds,
-                "builder_paid_out": self.builder_paid_out,
-                "asset_resales": self.asset_resales,
-                "asset_resale_money": self.asset_resale_money,
+                "asset_trades": self.asset_trades,
+                "asset_trade_money": self.asset_trade_money,
                 # Average units per agent over the scarcity window (oldest first) and how much it fell.
                 "per_agent_history": {r: list(h) for r, h in self.per_agent_history.items()},
                 "scarcity": self.scarcity,
                 "stockpiling": {r: self.rules.stockpiling_enabled and d >= self.rules.scarcity_trigger
                                 for r, d in self.scarcity.items()},
-                "money": sum(a.money for a in self.agents) + self.builder_funds,
+                "money": sum(a.money for a in self.agents),
                 "units": {r: sum(a.inventory.count(r) for a in self.agents) for r in economy.RESOURCES},
             },
             "agents": [dict(a.to_dict(self.rules), reserve={

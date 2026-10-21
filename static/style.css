@@ -193,6 +193,8 @@ h2 .count { text-transform: none; letter-spacing: 0; font-weight: 400; }
 .badge { display: inline-block; margin-top: 4px; padding: 1px 6px; border-radius: 999px; font-size: 10px;
   background: color-mix(in srgb, #d1453b 15%, var(--panel)); color: #d1453b; }
 .activity .stockpiling { color: #8e44ad; }
+.activity .restocking { color: #2e86c1; }
+.activity .selling { color: #3f8f3a; }
 
 /* ---------- Demand pressure ---------- */
 .market-row span.price-move { display: inline; margin-left: 4px; font-size: 11px; }

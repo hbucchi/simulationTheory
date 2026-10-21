@@ -120,29 +120,34 @@ pressure* on the setup screen.
 
 ### Investment
 
-Each resource has its own **asset**: food assets, water assets, games assets,
-each with its own value, return and growth (set on the setup screen).
+Each resource has its own **asset** (food assets, water assets, games assets),
+each with its own output, return and growth (set on the setup screen).
 
-- One whole asset is worth `asset_value` (100) and makes value × `asset_return`
-  units per step: worth 100 at 1% → 1 unit of food per step.
-- Its value grows by `asset_growth` (5%) every `asset_growth_steps` (50) steps,
-  compounding a little each step: 105 after 50 steps (1.05 units/step),
-  ~110 after 100. Output grows with it.
-- Agents hold **shares** (fractions) of assets, so 0.5 of a food asset makes
-  half as much. They can start with some (*Starting agents*, any distribution).
+- **No assets are created.** The only ones are the starting assets (*Starting
+  agents*, random 0–2 shares of each by default, any distribution). They only
+  change hands between agents. Agents hold **shares**, so 0.5 of a food asset
+  makes half as much.
+- One whole asset makes `asset_output` (0.1) units per step. That output grows
+  by `asset_growth` (5%) every `asset_growth_steps` (50) steps, compounding a
+  little each step.
+- **Asset price = output per step × current price of the resource ÷ return**
+  (1%). A dearer resource makes its assets dearer, and an asset always earns 1%
+  of its price per step.
 - Each step an agent keeps cash for what it needs to buy now plus 3 units of
-  every resource at current prices. Once at least `min_investment` (10) is
-  spare, it puts all of it into the asset with the best return per money:
-  return × current price of the resource + value growth per step.
-- It buys first from owners that are **short of cash**, most short first,
-  paying them the current value for just enough shares to cover the gap.
-  The rest are new shares; that money goes to the **asset builder**, which pays
-  1% of what it holds back to all living agents each step. Total money stays
-  constant, and the builder's money still counts toward the price level.
+  every resource. Once at least `min_investment` (10) is spare, it buys shares
+  of the best-returning asset of a resource it **lacks** (needs it, or is below
+  the stock floor), from owners that:
+  - are **short of cash**: just enough shares to cover the gap, or
+  - hold **more than the stock cap** of that resource: up to a quarter of those
+    assets per deal.
 
-The market panel shows each asset's current value, shares owned and output;
-cards show each agent's shares, their worth and output; *Manage agents* can
-edit shares.
+### Stock band
+
+Agents keep between the floor (50) and the cap (100) units of each resource.
+Above the cap they go out to **sell** the surplus to agents that want it, to
+make money; below the floor they go out to **restock** back up to the cap,
+paying in money. They never sell below the floor. Between floor and cap they
+keep what they have, which also stops assets going back and forth.
 
 ### Prices
 

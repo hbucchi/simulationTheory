@@ -8,7 +8,8 @@ CALM = {"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0}
 
 def world_with(**rules):
     # Investing is off unless a test turns it on: asset purchases would spend the money under test.
-    return World(seed=1, rules=Rules.from_dict({"investing_enabled": False, **rules}))
+    return World(seed=1, rules=Rules.from_dict({"investing_enabled": False, "selling_enabled": False,
+                                                "assets": {"food": 0, "water": 0, "games": 0}, **rules}))
 
 
 class ScarcityTests(unittest.TestCase):
@@ -127,7 +128,7 @@ class DemandPricingTests(unittest.TestCase):
         self.assertEqual(world.price_multiplier["water"], 1)
 
     def test_each_extra_unit_costs_more_under_pressure(self):
-        rules = Rules()
+        rules = Rules.from_dict({"selling_enabled": False})
         buyer = World(seed=1).create_agent(inventory={"water": 0, "food": 0, "games": 0},
                                            needs={**CALM, "thirst": 0.6}, money=100)
         seller = World(seed=1).create_agent(inventory={"water": 100}, needs=CALM)

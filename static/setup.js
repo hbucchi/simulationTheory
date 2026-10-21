@@ -52,6 +52,13 @@ const SETUP_SECTIONS = [
     { path: "purchase_min", label: "Buy at least ×", kind: "float", min: 1, max: 10, step: 0.1 },
     { path: "purchase_max", label: "Buy at most ×", kind: "float", min: 1, max: 10, step: 0.1 },
   ]},
+  { title: "Stock band", hint: "Agents keep between the floor and the cap of each resource: above the cap they go " +
+      "out to sell the surplus (to make money for assets); below the floor they go out to buy back up to the cap.", fields: [
+    { path: "selling_enabled", label: "Agents sell surplus and restock", kind: "bool", full: true },
+    { path: "stock_cap", label: "Cap (units of each)", kind: "int", min: 1, enabledWhen: v => v.selling_enabled },
+    { path: "restock_below", label: "Floor (0.5 = half the cap)", kind: "float", min: 0, max: 1, step: 0.05,
+      enabledWhen: v => v.selling_enabled },
+  ]},
   { title: "Market dynamics: stockpiling", hint: "When a resource's average per agent falls by the trigger " +
       "within the window, agents hoard it: they buy a reserve (paid in money, within a budget) and stop selling into it.", fields: [
     { path: "stockpiling_enabled", label: "Agents stockpile scarce resources", kind: "bool", full: true },
@@ -78,15 +85,16 @@ const SETUP_SECTIONS = [
     { path: "unit_markup", label: "Extra unit costs more (0.05 = +5%)", kind: "float", min: 0, max: 1, step: 0.01,
       full: true, enabledWhen: v => v.demand_pricing_enabled },
   ]},
-  { title: "Investment", hint: "Each resource has its own asset. An asset produces value × return units per step " +
-      "(worth 100 at 1% → 1 unit/step) and its value grows over time. Agents keep cash for their needs and invest the rest " +
-      "in shares of the best asset; money for new shares goes to a builder that pays it back to all agents as income.", fields: [
-    { path: "investing_enabled", label: "Agents invest in assets", kind: "bool", full: true },
-    ...per(RESOURCES, r => ({ path: `asset_value.${r}`, label: `${cap(r)} asset value`, kind: "float", min: 0.01, step: 1,
-      enabledWhen: v => v.investing_enabled })),
-    ...per(RESOURCES, r => ({ path: `asset_return.${r}`, label: `${cap(r)} return/step (0.01 = 1%)`, kind: "float",
-      min: 0, max: 10, step: 0.001, enabledWhen: v => v.investing_enabled })),
-    ...per(RESOURCES, r => ({ path: `asset_growth.${r}`, label: `${cap(r)} value growth (0.05 = 5%)`, kind: "float",
+  { title: "Investment", hint: "Each resource has its own asset. The only assets are the starting ones; " +
+      "they change hands between agents and their output grows over time. Asset price = output per step × resource price " +
+      "÷ return, so a dearer resource makes its assets dearer. Agents invest spare cash in assets of what they lack, " +
+      "buying from owners that are short of cash or hold more than the stock cap of that resource.", fields: [
+    { path: "investing_enabled", label: "Agents buy and sell assets", kind: "bool", full: true },
+    ...per(RESOURCES, r => ({ path: `asset_output.${r}`, label: `${cap(r)} asset output/step`, kind: "float", min: 0,
+      step: 0.01, enabledWhen: v => v.investing_enabled })),
+    ...per(RESOURCES, r => ({ path: `asset_return.${r}`, label: `${cap(r)} return (0.01 = 1%)`, kind: "float",
+      min: 0.0001, max: 10, step: 0.001, enabledWhen: v => v.investing_enabled })),
+    ...per(RESOURCES, r => ({ path: `asset_growth.${r}`, label: `${cap(r)} output growth (0.05 = 5%)`, kind: "float",
       min: -0.99, max: 100, step: 0.01, enabledWhen: v => v.investing_enabled })),
     { path: "asset_growth_steps", label: "… every (steps)", kind: "int", min: 1, max: 100000,
       enabledWhen: v => v.investing_enabled },
@@ -94,8 +102,6 @@ const SETUP_SECTIONS = [
       enabledWhen: v => v.investing_enabled },
     { path: "min_investment", label: "Invest once spare cash ≥", kind: "float", min: 0.01, step: 1,
       enabledWhen: v => v.investing_enabled },
-    { path: "builder_payout_rate", label: "Builder pays out per step (0.01 = 1%)", kind: "float", min: 0, max: 1,
-      step: 0.005, enabledWhen: v => v.investing_enabled },
   ]},
   { title: "Need thresholds", hint: "When agents act on a need, and what consuming does.", fields: [
     { path: "seek_threshold", label: "Act above", kind: "float", min: 0, max: 1, step: 0.05 },
@@ -587,25 +593,24 @@ function renderPreview(r, error) {
   }
 
   if (r.investing_enabled) {
-    const after = (x, steps) => r.asset_value[x] * (1 + r.asset_growth[x]) ** (steps / r.asset_growth_steps);
-    for (const x of RESOURCES) {
-      const out = r.asset_value[x] * r.asset_return[x];
-      const use = avg(r.rates[NEED_FOR[x]]) / r.relief_per_unit;
-      line(`${cap(x)} asset: worth ${r.asset_value[x]} → ${after(x, 500).toFixed(0)} after 500 steps; one whole asset makes ` +
-           `${out.toFixed(2)} → ${(out * after(x, 500) / r.asset_value[x]).toFixed(2)} ${x}/step` +
-           (use ? `, about ${(out / use).toFixed(1)}× what an average agent uses.` : "."),
-           out / (use || 1) > 3 ? "short" : "");
-    }
-    // Starting prices as in the "Starting prices" line below; cash kept = liquidity at those prices.
+    // Starting prices as in the "Starting prices" line below.
     const stock = RESOURCES.map(x => avg(r.inventory[x]));
     const units = stock.reduce((a, b) => a + b, 0);
     const startPrices = RESOURCES.map((x, i) => r.price_mode === "fixed" ? r.fixed_prices[x]
       : units ? avg(r.money) / units * (1 - stock[i] / units) : 0);
-    const cash = avg(r.money);
-    const kept = r.liquidity_units * startPrices.reduce((a, b) => a + b, 0);
-    const shares = Math.max(0, cash - kept) / Math.min(...RESOURCES.map(x => r.asset_value[x]));
-    line(`Investment: an average agent starts with ${cash.toFixed(0)} money and can buy about ${shares.toFixed(2)} ` +
-         `of an asset at once (it invests whenever ${r.min_investment}+ money is spare).`);
+    RESOURCES.forEach((x, i) => {
+      const out = r.asset_output[x];
+      const grown = out * (1 + r.asset_growth[x]) ** (500 / r.asset_growth_steps);
+      const use = avg(r.rates[NEED_FOR[x]]) / r.relief_per_unit;
+      line(`${cap(x)} asset: makes ${out} → ${grown.toFixed(3)} ${x}/step after 500 steps` +
+           (use ? ` (${(out / use).toFixed(1)}× an average agent's use)` : "") +
+           `; costs ${out} × ${startPrices[i].toFixed(3)} ÷ ${r.asset_return[x]} = ${(out * startPrices[i] / r.asset_return[x]).toFixed(2)} at starting prices.`,
+           out / (use || 1) > 3 ? "short" : "");
+    });
+    const held = RESOURCES.reduce((sum, x) => sum + avg(r.assets[x]), 0);
+    line(`Assets: an average agent starts with ${held.toFixed(2)} assets in total. No new assets are ever made, ` +
+         (held ? "so investing means buying them from other agents." : "so with none to start, nobody can invest."),
+         held ? "" : "short");
   }
 
   const g = avg(r.rates.sleep), rec = avg(r.sleep_recovery);
