@@ -50,6 +50,18 @@ const SETUP_SECTIONS = [
     { path: "purchase_min", label: "Buy at least ×", kind: "float", min: 1, max: 10, step: 0.1 },
     { path: "purchase_max", label: "Buy at most ×", kind: "float", min: 1, max: 10, step: 0.1 },
   ]},
+  { title: "Market dynamics: stockpiling", hint: "When a resource's average per agent falls by the trigger " +
+      "within the window, agents hoard it: they buy a reserve (paid in money, within a budget) and stop selling into it.", fields: [
+    { path: "stockpiling_enabled", label: "Agents stockpile scarce resources", kind: "bool", full: true },
+    { path: "scarcity_window", label: "Watch the last (steps)", kind: "int", min: 10, max: 500,
+      enabledWhen: v => v.stockpiling_enabled },
+    { path: "scarcity_trigger", label: "Scarce after a fall of (0.1 = 10%)", kind: "float", min: 0.01, max: 0.9, step: 0.01,
+      enabledWhen: v => v.stockpiling_enabled },
+    { path: "stockpile_steps", label: "Reserve (steps of own use)", kind: "int", min: 0, max: 5000,
+      enabledWhen: v => v.stockpiling_enabled },
+    { path: "stockpile_budget", label: "Spend at most (0.5 = half its money)", kind: "float", min: 0, max: 1, step: 0.05,
+      enabledWhen: v => v.stockpiling_enabled },
+  ]},
   { title: "Need thresholds", hint: "When agents act on a need, and what consuming does.", fields: [
     { path: "seek_threshold", label: "Act above", kind: "float", min: 0, max: 1, step: 0.05 },
     { path: "target_level", label: "Until below", kind: "float", min: 0, max: 1, step: 0.05 },
@@ -524,6 +536,12 @@ function renderPreview(r, error) {
   if (Math.min(...stock) / needPerStep > 300) {
     line(`Agents start with enough of everything for ${Math.round(Math.min(...stock) / needPerStep)}+ steps, ` +
          "so they won't need to trade for a long time. Lower the starting inventory for more trading.");
+  }
+
+  if (r.stockpiling_enabled) {
+    line(`Stockpiling: when a resource's average per agent falls ${(r.scarcity_trigger * 100).toFixed(0)}% within ` +
+         `${r.scarcity_window} steps, agents short of it want ${r.stockpile_steps} steps of their own use in reserve ` +
+         `(up to 3× if it falls faster), spending at most ${(r.stockpile_budget * 100).toFixed(0)}% of their money per trade.`);
   }
 
   const g = avg(r.rates.sleep), rec = avg(r.sleep_recovery);

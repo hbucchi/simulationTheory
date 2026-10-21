@@ -2,6 +2,7 @@
 
 import math
 import random
+from collections import deque
 
 from . import distributions, economy
 from .agent import Agent
@@ -32,6 +33,10 @@ class World:
         self.tick = 0
         self.events = []  # newest last; trimmed to keep the payload small
         self.cooldowns = {}  # frozenset({id_a, id_b}) -> tick until which they ignore each other
+        # Average units per living agent of each resource, one entry per step, for the
+        # last scarcity_window steps; scarcity = how much that average fell over the window.
+        self.per_agent_history = {r: deque(maxlen=self.rules.scarcity_window + 1) for r in economy.RESOURCES}
+        self.scarcity = {r: 0.0 for r in economy.RESOURCES}
         self.next_id = 1
 
     def clamp_position(self, x, y):
@@ -143,20 +148,35 @@ class World:
         return [o for o in self.agents
                 if o.activity == "seeking" and o.target_id == agent.id and not self.in_cooldown(agent, o)]
 
-    def nearest_seller(self, agent):
+    def nearest_seller(self, agent, stockpile=False):
         """Closest agent with spare of what ``agent`` needs: (seller, resource) or (None, None).
 
         Needs are tried most urgent first, so a thirsty and slightly hungry agent
-        looks for water before food. Agents it has just met are skipped.
+        looks for water before food. With ``stockpile`` it looks instead for
+        resources it is short of in its reserve. Agents it has just met are skipped.
         """
-        wanted = [r for r in economy.RESOURCES if economy.demand(agent, r, self.rules) > 0]
-        wanted.sort(key=lambda r: getattr(agent, economy.NEED_FOR_RESOURCE[r]), reverse=True)
+        if stockpile:
+            wanted = [r for r in economy.RESOURCES
+                      if economy.stockpile_shortfall(agent, r, self.rules, self.scarcity) > 0]
+            wanted.sort(key=lambda r: self.scarcity[r], reverse=True)
+        else:
+            wanted = [r for r in economy.RESOURCES if economy.demand(agent, r, self.rules) > 0]
+            wanted.sort(key=lambda r: getattr(agent, economy.NEED_FOR_RESOURCE[r]), reverse=True)
         for resource in wanted:
             sellers = [o for o in self.agents if o is not agent and not self.in_cooldown(agent, o)
-                       and economy.spare(o, resource, self.rules) > 0]
+                       and economy.spare(o, resource, self.rules, self.scarcity) > 0]
             if sellers:
                 return min(sellers, key=agent.distance_to), resource
         return None, None
+
+    def update_scarcity(self):
+        """Record average units per agent and how much it fell over the scarcity window."""
+        n = len(self.agents)
+        for r, history in self.per_agent_history.items():
+            history.append(sum(a.inventory.count(r) for a in self.agents) / n if n else 0.0)
+            past, now = history[0], history[-1]
+            full = len(history) == history.maxlen
+            self.scarcity[r] = max(0.0, 1 - now / past) if full and past > 0 else 0.0
 
     def contacts(self):
         """All pairs of agents currently close enough to interact."""
@@ -176,6 +196,7 @@ class World:
         before the check ran.
         """
         self.tick += 1
+        self.update_scarcity()
         for agent in list(self.agents):
             if agent not in self.agents:
                 continue
@@ -209,14 +230,16 @@ class World:
         agent moves on to the next-closest agent instead of retrying the same one.
         """
         rules = self.rules
-        if not (economy.is_needy(a, rules) or economy.is_needy(b, rules)):
+        scarcity = self.scarcity
+        if not (economy.wants_anything(a, rules, scarcity) or economy.wants_anything(b, rules, scarcity)):
             return  # a casual bump: nobody needs anything
         prices = economy.market_prices(self.agents, rules)
-        deals = economy.trade(a, b, prices, rules, self.rng)
-        for buyer, seller, bought, paid in deals:
+        deals = economy.trade(a, b, prices, rules, self.rng, scarcity)
+        for buyer, seller, bought, paid, stocked in deals:
+            note = f" ({economy.describe(stocked)} to stockpile)" if stocked else ""
             self.log(f"{buyer.name} got {economy.describe(bought)} from {seller.name} "
-                     f"for {economy.describe_payment(paid)}")
-        for reason in economy.unmet(a, b, rules) + economy.unmet(b, a, rules):
+                     f"for {economy.describe_payment(paid)}{note}")
+        for reason in economy.unmet(a, b, rules, scarcity) + economy.unmet(b, a, rules, scarcity):
             self.log(f"No trade: {reason}")
 
         self.cooldowns[frozenset((a.id, b.id))] = self.tick + rules.cooldown_steps
@@ -246,10 +269,17 @@ class World:
             "rules": self.rules.to_dict(),
             "market": {
                 "prices": economy.market_prices(self.agents, self.rules),
+                # Average units per agent over the scarcity window (oldest first) and how much it fell.
+                "per_agent_history": {r: list(h) for r, h in self.per_agent_history.items()},
+                "scarcity": self.scarcity,
+                "stockpiling": {r: self.rules.stockpiling_enabled and d >= self.rules.scarcity_trigger
+                                for r, d in self.scarcity.items()},
                 "money": sum(a.money for a in self.agents),
                 "units": {r: sum(a.inventory.count(r) for a in self.agents) for r in economy.RESOURCES},
             },
-            "agents": [a.to_dict(self.rules) for a in self.agents],
+            "agents": [dict(a.to_dict(self.rules), reserve={
+                r: economy.stockpile_target(a, r, self.rules, self.scarcity) for r in economy.RESOURCES})
+                for a in self.agents],
             # Only pairs that can interact; pairs in cooldown just overlap.
             "contacts": [[a.id, b.id] for a, b in self.contacts() if not self.in_cooldown(a, b)],
             "events": self.events[-50:],

@@ -82,6 +82,26 @@ way the pair ignores each other for 60 steps, so a needy agent moves on to the
 next-closest agent instead of retrying the same one. Agents that bump into
 each other without needing anything just carry on.
 
+### Market dynamics: stockpiling
+
+Each step the world records the average units per living agent of every
+resource. When that average has fallen by at least the trigger (10%) over the
+window (100 steps), the resource is *becoming scarce* and agents start
+hoarding it:
+
+- An agent wants a **reserve** of its own net use (use minus own production)
+  for `stockpile_steps` steps (100), scaled by how fast the resource is
+  falling: a fall of 1× the trigger → 1× the reserve, 2× → 2×, capped at 3×.
+  Agents that produce enough themselves don't stockpile.
+- An agent below its reserve goes to the nearest seller even when it isn't in
+  need yet (activity *stockpiling*). Reserve units are paid in money only, at
+  most `stockpile_budget` (half) of its money per trade.
+- Sellers don't sell into their own reserve, so hoarding also shrinks supply.
+
+The Overview market panel shows units per agent, the fall over the window, a
+trend line and an *agents stockpiling* badge; cards show each agent's reserve.
+All of it is set in the *Market dynamics* section of the setup screen.
+
 ### Prices
 
 Prices are recomputed from what everyone holds at the moment of each trade:

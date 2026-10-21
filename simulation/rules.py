@@ -41,6 +41,18 @@ class Rules:
     purchase_min: float = 1.0
     purchase_max: float = 3.0
 
+    # Market dynamics: stockpiling when a resource is becoming scarce. A resource is
+    # "becoming scarce" when its average units per living agent fell by at least
+    # scarcity_trigger over the last scarcity_window steps. Agents then want a reserve
+    # of stockpile_steps steps of their own net use (more the faster it falls, up to 3x),
+    # buy it with money only, spending at most stockpile_budget of their money per trade,
+    # and don't sell into their reserve.
+    stockpiling_enabled: bool = True
+    scarcity_window: int = 100
+    scarcity_trigger: float = 0.1
+    stockpile_steps: int = 100
+    stockpile_budget: float = 0.5
+
     # Prices
     price_mode: str = "scarcity"       # "scarcity": money/units*(1-share); "fixed": fixed_prices
     fixed_prices: dict = field(default_factory=lambda: {"food": 1.0, "water": 1.0, "games": 1.0})
@@ -122,6 +134,11 @@ LIMITS = {
     "relief_per_unit": (0.001, 1, "float"),
     "seek_threshold": (0, 1, "float"),
     "target_level": (0, 1, "float"),
+    "stockpiling_enabled": (None, None, "bool"),
+    "scarcity_window": (10, 500, "int"),
+    "scarcity_trigger": (0.01, 0.9, "float"),
+    "stockpile_steps": (0, 5000, "int"),
+    "stockpile_budget": (0, 1, "float"),
     "purchase_min": (1, 10, "float"),
     "purchase_max": (1, 10, "float"),
     "price_mode": (PRICE_MODES, None, "choice"),

@@ -289,7 +289,21 @@ function renderMarket() {
     cell.append(`${r} `, price);
     const detail = document.createElement("span");
     detail.textContent = `${m.units[r]} units · ${(share * 100).toFixed(0)}% share`;
-    cell.append(detail);
+    // Average units per agent and how much it fell over the scarcity window.
+    const history = m.per_agent_history[r];
+    const perAgent = history.length ? history[history.length - 1] : 0;
+    const trend = document.createElement("span");
+    const decline = m.scarcity[r];
+    trend.textContent = `${perAgent.toFixed(1)} per agent` +
+      (decline > 0 ? ` · ▼ ${(decline * 100).toFixed(0)}% in ${history.length - 1} steps` : "");
+    trend.className = m.stockpiling[r] ? "scarce" : "";
+    cell.append(detail, trend, sparkline(history));
+    if (m.stockpiling[r]) {
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = "agents stockpiling";
+      cell.append(badge);
+    }
     row.append(cell);
   }
   ui.market.append(row);
@@ -304,6 +318,7 @@ const SORT_VALUE = {
   name: a => a.name.toLowerCase(),
   money: a => a.money,
   movement: a => a.movement,
+  reserve: a => RESOURCES.reduce((sum, r) => sum + (a.reserve?.[r] || 0), 0),
   urgency: a => Math.max(...NEEDS.map(n => a.needs[n])),
   ...Object.fromEntries(RESOURCES.map(r => [r, a => a.inventory[r] ?? 0])),
   ...Object.fromEntries(NEEDS.map(n => [n, a => a.needs[n]])),
@@ -347,6 +362,28 @@ ui.agentSort.onchange = () => {
 };
 ui.agentSortDir.onclick = () => { agentView.desc = !agentView.desc; onAgentViewChange(); };
 agentView.desc = false;  // default: ID ascending
+
+// Small line chart of a series (oldest first). The axis starts at 0 so a line only
+// slopes as much as the value really changed.
+function sparkline(values) {
+  const canvas = document.createElement("canvas");
+  canvas.className = "spark";
+  canvas.width = 110;
+  canvas.height = 24;
+  if (values.length < 2) return canvas;
+  const c = canvas.getContext("2d");
+  const lo = 0, span = Math.max(...values) || 1;
+  c.strokeStyle = cssVar("--accent");
+  c.lineWidth = 1.5;
+  c.beginPath();
+  values.forEach((v, i) => {
+    const x = (i / (values.length - 1)) * (canvas.width - 2) + 1;
+    const y = canvas.height - 2 - ((v - lo) / span) * (canvas.height - 4);
+    i ? c.lineTo(x, y) : c.moveTo(x, y);
+  });
+  c.stroke();
+  return canvas;
+}
 
 function renderAgents() {
   ui.agents.innerHTML = "";
@@ -406,6 +443,9 @@ function renderAgents() {
       ...RESOURCES.map(r => [r, a.inventory[r] ?? 0, production[r] ? `+1 / ${production[r]} steps` : "no production"]),
       ["money", a.money.toFixed(2)],
       ["movement", a.depressed ? `${a.speed} px (depressed, ${a.movement} normally)` : `${a.speed} px`],
+      // Reserve it wants to hold because the resource is becoming scarce.
+      ...RESOURCES.filter(r => a.reserve?.[r]).map(r => [`${r} reserve`, a.reserve[r],
+        "Wants to hold this much because it is becoming scarce"]),
     ];
     for (const [label, value, title] of fields) {
       const span = document.createElement("span");
@@ -423,6 +463,7 @@ function renderAgents() {
     const target = state.agents.find(o => o.id === a.target_id);
     act.textContent = a.activity === "seeking" && target ? `seeking ${target.name} to buy ${a.seeking_for}`
       : a.activity === "meeting" && target ? `meeting ${target.name}`
+      : a.activity === "stockpiling" && target ? `stockpiling ${a.seeking_for} from ${target.name}`
       : a.activity === "searching" ? `searching: nobody has ${a.wants.join(" or ")} to sell`
       : a.activity;
     const prod = RESOURCES.map(r => production[r] ? `${r} 1/${production[r]}` : `${r} –`).join(" · ");

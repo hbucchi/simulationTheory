@@ -13,8 +13,13 @@ NEED_FOR_RESOURCE = {"food": "hunger", "water": "thirst", "games": "boredom"}
 # A need reaching this level has consequences: hunger/thirst -> death, boredom -> depression.
 CRITICAL_LEVEL = 1.0
 
+# A reserve is at most this many times the base stockpile (when a resource falls 3x the trigger).
+MAX_STOCKPILE_LEVEL = 3
+
 # Every function below takes the game's Rules (thresholds, relief per unit,
-# price mode); they default to the standard rules.
+# price mode); they default to the standard rules. Functions that take
+# ``scarcity`` get {resource: decline} from the World (how much the average
+# units per agent fell over the scarcity window); None means no stockpiling.
 
 
 def market_prices(agents, rules=DEFAULT_RULES):
@@ -87,21 +92,56 @@ def demand(agent, resource, rules=DEFAULT_RULES):
     return max(0, units_to_satisfy(level, rules) - agent.inventory.count(resource))
 
 
-def spare(agent, resource, rules=DEFAULT_RULES):
-    """Units the agent can give away without hurting its own current needs."""
-    reserve = units_to_satisfy(getattr(agent, NEED_FOR_RESOURCE[resource]), rules)
+def net_use(agent, resource, rules=DEFAULT_RULES):
+    """Units per step the agent uses beyond what it produces itself (0 if self-sufficient)."""
+    rates = next((m.rates for m in agent.modules if hasattr(m, "rates")), {})
+    every = next((m.intervals.get(resource) for m in agent.modules if hasattr(m, "intervals")), 0)
+    used = rates.get(NEED_FOR_RESOURCE[resource], 0) / rules.relief_per_unit
+    return max(0.0, used - (1 / every if every else 0))
+
+
+def stockpile_target(agent, resource, rules=DEFAULT_RULES, scarcity=None):
+    """Units the agent wants in reserve because ``resource`` is becoming scarce (0 if it isn't).
+
+    Reserve = net use per step x stockpile_steps x (decline / trigger), capped at
+    MAX_STOCKPILE_LEVEL: the faster the resource disappears, the more it hoards.
+    """
+    if not scarcity or not rules.stockpiling_enabled:
+        return 0
+    decline = scarcity.get(resource, 0)
+    if decline < rules.scarcity_trigger:
+        return 0
+    level = min(MAX_STOCKPILE_LEVEL, decline / rules.scarcity_trigger)
+    return math.ceil(round(net_use(agent, resource, rules) * rules.stockpile_steps * level, 9))
+
+
+def stockpile_shortfall(agent, resource, rules=DEFAULT_RULES, scarcity=None):
+    return max(0, stockpile_target(agent, resource, rules, scarcity) - agent.inventory.count(resource))
+
+
+def wants_anything(agent, rules=DEFAULT_RULES, scarcity=None):
+    """Needs something now, or is below a stockpile reserve."""
+    return is_needy(agent, rules) or any(stockpile_shortfall(agent, r, rules, scarcity) for r in RESOURCES)
+
+
+def spare(agent, resource, rules=DEFAULT_RULES, scarcity=None):
+    """Units the agent can give away without hurting its current needs or its reserve."""
+    reserve = max(units_to_satisfy(getattr(agent, NEED_FOR_RESOURCE[resource]), rules),
+                  stockpile_target(agent, resource, rules, scarcity))
     return max(0, agent.inventory.count(resource) - reserve)
 
 
-def _settle_one(buyer, seller, buying, prices, rules):
+def _settle_one(buyer, seller, buying, prices, rules, scarcity=None, money_only=False):
     """Buyer gets one unit of ``buying``. Returns (resource given in exchange or None, money buyer paid).
 
     Payment preference: a resource the seller needs (barter), then money, then
     any other spare resource. In a barter the price difference is settled in
     money by whichever side got the cheaper deal. Returns None if the buyer
-    can't pay at all.
+    can't pay at all. ``money_only`` (stockpiling) never gives goods away.
     """
     price = prices[buying]
+    if money_only:
+        return (None, price) if buyer.money >= price else None
     needed_by_seller = [r for r in RESOURCES if r != buying and demand(seller, r, rules) > 0]
     others = [r for r in RESOURCES if r != buying and r not in needed_by_seller]
     for option in needed_by_seller + ["money"] + others:
@@ -109,7 +149,7 @@ def _settle_one(buyer, seller, buying, prices, rules):
             if buyer.money >= price:
                 return None, price
             continue
-        if spare(buyer, option, rules) == 0:
+        if spare(buyer, option, rules, scarcity) == 0:
             continue
         diff = price - prices[option]   # > 0: buyer tops up; < 0: seller gives change
         payer = buyer if diff > 0 else seller
@@ -132,21 +172,34 @@ def purchase_goal(buyer, resource, rules, rng=None):
     return math.ceil(round(needed * multiplier, 9))
 
 
-def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None):
-    """Buyer acquires what it needs (times a random multiplier) from seller at market prices.
+def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None):
+    """Buyer acquires what it needs (times a random multiplier) from seller at market prices,
+    plus any stockpile reserve it is missing.
 
     It stops when it reaches its goal, the seller has no spare left, or it
-    can't pay. Returns (bought, paid): bought = {resource: units}; paid =
-    {resource: units, "money": net money buyer -> seller (negative = change)}.
+    can't pay. Units bought only for the reserve are paid in money, up to
+    stockpile_budget of the money the buyer had at the start.
+    Returns (bought, paid, stocked): bought = {resource: units}; paid =
+    {resource: units, "money": net money buyer -> seller (negative = change)};
+    stocked = {resource: units of bought that went to the reserve}.
     """
-    bought, paid = {}, {}
+    bought, paid, stocked = {}, {}, {}
+    budget = buyer.money * rules.stockpile_budget
+    spent_on_reserve = 0.0
     wants = sorted(RESOURCES, key=lambda r: getattr(buyer, NEED_FOR_RESOURCE[r]), reverse=True)
     for resource in wants:
-        goal = purchase_goal(buyer, resource, rules, rng)
-        while buyer.inventory.count(resource) < goal and spare(seller, resource, rules) > 0:
-            settled = _settle_one(buyer, seller, resource, prices, rules)
+        need_goal = purchase_goal(buyer, resource, rules, rng)
+        goal = max(need_goal, stockpile_target(buyer, resource, rules, scarcity))
+        while buyer.inventory.count(resource) < goal and spare(seller, resource, rules, scarcity) > 0:
+            for_reserve = buyer.inventory.count(resource) >= need_goal
+            if for_reserve and spent_on_reserve + prices[resource] > budget:
+                break
+            settled = _settle_one(buyer, seller, resource, prices, rules, scarcity, money_only=for_reserve)
             if settled is None:
-                return bought, paid
+                return bought, paid, stocked
+            if for_reserve:
+                spent_on_reserve += prices[resource]
+                stocked[resource] = stocked.get(resource, 0) + 1
             given, money = settled
             transfer(seller, buyer, resource)
             if given:
@@ -155,22 +208,25 @@ def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None):
             pay(buyer, seller, money)
             paid["money"] = paid.get("money", 0.0) + money
             bought[resource] = bought.get(resource, 0) + 1
-    return bought, paid
+    return bought, paid, stocked
 
 
-def trade(a, b, prices, rules=DEFAULT_RULES, rng=None):
-    """Both agents buy what they need from each other, then consume. Returns a list of deals."""
+def trade(a, b, prices, rules=DEFAULT_RULES, rng=None, scarcity=None):
+    """Both agents buy what they need (and any stockpile) from each other, then consume.
+
+    Returns a list of deals: (buyer, seller, bought, paid, stocked).
+    """
     deals = []
     for buyer, seller in ((a, b), (b, a)):
-        bought, paid = buy(buyer, seller, prices, rules, rng)
+        bought, paid, stocked = buy(buyer, seller, prices, rules, rng, scarcity)
         if bought:
-            deals.append((buyer, seller, bought, paid))
+            deals.append((buyer, seller, bought, paid, stocked))
     consume(a, rules)
     consume(b, rules)
     return deals
 
 
-def unmet(buyer, seller, rules=DEFAULT_RULES):
+def unmet(buyer, seller, rules=DEFAULT_RULES, scarcity=None):
     """Why ``buyer`` still lacks something after dealing with ``seller`` (list of strings)."""
     reasons = []
     for resource in RESOURCES:
@@ -180,7 +236,7 @@ def unmet(buyer, seller, rules=DEFAULT_RULES):
         stock = seller.inventory.count(resource)
         if stock == 0:
             why = f"{seller.name} has none"
-        elif spare(seller, resource, rules) == 0:
+        elif spare(seller, resource, rules, scarcity) == 0:
             why = f"{seller.name} keeps its {stock} for itself"
         else:
             why = "nothing left to pay with"

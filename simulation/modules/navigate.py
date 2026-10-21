@@ -14,6 +14,8 @@ class Navigate(Module):
                    step, find the closest agent that has spare of what it
                    needs (most urgent need first) and walk straight at it.
        searching - same, but nobody has any to sell: keep wandering.
+    2b. stockpiling - not in need, but below its reserve of a resource that is
+                   becoming scarce: go to the nearest agent with spare of it.
     3. meeting   - another agent is seeking this one: walk toward that seeker,
                    so both close the gap and are guaranteed to touch.
     4. wandering - otherwise: random walk between random points.
@@ -43,6 +45,12 @@ class Navigate(Module):
             if seller is not None:
                 agent.seeking_for = resource
                 self._go_to(agent, "seeking", seller, world)
+                return
+        else:
+            seller, resource = world.nearest_seller(agent, stockpile=True)
+            if seller is not None:
+                agent.seeking_for = resource
+                self._go_to(agent, "stockpiling", seller, world)
                 return
 
         seekers = world.seekers_of(agent)
