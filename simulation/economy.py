@@ -53,6 +53,11 @@ def units_to_satisfy(level, rules=DEFAULT_RULES):
 
 
 def transfer(giver, receiver, resource, qty=1):
+    """Move ``qty`` units. Perishable units (labour) keep their expiry date, oldest given first."""
+    if resource in giver.inventory.perishable:
+        for expires, units in giver.inventory.take(resource, qty):
+            receiver.inventory.add(resource, units, expires=expires)
+        return
     giver.inventory.remove(resource, qty)
     receiver.inventory.add(resource, qty)
 
@@ -201,7 +206,8 @@ def _settle_one(buyer, seller, buying, prices, rules, scarcity=None, money_only=
     if money_only:
         return (None, price) if buyer.money >= price else None
     needed_by_seller = [r for r in RESOURCES if r != buying and demand(seller, r, rules) > 0]
-    others = [r for r in RESOURCES if r != buying and r not in needed_by_seller]
+    # Labour is only offered to a seller that needs it: anyone else would just watch it expire.
+    others = [r for r in RESOURCES if r != buying and r not in needed_by_seller and r != LABOR]
     for option in needed_by_seller + ["money"] + others:
         if option == "money":
             if buyer.money >= price:

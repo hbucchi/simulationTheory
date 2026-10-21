@@ -117,7 +117,8 @@ class EconomyTests(unittest.TestCase):
 class ProductionTests(unittest.TestCase):
     def test_agents_make_labour_and_no_goods_without_assets(self):
         world = bare_world()
-        agent = world.add_agent(Agent(0, 0, modules=[Production(labor_rate=0.5)]))
+        agent = world.add_agent(Agent(0, 0, inventory=Inventory(perishable={"labor": 100}),
+                                      modules=[Production(labor_rate=0.5)]))
         for _ in range(9):
             world.step()
         self.assertEqual(agent.inventory.to_dict(), {"labor": 4})     # 4.5 made; the half carries over

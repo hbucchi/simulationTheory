@@ -146,9 +146,16 @@ assets need labour:
 - By default, for each good 10% of the agents own all its assets (drawn
   separately per good), so about a quarter of the agents are **owners** and
   most are **workers** who own nothing and live by selling labour.
-- Owners keep labour for `labor_buffer_steps` (10) steps of what their
-  assets can employ and go out **hiring** when they fall below half of that;
-  workers go out **selling** their labour to owners who need it. Labour is a
+- **Labour expires** `labor_lifetime` (10) steps after it is made unless an
+  asset uses it or it is sold first (0 = never). Each step's labour is its own
+  batch: assets use the oldest first, sellers sell the oldest first, and
+  bought labour keeps its expiry date. So workers without assets have nothing
+  to fall back on unless they keep working and selling (or buy assets).
+- Owners keep labour for `labor_buffer_steps` (5) steps of what their assets
+  can employ and go out **hiring** when they fall below half of that; workers
+  go out **selling** their labour to owners who need it. Using it in
+  production is the only reason anyone buys labour, and labour is only
+  accepted as payment by a seller that needs it. Labour is a
   tradable resource with its own price (same formula as the goods) but meets
   no need and has no asset.
 

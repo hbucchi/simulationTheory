@@ -43,8 +43,14 @@ const SETUP_SECTIONS = [
     { path: "start_needs", label: "Starting needs", kind: "spread", min: 0, max: 1, step: 0.05 },
   ]},
   { title: "Labour", wide: true, hint: "Labour is the only thing agents make themselves. Food, water and games are only " +
-      "made by assets worked by labour, so agents without assets live by selling labour to owners.", fields: [
+      "made by assets worked by labour, so agents without assets live by selling labour to owners. Labour expires if it " +
+      "isn't used in production or sold in time, so workers have to keep working.", fields: [
     { path: "labor_rate", label: "Labour per step", kind: "spread", min: 0, step: 0.05 },
+  ]},
+  { title: "Labour expiry", hint: "Unused labour is lost after this many steps (0 = never). Owners keep a smaller buffer " +
+      "than this so the labour they buy is used before it expires.", fields: [
+    { path: "labor_lifetime", label: "Labour lasts (steps)", kind: "int", min: 0, max: 100000 },
+    { path: "labor_buffer_steps", label: "Owners keep labour for (steps)", kind: "int", min: 1, max: 100000 },
   ]},
   { title: "Resource consumption", wide: true, hint: "How fast each need grows per step, and how sleep recovers at rest.", fields: [
     ...per(NEEDS, n => ({ path: `rates.${n}`, label: `${cap(n)} / step`, kind: "spread", min: 0, max: 1, step: 0.001 })),
@@ -104,7 +110,6 @@ const SETUP_SECTIONS = [
     ...per(GOODS, r => ({ path: `productivity_growth.${r}`, label: `${cap(r)}: productivity growth (0.05 = 5%)`,
       kind: "float", min: -0.99, max: 100, step: 0.01 })),
     { path: "productivity_growth_steps", label: "… every (steps)", kind: "int", min: 1, max: 100000 },
-    { path: "labor_buffer_steps", label: "Owners keep labour for (steps)", kind: "int", min: 1, max: 100000 },
     ...per(GOODS, r => ({ path: `asset_return.${r}`, label: `${cap(r)} asset return (0.01 = 1%)`, kind: "float",
       min: 0.0001, max: 10, step: 0.001, enabledWhen: v => v.investing_enabled })),
     { path: "liquidity_units", label: "Keep cash for (units of each)", kind: "float", min: 0, step: 1,
@@ -584,6 +589,14 @@ function renderPreview(r, error) {
        (supply >= jobs ? `${(supply - jobs).toFixed(2)}/step more work than jobs (labour will be cheap).`
                        : `${(jobs - supply).toFixed(2)}/step more jobs than workers, so assets can't all run.`),
        supply >= jobs ? "" : "short");
+  if (r.labor_lifetime) {
+    line(`Labour expires ${r.labor_lifetime} steps after it is made unless used or sold; owners keep ` +
+         `${r.labor_buffer_steps} steps of their assets' labour.` +
+         (r.labor_buffer_steps >= r.labor_lifetime ? " Their buffer lasts as long as labour does or longer, so some bought labour will expire unused." : ""),
+         r.labor_buffer_steps >= r.labor_lifetime ? "short" : "");
+  } else {
+    line("Labour never expires: workers can save it up instead of selling it.");
+  }
   const stock = RESOURCES.map(x => avg(r.inventory[x]));
   const needPerStep = Math.max(...GOODS.map(x => avg(r.rates[NEED_FOR[x]]) / r.relief_per_unit));
   const goodsStock = Math.min(...GOODS.map(x => avg(r.inventory[x])));

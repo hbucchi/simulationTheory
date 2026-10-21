@@ -44,7 +44,7 @@ class AssetTests(unittest.TestCase):
         self.assertEqual(agent.inventory.count("water"), 0)
 
     def test_assets_need_labour(self):
-        world = world_with(investing_enabled=False, selling_enabled=False, asset_labor={"food": 1},
+        world = world_with(investing_enabled=False, selling_enabled=False, asset_labor={"food": 1}, labor_lifetime=0,
                            productivity_growth={"food": 0, "water": 0, "games": 0})
         idle = world.create_agent(inventory={"food": 0}, needs=CALM, rates=CALM, labor_rate=0, assets={"food": 1})
         half = world.create_agent(inventory={"food": 0}, needs=CALM, rates=CALM, labor_rate=0.5, assets={"food": 1})

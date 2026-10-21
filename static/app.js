@@ -341,7 +341,8 @@ function renderMarket() {
     const work = document.createElement("div");
     work.className = "market-title invest";
     work.textContent = `Labour · agents make ${m.labor_supply.toFixed(2)}/step · assets can employ ` +
-      `${m.labor_need.toFixed(2)}/step → ${m.labor_supply >= m.labor_need ? "more workers than jobs" : "more jobs than workers"}`;
+      `${m.labor_need.toFixed(2)}/step → ${m.labor_supply >= m.labor_need ? "more workers than jobs" : "more jobs than workers"}` +
+      (state.rules.labor_lifetime ? ` · ${m.labor_expired.toFixed(0)} expired unused so far` : "");
     ui.market.append(work);
   }
 }

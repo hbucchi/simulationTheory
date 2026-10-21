@@ -33,11 +33,14 @@ class Rules:
     movement: object = field(default_factory=lambda: {"dist": "uniform", "min": 5, "max": 25})
     start_needs: object = field(default_factory=lambda: {"dist": "uniform", "min": 0.0, "max": 0.5})
 
-    # Labour: every agent makes labor_rate units of labour per step (spread). Goods are only
-    # made by assets worked by labour (see Investment). Owners buy labour to keep
-    # labor_buffer_steps steps of what their assets can employ.
+    # Labour: every agent makes labor_rate units of labour per step (spread). Labour expires
+    # labor_lifetime steps after it was made (0 = never) unless it is used by an asset or sold
+    # first. Goods are only made by assets worked by labour (see Investment). Owners buy labour
+    # to keep labor_buffer_steps steps of what their assets can employ; owning or using labour
+    # in production is the only reason anyone buys it.
     labor_rate: object = 0.5
-    labor_buffer_steps: int = 10
+    labor_lifetime: int = 10
+    labor_buffer_steps: int = 5
 
     # Consumption: how fast needs grow (spreads), and what consuming does
     rates: dict = field(default_factory=lambda: {"hunger": 0.010, "sleep": 0.005, "thirst": 0.015,
@@ -212,6 +215,7 @@ LIMITS = {
     "asset_return": ((GOODS, 0.0001, 10, False), None, "map"),
     "productivity_growth": ((GOODS, -0.99, 100, False), None, "map"),
     "labor_buffer_steps": (1, 100000, "int"),
+    "labor_lifetime": (0, 100000, "int"),
     "productivity_growth_steps": (1, 100000, "int"),
     "min_investment": (0.01, 1e9, "float"),
     "liquidity_units": (0, 1e6, "float"),

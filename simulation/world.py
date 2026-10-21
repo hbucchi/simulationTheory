@@ -34,6 +34,7 @@ class World:
         self.tick = 0
         self.events = []  # newest last; trimmed to keep the payload small
         self.cooldowns = {}  # frozenset({id_a, id_b}) -> tick until which they ignore each other
+        self.labor_expired = 0.0     # labour that expired unused so far
         self.asset_trades = 0        # purchases of asset shares between agents
         self.asset_trade_money = 0.0
         # Units of each good one unit of labour makes right now (grows every step).
@@ -104,7 +105,8 @@ class World:
             x, y, name=name, **start_needs,
             money=round(draw(r.money, field="money"), 2) if money is None else money,
             movement=draw(r.movement, True, "movement") if movement is None else movement,
-            inventory=Inventory({**{k: draw(v, True, "inventory") for k, v in r.inventory.items()},
+            inventory=Inventory(perishable={economy.LABOR: r.labor_lifetime}, now=self.tick, items={
+                **{k: draw(v, True, "inventory") for k, v in r.inventory.items()},
                                  **(inventory or {})}),
             modules=modules,
         )
@@ -293,6 +295,9 @@ class World:
         self.grow_assets()
         self.update_scarcity()
         self.update_demand()
+        for agent in self.agents:
+            agent.inventory.now = self.tick
+            self.labor_expired += agent.inventory.expire().get(economy.LABOR, 0)
         for agent in list(self.agents):
             if agent not in self.agents:
                 continue
@@ -393,6 +398,7 @@ class World:
                 "asset_output": {g: self.asset_output(g, sum(a.assets.get(g, 0) for a in self.agents))
                                  for g in economy.GOODS},
                 "labor_need": sum(a.labor_need for a in self.agents),
+                "labor_expired": self.labor_expired,
                 "labor_supply": sum(next((m.labor_rate for m in a.modules if hasattr(m, "labor_rate")), 0)
                                     for a in self.agents),
                 "asset_trades": self.asset_trades,
