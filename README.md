@@ -192,18 +192,39 @@ The **Report** view (top bar: *Simulation | Report*) is a dashboard of the
 current game over the last 100 / 250 / 500 / all recorded steps (the world
 keeps one snapshot per step, up to 2,000):
 
-- headline numbers: population and deaths, total wealth and its change,
-  wealth and income per agent, Gini of wealth, money and assets, top 10%
-  share, government money created;
+- headline numbers in three groups, each with its change since the start of
+  the window (holdings compare first and last step; per-step flows compare the
+  average of the first and last ~5% of the window):
+  - **Distribution**: Gini of wealth, money, asset shares, income and
+    consumption; share held by the richest 10% and the poorest 50%; number of
+    asset owners;
+  - **Employment**: employment rate (agents who worked, on their own assets or
+    hired), participation (agents offering labour), unemployment (offered
+    labour nobody hired), unfilled jobs, capacity used, wage, labour share of
+    output (wages / value of goods produced), government spending;
+  - **Living standards**: population and deaths by cause, total wealth and
+    wealth per agent (money / goods / assets), income and consumption per agent,
+    wellbeing, share in need, share struggling (need for a job above 0.5);
 - prices of every resource over time, with now / min / avg / max / change;
 - production vs consumption of each good per step, with totals;
-- labour made, used, expired and bought by the government;
-- inequality over time (Gini) and Lorenz curves of who holds what now;
+- employment rates over time and an owners-vs-workers table;
+- labour capacity, used, unused and bought by the government;
+- workers' condition and hardship (in need, struggling, deaths by cause);
+- inequality of holdings (Gini) and Lorenz curves (money, shares, wealth,
+  income); inequality of income and consumption; wealth by fifth;
+- income by source (wages, goods sales, asset sales, government);
 - total wealth, income per step, the richest agents, trading activity and
   population.
 
-Wealth = money + goods + assets at current prices. Income = money received
-from selling goods, labour or assets, and from the government.
+**What wealth means.** An agent's wealth = money + the goods it holds at
+today's prices + its asset shares at today's asset prices. Asset prices come
+from profit (output value minus wages, over the return), so an asset that
+doesn't cover its wages is worth 0 even though it still produces; that is why
+asset *ownership* inequality is measured on shares, not value. Everyone starts
+with the same money and money is most of wealth, so the wealth Gini starts near
+0 and moves slowly; uneven or smaller starting money makes differences show up
+sooner. Income = money received, tagged by source. Income and consumption
+inequality use each agent's smoothed per-step income/consumption.
 `GET /api/report?window=N` returns the same data.
 
 Money is counted in units 100× those of the goods (agents start with 10,000),

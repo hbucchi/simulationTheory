@@ -22,7 +22,7 @@ const fmt = {
   money: (v) => v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
   num: (v, d = 2) => v.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }),
   pct: (v, d = 1) => `${(v * 100).toFixed(d)}%`,
-  signedPct: (v) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%`,
+  signedPct: (v) => `${v >= 0 ? "+" : "−"}${Math.abs(v * 100).toFixed(1)}%`,
 };
 
 // ---------- Small SVG line chart ----------
@@ -201,12 +201,26 @@ function smooth(values, w) {
 
 // ---------- The report ----------
 
-function kpi(label, value, note, tone = "") {
+// A headline figure with its change since the start of the window.
+// better: "up" / "down" (which direction is good) or null (neutral).
+function kpi(label, value, delta, note, better = null) {
   const card = Object.assign(document.createElement("div"), { className: "kpi" });
   card.append(Object.assign(document.createElement("div"), { className: "kpi-label", textContent: label }),
               Object.assign(document.createElement("div"), { className: "kpi-value", textContent: value }));
-  if (note) card.append(Object.assign(document.createElement("div"), { className: `kpi-note ${tone}`, textContent: note }));
+  if (delta) {
+    const tone = !better || delta.sign === 0 ? "" : (delta.sign > 0) === (better === "up") ? "good" : "bad";
+    card.append(Object.assign(document.createElement("div"), { className: `kpi-delta ${tone}`, textContent: delta.text }));
+  }
+  if (note) card.append(Object.assign(document.createElement("div"), { className: "kpi-note", textContent: note }));
   return card;
+}
+
+function kpiSection(title, cards) {
+  const wrap = document.createElement("section");
+  const grid = Object.assign(document.createElement("div"), { className: "kpi-grid" });
+  grid.append(...cards);
+  wrap.append(Object.assign(document.createElement("h2"), { className: "kpi-section-title", textContent: title }), grid);
+  return wrap;
 }
 
 function renderReport(r) {
@@ -222,20 +236,73 @@ function renderReport(r) {
     ? `Steps ${t.from_tick}–${r.tick} · ${t.steps} steps${t.steps < reportWindow ? " (all recorded so far)" : ""}`
     : "No steps recorded yet: press Step or Play.";
 
-  // Headline numbers.
-  reportUi.kpis.innerHTML = "";
+  // Headline numbers. Holdings compare the last step of the window with the first; per-step
+  // flows (income, unemployment, ...) compare the average of the first and last ~5% of the
+  // window so one noisy step doesn't decide the change.
+  const edge = (pts) => (fn) => pts.reduce((a, p) => a + fn(p), 0) / (pts.length || 1);
+  const head = edge(s.slice(0, w)), tail = edge(s.slice(-w));
+  const since = `since step ${t.from_tick}`;
+  const change = (now, start, kind) => {
+    if (!s.length || start == null || !isFinite(now) || !isFinite(start)) return null;
+    const d = now - start;
+    // Size of the change as displayed; anything that rounds to zero reads as "no change".
+    const size = kind === "pp" ? Math.abs(d * 100).toFixed(1)
+      : kind === "rel" ? (start ? Math.abs((now / start - 1) * 100).toFixed(1) : null)
+      : kind === "int" ? `${Math.abs(Math.round(d))}`
+      : Math.abs(d).toFixed(3);
+    if (size !== null && Number(size) === 0) return { sign: 0, text: `■ no change ${since}` };
+    const sign = Math.sign(d);
+    const plus = d >= 0 ? "+" : "−";
+    const unit = kind === "pp" ? " pts" : kind === "rel" ? "%" : "";
+    const text = size === null ? "new" : `${plus}${size}${unit}`;
+    return { sign, text: `${sign > 0 ? "▲" : "▼"} ${text} ${since}` };
+  };
+  const stock = (fn) => s.length ? { now: fn(r.end), start: fn(r.start) } : { now: fn(c), start: null };
+  const rate = (fn) => s.length ? { now: tail(fn), start: head(fn) } : { now: 0, start: null };
+  const perAgent = (v) => (p) => v(p) / (p.population || 1);
+  const consumedOf = (p) => GOODS.reduce((a, g) => a + p.consumed[g], 0);
+  const KPI = (label, m, format, kind, better, note) =>
+    kpi(label, format(m.now), change(m.now, m.start, kind), note, better);
+  const g2 = (v) => v.toFixed(2);
+  const pct = (v) => fmt.pct(v);
+  const whole = (v) => `${Math.round(v)}`;
   const n = c.population || 1;
+  const dead = t.deaths ? `${t.deaths} died (${t.deaths_hunger} hunger, ${t.deaths_thirst} thirst)` : "no deaths in this window";
+
+  reportUi.kpis.innerHTML = "";
   reportUi.kpis.append(
-    kpi("Population", `${c.population}`, t.deaths ? `${t.deaths} died in this window` : "no deaths in this window",
-        t.deaths ? "bad" : "good"),
-    kpi("Total wealth", fmt.money(c.wealth), `${fmt.signedPct(t.wealth_change)} over the window`,
-        t.wealth_change >= 0 ? "good" : "bad"),
-    kpi("Wealth per agent", fmt.money(c.wealth / n), `money ${fmt.money(c.money / n)} · assets ${fmt.money(c.asset_value / n)}`),
-    kpi("Income per agent", fmt.money(t.income_per_agent_step), "per step, from sales and government"),
-    kpi("Wealth inequality", c.gini_wealth.toFixed(2), `Gini · top 10% hold ${fmt.pct(c.top10_wealth)}`),
-    kpi("Money inequality", c.gini_money.toFixed(2), "Gini of money held"),
-    kpi("Asset concentration", c.gini_assets.toFixed(2), `Gini · ${c.owners} of ${c.population} agents own assets`),
-    kpi("Government money", fmt.money(t.gov_money), `created in this window · ${fmt.num(t.labor_gov, 1)} labour hired`),
+    kpiSection("Distribution", [
+      KPI("Wealth inequality", stock(p => p.gini_wealth), g2, "num", "down", "Gini of wealth"),
+      KPI("Money inequality", stock(p => p.gini_money), g2, "num", "down", "Gini of money held"),
+      KPI("Asset ownership", stock(p => p.gini_assets), g2, "num", "down", `Gini of shares · ${c.owners} of ${c.population} own some`),
+      KPI("Income inequality", stock(p => p.gini_income), g2, "num", "down", "Gini of smoothed income"),
+      KPI("Consumption inequality", stock(p => p.gini_consumption), g2, "num", "down", "Gini of smoothed consumption"),
+      KPI("Richest 10% hold", stock(p => p.top10_wealth), pct, "pp", "down", "share of all wealth"),
+      KPI("Poorest 50% hold", stock(p => p.bottom50_wealth), pct, "pp", "up", "share of all wealth (50% = equal)"),
+      KPI("Asset owners", stock(p => p.owners), whole, "int", "up", "agents holding any share"),
+    ]),
+    kpiSection("Employment", [
+      KPI("Employment rate", rate(p => p.employment), pct, "pp", "up", "agents who worked (own assets or hired)"),
+      KPI("Participation", rate(p => p.participation), pct, "pp", null, "agents offering labour"),
+      KPI("Unemployment", rate(p => p.unemployment), pct, "pp", "down", "offered labour nobody hired"),
+      KPI("Unfilled jobs", rate(p => p.unfilled_jobs), pct, "pp", "down", "jobs employers couldn't fill"),
+      KPI("Capacity used", rate(p => p.utilisation), pct, "pp", "up", "labour used ÷ labour capacity"),
+      KPI("Wage", rate(p => p.wage), fmt.money, "rel", "up", "market wage per unit of labour"),
+      KPI("Labour share of output", rate(p => p.labor_share_output), pct, "pp", null, "wages ÷ value of goods produced"),
+      KPI("Government spending", rate(p => p.gov_money), fmt.money, "rel", null,
+          `per step · ${fmt.money(t.gov_money)} created · ${fmt.num(t.labor_gov, 1)} labour hired`),
+    ]),
+    kpiSection("Living standards", [
+      KPI("Population", stock(p => p.population), whole, "int", "up", dead),
+      KPI("Total wealth", stock(p => p.wealth), fmt.money, "rel", "up", "money + goods + assets at current prices"),
+      KPI("Wealth per agent", stock(perAgent(p => p.wealth)), fmt.money, "rel", "up",
+          `money ${fmt.money(c.money / n)} · goods ${fmt.money(c.goods_value / n)} · assets ${fmt.money(c.asset_value / n)}`),
+      KPI("Income per agent", rate(perAgent(p => p.income)), fmt.money, "rel", "up", "per step, all sources"),
+      KPI("Consumption per agent", rate(perAgent(consumedOf)), (v) => fmt.num(v, 3), "rel", "up", "units of goods per step"),
+      KPI("Wellbeing", stock(p => p.wellbeing), g2, "num", "up", "average, 1 = all needs met"),
+      KPI("In need", stock(p => p.in_need), pct, "pp", "down", "agents with a need above the seek threshold"),
+      KPI("Struggling", stock(p => p.struggling), pct, "pp", "down", "agents who badly need a job"),
+    ]),
   );
 
   // Prices.
@@ -264,6 +331,25 @@ function renderReport(r) {
     return [cap(g), fmt.num(t.produced[g], 0), fmt.num(t.consumed[g], 0), netCell];
   }));
 
+  // Employment.
+  lineChart($("chart-employment"), { x, xLabel: "Step", yMax: 1, yFormat: (v) => fmt.pct(v, 0), title: "Employment",
+    tipFormat: (v) => fmt.pct(v),
+    series: [{ label: "Employment rate", color: SERIES[0], values: flow(p => p.employment) },
+             { label: "Participation", color: SERIES[1], values: flow(p => p.participation) },
+             { label: "Unemployment", color: SERIES[2], values: flow(p => p.unemployment) },
+             { label: "Unfilled jobs", color: SERIES[3], values: flow(p => p.unfilled_jobs) }] });
+  const grp = r.groups;
+  table($("table-groups"), ["", "Owners", "Workers"], [
+    ["Agents", `${grp.owners.count}`, `${grp.workers.count}`],
+    ["Share of wealth", fmt.pct(grp.owners.share), fmt.pct(grp.workers.share)],
+    ["Wealth", fmt.money(grp.owners.wealth), fmt.money(grp.workers.wealth)],
+    ["Money", fmt.money(grp.owners.money), fmt.money(grp.workers.money)],
+    ["Income / step", fmt.money(grp.owners.income), fmt.money(grp.workers.income)],
+    ["Worked this step", fmt.pct(grp.owners.worked), fmt.pct(grp.workers.worked)],
+    ["Wellbeing", grp.owners.wellbeing.toFixed(2), grp.workers.wellbeing.toFixed(2)],
+    ["Need for a job", grp.owners.job_need.toFixed(2), grp.workers.job_need.toFixed(2)],
+  ].map((row, i) => [row[0], grp.owners.count || !i ? row[1] : "–", grp.workers.count || !i ? row[2] : "–"]));
+
   // Labour.
   lineChart($("chart-labor"), { x, xLabel: "Step", title: "Labour per step",
     series: [{ label: "Capacity", color: SERIES[0], values: flow(p => p.labor_made) },
@@ -281,19 +367,40 @@ function renderReport(r) {
     series: [{ label: "Efficiency", color: SERIES[0], values: s.map(p => p.efficiency) },
              { label: "Wellbeing", color: SERIES[1], values: s.map(p => p.wellbeing) },
              { label: "Need for a job", color: SERIES[2], values: s.map(p => p.job_need) }] });
+  lineChart($("chart-hardship"), { x, xLabel: "Step", yMax: 1, yFormat: (v) => fmt.pct(v, 0), tipFormat: (v) => fmt.pct(v),
+    height: 160, title: "Hardship",
+    series: [{ label: "In need", color: SERIES[0], values: s.map(p => p.in_need) },
+             { label: "Struggling", color: SERIES[1], values: s.map(p => p.struggling) }] });
+  table($("table-deaths"), ["Deaths in window", "Count"], [
+    ["Hunger", `${t.deaths_hunger}`], ["Thirst", `${t.deaths_thirst}`], ["Total", `${t.deaths}`]]);
 
   // Inequality.
   const gFmt = (v) => v.toFixed(2);
   lineChart($("chart-gini"), { x, xLabel: "Step", yMax: 1, yFormat: gFmt, title: "Inequality (Gini)",
     series: [{ label: "Money", color: SERIES[0], values: s.map(p => p.gini_money) },
-             { label: "Assets", color: SERIES[1], values: s.map(p => p.gini_assets) },
+             { label: "Asset shares", color: SERIES[1], values: s.map(p => p.gini_assets) },
              { label: "Wealth", color: SERIES[2], values: s.map(p => p.gini_wealth) }] });
   const lx = r.lorenz.wealth.map(p => p[0]);
   lineChart($("chart-lorenz"), { x: lx, yMax: 1, reference: [[0, 0], [1, 1]], title: "Lorenz curves",
     xFormat: (v) => fmt.pct(v, 0), yFormat: (v) => fmt.pct(v, 0), xLabel: "Poorest",
     series: [{ label: "Money", color: SERIES[0], values: r.lorenz.money.map(p => p[1]) },
-             { label: "Assets", color: SERIES[1], values: r.lorenz.assets.map(p => p[1]) },
-             { label: "Wealth", color: SERIES[2], values: r.lorenz.wealth.map(p => p[1]) }] });
+             { label: "Asset shares", color: SERIES[1], values: r.lorenz.assets.map(p => p[1]) },
+             { label: "Wealth", color: SERIES[2], values: r.lorenz.wealth.map(p => p[1]) },
+             { label: "Income", color: SERIES[3], values: r.lorenz.income.map(p => p[1]) }] });
+  lineChart($("chart-gini-flows"), { x, xLabel: "Step", yMax: 1, yFormat: gFmt, title: "Income and consumption inequality",
+    series: [{ label: "Income", color: SERIES[0], values: s.map(p => p.gini_income) },
+             { label: "Consumption", color: SERIES[1], values: s.map(p => p.gini_consumption) }] });
+  const fifths = ["Poorest", "2nd", "Middle", "4th", "Richest"];
+  table($("table-quintiles"), ["Group", "Share of wealth", "Avg wealth", "Income / step", "Wellbeing"],
+    r.quintiles.map((q, i) => [fifths[i], fmt.pct(q.share), fmt.money(q.wealth), fmt.money(q.income), q.wellbeing.toFixed(2)]));
+
+  // Income by source.
+  const SOURCES = [["wages", "Wages"], ["goods", "Goods sales"], ["assets", "Asset sales"], ["government", "Government"]];
+  lineChart($("chart-sources"), { x, xLabel: "Step", title: "Income by source", tipFormat: fmt.money,
+    series: SOURCES.map(([k, label], i) => ({ label, color: SERIES[i], values: flow(p => p.income_sources[k]) })) });
+  const srcTotal = Object.values(t.income_sources).reduce((a, v) => a + v, 0) || 1;
+  table($("table-sources"), ["Source", "Total", "Share"], SOURCES.map(([k, label], i) =>
+    [swatchLabel(label, SERIES[i]), fmt.money(t.income_sources[k]), fmt.pct(t.income_sources[k] / srcTotal)]));
 
   // Wealth and income.
   lineChart($("chart-wealth"), { x, xLabel: "Step", title: "Total wealth", tipFormat: fmt.money,

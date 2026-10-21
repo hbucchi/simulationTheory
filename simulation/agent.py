@@ -82,7 +82,10 @@ class Agent:
         self.labor_bought = 0.0     # labour it hired this step
         self.employers = {}         # who it worked for this step -> units
         # This step's flows (income, produced, consumed, labour), reset by the World each step.
-        self.flow = {"income": 0.0, "produced": {}, "consumed": {}, "labor_made": 0.0, "labor_used": 0.0}
+        self.flow = {"income": 0.0, "sources": {}, "produced": {}, "consumed": {}, "labor_made": 0.0, "labor_used": 0.0}
+        # Smoothed per-step income and consumption (for income / consumption inequality).
+        self.income_avg = 0.0
+        self.consumption_avg = 0.0
         self.target_id = None
         self.seeking_for = None  # resource it is going to buy from target_id (Navigate)
         self.depart_heading = 0.0  # radians

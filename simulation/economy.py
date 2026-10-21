@@ -62,12 +62,18 @@ def transfer(giver, receiver, resource, qty=1):
     receiver.inventory.add(resource, qty)
 
 
+def earn(agent, amount, source):
+    """Record income for the report: source is "wages", "goods", "assets" or "government"."""
+    agent.flow["income"] += amount
+    agent.flow["sources"][source] = agent.flow["sources"].get(source, 0.0) + amount
+
+
 def pay(payer, payee, amount):
-    """Move money; whoever receives it (the payee, or the payer when it gets change) earns income."""
+    """Pay for goods; whoever receives money (the payee, or the payer when it gets change)
+    earns income from selling goods."""
     payer.money -= amount
     payee.money += amount
-    receiver = payee if amount > 0 else payer
-    receiver.flow["income"] += abs(amount)
+    earn(payee if amount > 0 else payer, abs(amount), "goods")
 
 
 def consume(agent, rules=DEFAULT_RULES):

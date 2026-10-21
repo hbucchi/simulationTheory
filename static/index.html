@@ -191,7 +191,28 @@
       </div>
     </div>
 
-    <div id="report-kpis" class="kpi-grid"></div>
+    <details class="card wealth-note">
+      <summary>What "wealth" and these measures mean</summary>
+      <div class="wealth-note-body">
+        <p><b>Wealth</b> of an agent = its <b>money</b> + the <b>goods</b> it holds valued at today's prices + its
+          <b>asset shares</b> valued at today's asset prices. Asset prices come from profit (output value minus wages,
+          divided by the return), so assets that don't cover their wages are worth 0 even though they still produce.
+          Wealth is a snapshot at current prices: it changes when prices move, not only when things change hands.</p>
+        <p><b>Why inequality moves slowly:</b> everyone starts with the same money, and money is most of wealth, so the
+          wealth Gini starts near 0 and only drifts as trades, wages and asset sales move money around. A few hundred
+          steps of small trades barely move it. Starting with less money (or uneven money), or less stock, makes
+          differences show up faster.</p>
+        <p><b>Gini</b>: 0 = everyone holds the same, 1 = one agent holds everything. <b>Income</b> and
+          <b>consumption</b> inequality use each agent's smoothed per-step income/consumption. <b>Asset
+          ownership</b> uses shares owned. Each figure below shows its change since the start of the window.</p>
+        <p><b>Employment rate</b> = agents who worked this step (on their own assets or hired).
+          <b>Participation</b> = agents offering labour. <b>Unemployment</b> = labour offered that nobody hired.
+          <b>Unfilled jobs</b> = jobs on assets employers wanted but could not fill. <b>Labour share of output</b> =
+          wages paid ÷ value of goods produced (owners working their own assets aren't paid a wage).</p>
+      </div>
+    </details>
+
+    <div id="report-kpis"></div>
 
     <div class="report-grid">
       <section class="card report-card span-2">
@@ -217,6 +238,18 @@
       </section>
 
       <section class="card report-card span-2">
+        <h2 class="card-title">Employment</h2>
+        <p class="card-sub">Share of agents who worked and who offered labour, share of offered labour nobody hired,
+          and share of jobs left unfilled (<span class="avg-note"></span>).</p>
+        <div id="chart-employment"></div>
+      </section>
+      <section class="card report-card">
+        <h2 class="card-title">Owners and workers</h2>
+        <p class="card-sub">Owners hold at least one asset share; workers hold none. Averages per agent now.</p>
+        <div id="table-groups"></div>
+      </section>
+
+      <section class="card report-card span-2">
         <h2 class="card-title">Labour</h2>
         <p class="card-sub">Units per step (<span class="avg-note"></span>): capacity, used on assets (own + hired),
           hired by the government, and unused (not offered, or offered but not hired).</p>
@@ -228,22 +261,53 @@
         <div id="table-labor"></div>
       </section>
 
-      <section class="card report-card span-3">
+      <section class="card report-card span-2">
         <h2 class="card-title">Workers' condition</h2>
         <p class="card-sub">Averages over all agents: efficiency (share of capacity they can give), wellbeing, and how much
           they need a job (0 = not at all, 1 = desperately).</p>
         <div id="chart-workers"></div>
       </section>
+      <section class="card report-card">
+        <h2 class="card-title">Hardship</h2>
+        <p class="card-sub">Share of agents with a need above the seek threshold, and share who badly need a job
+          (need above 0.5).</p>
+        <div id="chart-hardship"></div>
+        <div id="table-deaths"></div>
+      </section>
 
       <section class="card report-card span-2">
-        <h2 class="card-title">Inequality over time</h2>
-        <p class="card-sub">Gini: 0 = everyone holds the same, 1 = one agent holds everything.</p>
+        <h2 class="card-title">Inequality of what agents hold</h2>
+        <p class="card-sub">Gini of money, asset shares and wealth: 0 = everyone holds the same, 1 = one agent holds
+          everything.</p>
         <div id="chart-gini"></div>
       </section>
       <section class="card report-card">
         <h2 class="card-title">Who holds what now</h2>
         <p class="card-sub">Lorenz curves: share held by the poorest x% of agents. The dashed line is perfect equality.</p>
         <div id="chart-lorenz"></div>
+      </section>
+
+      <section class="card report-card span-2">
+        <h2 class="card-title">Inequality of income and consumption</h2>
+        <p class="card-sub">Gini of each agent's smoothed income and consumption per step.</p>
+        <div id="chart-gini-flows"></div>
+      </section>
+      <section class="card report-card">
+        <h2 class="card-title">Wealth by fifth</h2>
+        <p class="card-sub">Agents ranked by wealth, split into five equal groups (poorest first).</p>
+        <div id="table-quintiles"></div>
+      </section>
+
+      <section class="card report-card span-2">
+        <h2 class="card-title">Income by source</h2>
+        <p class="card-sub">Money earned per step (<span class="avg-note"></span>) from wages, selling goods, selling
+          asset shares and government hiring.</p>
+        <div id="chart-sources"></div>
+      </section>
+      <section class="card report-card">
+        <h2 class="card-title">Income sources</h2>
+        <p class="card-sub">Totals in this window.</p>
+        <div id="table-sources"></div>
       </section>
 
       <section class="card report-card">

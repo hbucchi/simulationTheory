@@ -165,7 +165,7 @@ class LaborMarket:
                 continue
             pay = units * worker.asking_wage
             worker.money += pay
-            worker.flow["income"] += pay
+            economy.earn(worker, pay, "government")
             worker.labor_sold += units
             worker.employers["Government"] = worker.employers.get("Government", 0) + units
             remaining[worker] -= units
@@ -188,7 +188,7 @@ class LaborMarket:
         pay = units * wage
         employer.money -= pay
         worker.money += pay
-        worker.flow["income"] += pay
+        economy.earn(worker, pay, "wages")
         worker.labor_sold += units
         worker.employers[employer.name] = worker.employers.get(employer.name, 0) + units
         employer.labor_available += units

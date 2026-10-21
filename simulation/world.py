@@ -347,6 +347,7 @@ class World:
                 self._dead_flows.append(agent.flow)
                 self.recorder.count("deaths")
                 cause = "hunger" if need == "hunger" else "thirst"
+                self.recorder.count(f"deaths_{cause}")
                 self.log(f"{agent.name} died of {cause}")
                 return True
         return False

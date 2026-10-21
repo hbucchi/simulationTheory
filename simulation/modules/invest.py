@@ -66,7 +66,7 @@ class Invest(Module):
                 shares = money / price
                 transfer_shares(seller, agent, resource, shares)
                 seller.money += money
-                seller.flow["income"] += money
+                economy.earn(seller, money, "assets")
                 agent.money -= money
                 spare -= money
                 bought[seller.name] = shares

@@ -5,12 +5,24 @@ what was produced and consumed, labour flows, trades, deaths). ``build_report``
 turns the last N snapshots plus the current state into the Report view's data.
 
 Definitions
-- wealth of an agent = money + inventory at current prices + asset shares at
-  current asset prices.
-- income of an agent in a step = money it received from selling goods, labour or
-  assets (barter change included) and from the government.
-- Gini = 0 when everyone holds the same, 1 when one agent holds everything.
+- wealth of an agent = money + goods it holds at current prices + its asset shares
+  at current asset prices (profit-based, so assets that lose money are worth 0).
+- income of an agent in a step = money it received, by source: wages (labour sold
+  to employers), goods (sales of goods, barter change included), assets (shares
+  sold) and government (labour hired by the government).
+- Gini = 0 when everyone holds the same, 1 when one agent holds everything. Income
+  and consumption inequality use each agent's smoothed per-step income/consumption.
+- Asset ownership concentration uses shares owned (not their value, which can be 0).
+- employment rate = share of agents that worked this step (own assets or hired);
+  participation = share that offered labour; unemployment = offered labour nobody
+  hired / labour offered; capacity used = labour used on assets / capacity;
+  unfilled jobs = jobs employers wanted but couldn't fill / jobs wanted.
+- in need = share of agents with a need above the seek threshold; struggling =
+  share whose need for a job is above 0.5.
 """
+
+INCOME_SOURCES = ("wages", "goods", "assets", "government")
+SMOOTHING = 0.05   # weight of the latest step in agents' smoothed income / consumption
 
 from collections import deque
 
@@ -54,15 +66,26 @@ def lorenz(values):
     return points
 
 
+def bottom_share(values, fraction=0.5):
+    """Share of the total held by the bottom ``fraction`` of agents."""
+    values = sorted(values)
+    total = sum(values)
+    if not values or total <= 0:
+        return 0.0
+    k = max(1, round(len(values) * fraction))
+    return sum(values[:k]) / total
+
+
 def agent_values(world):
-    """Per-agent money, asset value and wealth at current prices."""
+    """Per-agent money, goods, asset value, shares and wealth at current prices."""
     prices = world.current_prices()
     asset_prices = world.asset_prices(prices)
     rows = []
     for a in world.agents:
         goods = sum(a.inventory.amount(r) * prices[r] for r in economy.GOODS)
         assets = sum(shares * asset_prices[g] for g, shares in a.assets.items())
-        rows.append({"agent": a, "money": a.money, "assets": assets, "wealth": a.money + goods + assets})
+        rows.append({"agent": a, "money": a.money, "goods": goods, "assets": assets,
+                     "shares": sum(a.assets.values()), "wealth": a.money + goods + assets})
     return rows
 
 
@@ -76,16 +99,28 @@ class Recorder:
     def begin_step(self, world):
         for a in world.agents:
             a.flow = new_flow()
-        self.step_counts = {"deaths": 0, "goods_deals": 0, "asset_trades_before": world.asset_trades}
+        self.step_counts = {"deaths": 0, "deaths_hunger": 0, "deaths_thirst": 0, "goods_deals": 0,
+                            "asset_trades_before": world.asset_trades}
 
     def count(self, key, amount=1):
         self.step_counts[key] = self.step_counts.get(key, 0) + amount
 
     def end_step(self, world, dead_flows):
         flows = [a.flow for a in world.agents] + dead_flows
+        for a in world.agents:
+            a.income_avg += SMOOTHING * (a.flow["income"] - a.income_avg)
+            a.consumption_avg += SMOOTHING * (sum(a.flow["consumed"].values()) - a.consumption_avg)
         rows = agent_values(world)
         prices = world.current_prices()
         sc = self.step_counts
+        agents = world.agents
+        n = len(agents) or 1
+        L = world.labor.stats
+        produced = {g: sum(f["produced"].get(g, 0) for f in flows) for g in economy.GOODS}
+        sources = {k: sum(f["sources"].get(k, 0.0) for f in flows) for k in INCOME_SOURCES}
+        output_value = sum(produced[g] * prices[g] for g in economy.GOODS)
+        worked = sum(1 for a in agents if a.labor_sold > 1e-9 or min(a.capacity_now, a.labor_need) > 1e-9)
+        offering = sum(1 for a in agents if a.offered > 1e-9)
         self.history.append({
             "tick": world.tick,
             "population": len(world.agents),
@@ -96,10 +131,26 @@ class Recorder:
             "asset_value": sum(r["assets"] for r in rows),
             "income": sum(f["income"] for f in flows),
             "gini_money": gini([r["money"] for r in rows]),
-            "gini_assets": gini([r["assets"] for r in rows]),
+            "gini_assets": gini([r["shares"] for r in rows]),
             "gini_wealth": gini([r["wealth"] for r in rows]),
+            "gini_income": gini([a.income_avg for a in agents]),
+            "gini_consumption": gini([a.consumption_avg for a in agents]),
             "top10_wealth": top_share([r["wealth"] for r in rows]),
-            "produced": {g: sum(f["produced"].get(g, 0) for f in flows) for g in economy.GOODS},
+            "bottom50_wealth": bottom_share([r["wealth"] for r in rows]),
+            "owners": sum(1 for r in rows if r["shares"] > 1e-9),
+            "income_sources": sources,
+            "output_value": output_value,
+            "labor_share_output": (sources["wages"] / output_value) if output_value else 0.0,
+            "employment": worked / n,
+            "participation": offering / n,
+            "unemployment": (L["idle"] / L["offered"]) if L["offered"] else 0.0,
+            "utilisation": (L["own_use"] + L["hired"]) / L["capacity"] if L["capacity"] else 0.0,
+            "unfilled_jobs": (max(0.0, L["wanted"] - L["hired"]) / L["wanted"]) if L["wanted"] else 0.0,
+            "in_need": sum(1 for a in agents if economy.is_needy(a, world.rules)) / n,
+            "struggling": sum(1 for a in agents if a.job_need > 0.5) / n,
+            "deaths_hunger": sc["deaths_hunger"],
+            "deaths_thirst": sc["deaths_thirst"],
+            "produced": produced,
             "consumed": {g: sum(f["consumed"].get(g, 0) for f in flows) for g in economy.GOODS},
             # Labour: capacity (after efficiency), used on assets (own + hired), hired by the
             # government, unused (nobody bought it), and the wage.
@@ -121,7 +172,7 @@ class Recorder:
 
 
 def new_flow():
-    return {"income": 0.0, "produced": {}, "consumed": {}, "labor_made": 0.0, "labor_used": 0.0}
+    return {"income": 0.0, "sources": {}, "produced": {}, "consumed": {}, "labor_made": 0.0, "labor_used": 0.0}
 
 
 def _average(snapshots):
@@ -170,12 +221,40 @@ def build_report(world, window=None):
         "asset_trades": sum(s["asset_trades"] for s in history),
         "income": sum(s["income"] for s in history),
         "gov_money": sum(s["gov_money"] for s in history),
+        "deaths_hunger": sum(s["deaths_hunger"] for s in history),
+        "deaths_thirst": sum(s["deaths_thirst"] for s in history),
+        "income_sources": {k: sum(s["income_sources"][k] for s in history) for k in INCOME_SOURCES},
+        "output_value": sum(s["output_value"] for s in history),
         "wealth_change": (last.get("wealth", 0) / first["wealth"] - 1) if history and first["wealth"] else 0.0,
         "population_start": first.get("population", len(world.agents)),
     }
     totals["income_per_agent_step"] = totals["income"] / steps / max(1, len(world.agents))
+    # Owners vs workers, and wealth by fifths of the population (poorest first).
+    def group(members):
+        k = len(members) or 1
+        return {"count": len(members),
+                "wealth": sum(r["wealth"] for r in members) / k,
+                "money": sum(r["money"] for r in members) / k,
+                "income": sum(r["agent"].income_avg for r in members) / k,
+                "wellbeing": sum(r["agent"].wellbeing for r in members) / k,
+                "job_need": sum(r["agent"].job_need for r in members) / k,
+                "worked": sum(1 for r in members if r["agent"].labor_sold > 1e-9
+                              or min(r["agent"].capacity_now, r["agent"].labor_need) > 1e-9) / k,
+                "share": sum(r["wealth"] for r in members) / total_wealth}
+    groups = {"owners": group([r for r in rows if r["shares"] > 1e-9]),
+              "workers": group([r for r in rows if r["shares"] <= 1e-9])}
+    ordered = sorted(rows, key=lambda r: r["wealth"])
+    quintiles = []
+    for q in range(5):
+        members = ordered[round(len(ordered) * q / 5):round(len(ordered) * (q + 1) / 5)]
+        quintiles.append(group(members))
+
     return {
         "tick": world.tick,
+        "start": history[0] if history else None,
+        "end": history[-1] if history else None,
+        "groups": groups,
+        "quintiles": quintiles,
         "series": series,
         "totals": totals,
         "prices": price_stats,
@@ -185,12 +264,16 @@ def build_report(world, window=None):
             "wealth": sum(r["wealth"] for r in rows),
             "asset_value": sum(r["assets"] for r in rows),
             "gini_money": gini([r["money"] for r in rows]),
-            "gini_assets": gini([r["assets"] for r in rows]),
+            "gini_assets": gini([r["shares"] for r in rows]),
             "gini_wealth": gini([r["wealth"] for r in rows]),
             "top10_wealth": top_share([r["wealth"] for r in rows]),
-            "owners": sum(1 for a in world.agents if a.assets),
+            "bottom50_wealth": bottom_share([r["wealth"] for r in rows]),
+            "owners": sum(1 for r in rows if r["shares"] > 1e-9),
+            "goods_value": sum(r["goods"] for r in rows),
         },
-        "lorenz": {key: lorenz([r[key] for r in rows]) for key in ("money", "assets", "wealth")},
+        "lorenz": {"money": lorenz([r["money"] for r in rows]), "assets": lorenz([r["shares"] for r in rows]),
+                   "wealth": lorenz([r["wealth"] for r in rows]),
+                   "income": lorenz([r["agent"].income_avg for r in rows])},
         "top_agents": [{"id": r["agent"].id, "name": r["agent"].name, "color": r["agent"].color,
                         "wealth": r["wealth"], "share": r["wealth"] / total_wealth, "money": r["money"],
                         "assets": r["assets"]} for r in top],
