@@ -330,6 +330,31 @@ class WorldTests(unittest.TestCase):
         self.assertEqual(seeker.target_id, second.id)
         self.assertEqual(seeker.x, 500)                         # it turned around toward it
 
+    def test_seeker_skips_agents_without_spare_and_goes_to_a_seller(self):
+        world = bare_world()
+        thirsty = world.create_agent(inventory={"water": 0}, needs={"thirst": 0.9}, movement=5, x=500, y=500)
+        dry = world.create_agent(inventory={"water": 0}, movement=1, x=550, y=500)       # closer, no water
+        seller = world.create_agent(inventory={"water": 50}, needs={"thirst": 0}, movement=1, x=300, y=500)
+        world.step()
+        self.assertEqual((thirsty.activity, thirsty.target_id, thirsty.seeking_for), ("seeking", seller.id, "water"))
+        self.assertEqual(thirsty.x, 495)  # walked away from the dry agent, toward the seller
+
+    def test_most_urgent_need_is_sought_first(self):
+        world = bare_world()
+        agent = world.create_agent(inventory={"water": 0, "food": 0}, needs={"thirst": 0.9, "hunger": 0.6},
+                                   x=500, y=500)
+        world.create_agent(inventory={"food": 50, "water": 0}, needs={"hunger": 0}, x=520, y=500)
+        water_seller = world.create_agent(inventory={"water": 50, "food": 0}, needs={"thirst": 0}, x=900, y=500)
+        world.step()
+        self.assertEqual((agent.target_id, agent.seeking_for), (water_seller.id, "water"))
+
+    def test_nobody_to_buy_from_means_searching(self):
+        world = bare_world()
+        agent = world.create_agent(inventory={"water": 0}, needs={"thirst": 0.9}, x=500, y=500)
+        world.create_agent(inventory={"water": 0}, x=900, y=900)
+        world.step()
+        self.assertEqual((agent.activity, agent.target_id), ("searching", None))
+
     def test_bump_without_needs_is_ignored(self):
         world = bare_world()
         calm = {"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0}

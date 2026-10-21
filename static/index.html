@@ -45,9 +45,39 @@
 
       <section id="tab-overview" role="tabpanel">
         <div id="market" class="market"></div>
-        <div id="agents"></div>
         <h2>Events</h2>
         <ol id="events" reversed></ol>
+        <h2>Agents <span id="agent-shown" class="count"></span></h2>
+        <div class="agent-tools">
+          <input id="agent-search" type="search" placeholder="Search name…" aria-label="Search agents by name">
+          <select id="agent-filter" aria-label="Filter agents">
+            <option value="all">All agents</option>
+            <option value="needy">Needs something</option>
+            <option value="seeking">Seeking a seller</option>
+            <option value="searching">Searching (no seller)</option>
+            <option value="meeting">Meeting a seeker</option>
+            <option value="leaving">Leaving a trade</option>
+            <option value="sleeping">Sleeping</option>
+            <option value="wandering">Wandering</option>
+            <option value="depressed">Depressed</option>
+          </select>
+          <select id="agent-sort" aria-label="Sort agents">
+            <option value="id">Sort: ID</option>
+            <option value="name">Sort: name</option>
+            <option value="money">Sort: money</option>
+            <option value="food">Sort: food</option>
+            <option value="water">Sort: water</option>
+            <option value="games">Sort: games</option>
+            <option value="urgency">Sort: most urgent need</option>
+            <option value="hunger">Sort: hunger</option>
+            <option value="thirst">Sort: thirst</option>
+            <option value="sleep">Sort: sleep</option>
+            <option value="boredom">Sort: boredom</option>
+            <option value="movement">Sort: movement</option>
+          </select>
+          <button id="agent-sort-dir" type="button" title="Toggle ascending / descending">↓ desc</button>
+        </div>
+        <div id="agents"></div>
       </section>
 
       <section id="tab-manage" role="tabpanel" hidden>

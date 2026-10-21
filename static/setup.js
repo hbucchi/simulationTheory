@@ -79,8 +79,10 @@ const PRESETS = [
   ["current", "This game's rules"],
   ["factory", "Factory defaults", {}],
   ["balanced", "Balanced (no shortages)", { rates: { thirst: 0.01 } }],
-  ["lean", "Lean start (10 of each: lots of trading)", { inventory: { food: 10, water: 10, games: 10 },
-    rates: { thirst: 0.01 } }],
+  // Small stocks + production that differs between agents: some run short, others have surplus.
+  ["lean", "Lean start (small stocks, varied production: lots of trading)", {
+    inventory: { food: 10, water: 10, games: 10 }, rates: { thirst: 0.01 },
+    production: Object.fromEntries(RESOURCES.map(r => [r, { dist: "normal", mean: 10, std: 5, limit: 3, skew: 0 }])) }],
   ["specialists", "Specialists (production varies a lot)", { production: Object.fromEntries(RESOURCES.map(r =>
     [r, { dist: "normal", mean: 12, std: 10, limit: 3, skew: 4 }])) }],
   ["unequal", "Unequal wealth (1% hold 50% of money)", { money: { dist: "tiered", average: 100, tiers: EXAMPLE_TIERS } }],

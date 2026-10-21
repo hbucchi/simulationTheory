@@ -10,9 +10,10 @@ class Navigate(Module):
     0. sleeping  - resting to recover sleep (Rest module): stay still. Others
                    can still walk up to it and trade.
     1. leaving   - just traded: walk along the departure heading.
-    2. seeking   - a need is above the seek threshold and stock is gone: every step, find the
-                   closest available agent (it can't know who has what) and
-                   walk straight at its current position.
+    2. seeking   - a need is above the seek threshold and stock is gone: every
+                   step, find the closest agent that has spare of what it
+                   needs (most urgent need first) and walk straight at it.
+       searching - same, but nobody has any to sell: keep wandering.
     3. meeting   - another agent is seeking this one: walk toward that seeker,
                    so both close the gap and are guaranteed to touch.
     4. wandering - otherwise: random walk between random points.
@@ -35,10 +36,13 @@ class Navigate(Module):
                                agent.y + math.sin(agent.depart_heading) * agent.movement, world)
             return
 
-        if economy.is_needy(agent, world.rules):
-            partner = world.nearest_partner(agent)
-            if partner is not None:
-                self._go_to(agent, "seeking", partner, world)
+        agent.seeking_for = None
+        needy = economy.is_needy(agent, world.rules)
+        if needy:
+            seller, resource = world.nearest_seller(agent)
+            if seller is not None:
+                agent.seeking_for = resource
+                self._go_to(agent, "seeking", seller, world)
                 return
 
         seekers = world.seekers_of(agent)
@@ -46,7 +50,7 @@ class Navigate(Module):
             self._go_to(agent, "meeting", min(seekers, key=agent.distance_to), world)
             return
 
-        agent.activity = "wandering"
+        agent.activity = "searching" if needy else "wandering"
         agent.target_id = None
         if self.wander_target is None or (agent.x, agent.y) == self.wander_target:
             self.wander_target = world.random_position()

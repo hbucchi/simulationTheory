@@ -143,10 +143,20 @@ class World:
         return [o for o in self.agents
                 if o.activity == "seeking" and o.target_id == agent.id and not self.in_cooldown(agent, o)]
 
-    def nearest_partner(self, agent):
-        """Closest other agent that ``agent`` hasn't just met, or None."""
-        others = [o for o in self.agents if o is not agent and not self.in_cooldown(agent, o)]
-        return min(others, key=agent.distance_to, default=None)
+    def nearest_seller(self, agent):
+        """Closest agent with spare of what ``agent`` needs: (seller, resource) or (None, None).
+
+        Needs are tried most urgent first, so a thirsty and slightly hungry agent
+        looks for water before food. Agents it has just met are skipped.
+        """
+        wanted = [r for r in economy.RESOURCES if economy.demand(agent, r, self.rules) > 0]
+        wanted.sort(key=lambda r: getattr(agent, economy.NEED_FOR_RESOURCE[r]), reverse=True)
+        for resource in wanted:
+            sellers = [o for o in self.agents if o is not agent and not self.in_cooldown(agent, o)
+                       and economy.spare(o, resource, self.rules) > 0]
+            if sellers:
+                return min(sellers, key=agent.distance_to), resource
+        return None, None
 
     def contacts(self):
         """All pairs of agents currently close enough to interact."""

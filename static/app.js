@@ -13,6 +13,11 @@ const ui = {
   reset: $("reset"),
   showRange: $("show-range"),
   agents: $("agents"),
+  agentShown: $("agent-shown"),
+  agentSearch: $("agent-search"),
+  agentFilter: $("agent-filter"),
+  agentSort: $("agent-sort"),
+  agentSortDir: $("agent-sort-dir"),
   market: $("market"),
   events: $("events"),
   tabs: document.querySelectorAll(".tabs button"),
@@ -211,7 +216,10 @@ function draw() {
     ctx.beginPath(); ctx.moveTo(byId[a].x, byId[a].y); ctx.lineTo(byId[b].x, byId[b].y); ctx.stroke();
   }
 
+  const filtering = isFiltering();
   for (const agent of state.agents) {
+    // Agents hidden by the Overview filter are faded so the matching ones stand out.
+    ctx.globalAlpha = filtering && !matchesFilter(agent) ? 0.15 : 1;
     if (ui.showRange.checked) {
       ctx.fillStyle = agent.color + "18";
       ctx.strokeStyle = agent.color + "55";
@@ -253,6 +261,7 @@ function draw() {
     const ly = agent.y - DOT_RADIUS - 2 < 14 ? agent.y + DOT_RADIUS + 14 : agent.y - DOT_RADIUS - 2;
     ctx.fillText(agent.name, lx, ly);
   }
+  ctx.globalAlpha = 1;
 }
 
 function needColor(v) {
@@ -286,9 +295,71 @@ function renderMarket() {
   ui.market.append(row);
 }
 
+// ---------- Overview: search, filter and sort agents ----------
+
+const agentView = { query: "", filter: "all", sort: "id", desc: true };
+
+const SORT_VALUE = {
+  id: a => a.id,
+  name: a => a.name.toLowerCase(),
+  money: a => a.money,
+  movement: a => a.movement,
+  urgency: a => Math.max(...NEEDS.map(n => a.needs[n])),
+  ...Object.fromEntries(RESOURCES.map(r => [r, a => a.inventory[r] ?? 0])),
+  ...Object.fromEntries(NEEDS.map(n => [n, a => a.needs[n]])),
+};
+
+const isFiltering = () => agentView.query !== "" || agentView.filter !== "all";
+
+function matchesFilter(a) {
+  if (agentView.query && !a.name.toLowerCase().includes(agentView.query)) return false;
+  switch (agentView.filter) {
+    case "all": return true;
+    case "needy": return a.wants.length > 0 || a.activity === "sleeping";
+    case "depressed": return a.depressed;
+    default: return a.activity === agentView.filter;
+  }
+}
+
+function visibleAgents() {
+  const key = SORT_VALUE[agentView.sort];
+  const dir = agentView.desc ? -1 : 1;
+  return state.agents.filter(matchesFilter).sort((a, b) => {
+    const x = key(a), y = key(b);
+    return (x < y ? -1 : x > y ? 1 : a.id - b.id) * dir;
+  });
+}
+
+function onAgentViewChange() {
+  agentView.query = ui.agentSearch.value.trim().toLowerCase();
+  agentView.filter = ui.agentFilter.value;
+  agentView.sort = ui.agentSort.value;
+  ui.agentSortDir.textContent = agentView.desc ? "↓ desc" : "↑ asc";
+  renderAgents();
+  draw();
+}
+ui.agentSearch.oninput = onAgentViewChange;
+ui.agentFilter.onchange = onAgentViewChange;
+ui.agentSort.onchange = () => {
+  // Text and IDs read best A→Z / 1→n; amounts read best largest first.
+  agentView.desc = !["id", "name"].includes(ui.agentSort.value);
+  onAgentViewChange();
+};
+ui.agentSortDir.onclick = () => { agentView.desc = !agentView.desc; onAgentViewChange(); };
+agentView.desc = false;  // default: ID ascending
+
 function renderAgents() {
   ui.agents.innerHTML = "";
-  for (const a of state.agents) {
+  const shown = visibleAgents();
+  ui.agentShown.textContent = shown.length === state.agents.length
+    ? `(${shown.length})` : `(${shown.length} of ${state.agents.length})`;
+  if (!shown.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-list";
+    empty.textContent = "No agents match.";
+    ui.agents.append(empty);
+  }
+  for (const a of shown) {
     const card = document.createElement("div");
     card.className = "agent" + (a.id === selectedId ? " selected" : "");
     card.onclick = () => { selectedId = selectedId === a.id ? null : a.id; render(state); };
@@ -334,7 +405,7 @@ function renderAgents() {
     const fields = [
       ...RESOURCES.map(r => [r, a.inventory[r] ?? 0, production[r] ? `+1 / ${production[r]} steps` : "no production"]),
       ["money", a.money.toFixed(2)],
-      ["movement", a.depressed ? `${a.speed} px (halved, ${a.movement} normally)` : `${a.speed} px`],
+      ["movement", a.depressed ? `${a.speed} px (depressed, ${a.movement} normally)` : `${a.speed} px`],
     ];
     for (const [label, value, title] of fields) {
       const span = document.createElement("span");
@@ -350,9 +421,10 @@ function renderAgents() {
     const act = document.createElement("b");
     act.className = a.activity;
     const target = state.agents.find(o => o.id === a.target_id);
-    act.textContent = !target ? a.activity
-      : a.activity === "seeking" ? `seeking ${target.name} (needs ${a.wants.join(", ")})`
-      : `meeting ${target.name}`;
+    act.textContent = a.activity === "seeking" && target ? `seeking ${target.name} to buy ${a.seeking_for}`
+      : a.activity === "meeting" && target ? `meeting ${target.name}`
+      : a.activity === "searching" ? `searching: nobody has ${a.wants.join(" or ")} to sell`
+      : a.activity;
     const prod = RESOURCES.map(r => production[r] ? `${r} 1/${production[r]}` : `${r} –`).join(" · ");
     activity.append(act);
     if (a.depressed) {

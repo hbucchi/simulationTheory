@@ -70,7 +70,7 @@ aside { flex: 0 1 380px; min-width: 0; }
 .meta { margin-top: 8px; font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .meta b { color: var(--text); font-weight: 600; }
 
-#events { margin: 0; padding-left: 0; list-style: none; max-height: 240px; overflow-y: auto; font-size: 12px; color: var(--muted); }
+#events { margin: 0; padding-left: 0; list-style: none; max-height: 180px; overflow-y: auto; font-size: 12px; color: var(--muted); }
 #events li span { color: var(--text); }
 #events:empty::before { content: "No interactions yet."; }
 #events li { margin-bottom: 2px; }
@@ -176,3 +176,13 @@ button.primary { background: var(--accent); color: var(--panel); border-color: v
   .tiers { grid-column: 1 / -1; }
   .tier-row { grid-template-columns: 1fr 1fr; }
 }
+
+/* ---------- Overview: agent sort / filter ---------- */
+h2 .count { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.agent-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.agent-tools input[type=search] { flex: 1 1 120px; min-width: 0; }
+.agent-tools select { font: inherit; font-size: 12px; color: var(--text); background: var(--panel);
+  border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; }
+.agent-tools button { font-size: 12px; padding: 4px 10px; }
+.activity .searching { color: #b5651d; }
+.empty-list { font-size: 12px; color: var(--muted); }

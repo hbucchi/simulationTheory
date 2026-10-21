@@ -67,6 +67,7 @@ class Agent:
         self.depressed = False  # set by the Mood module; slows movement and sleep recovery
         self.depression_factor = 0.5  # set from the game rules by the World
         self.target_id = None
+        self.seeking_for = None  # resource it is going to buy from target_id (Navigate)
         self.depart_heading = 0.0  # radians
         self.depart_steps = 0
 
@@ -119,6 +120,7 @@ class Agent:
             "color": self.color,
             "activity": self.activity,
             "target_id": self.target_id,
+            "seeking_for": self.seeking_for,
             "wants": [r for r, n in economy.NEED_FOR_RESOURCE.items() if getattr(self, n) > rules.seek_threshold],
             "modules": {type(m).__name__: m.to_dict() for m in self.modules},
         }
