@@ -7,7 +7,7 @@ from collections import deque
 from . import distributions, economy
 from .agent import Agent
 from .inventory import Inventory
-from .modules import Consume, Mood, Navigate, NeedsDecay, Production, Rest
+from .modules import Consume, Invest, Mood, Navigate, NeedsDecay, Production, Rest
 from .rules import SPREADS, Rules
 
 AGENT_COLORS = ["#e4572e", "#29335c", "#f3a712", "#669bbc", "#a8c686", "#8e44ad", "#16a085", "#c0392b"]
@@ -34,6 +34,12 @@ class World:
         self.tick = 0
         self.events = []  # newest last; trimmed to keep the payload small
         self.cooldowns = {}  # frozenset({id_a, id_b}) -> tick until which they ignore each other
+        # The asset builder: receives the money paid for assets and pays it back out as income.
+        self.builder_funds = 0.0     # held right now
+        self.asset_spending = 0.0    # paid for assets so far
+        self.builder_paid_out = 0.0  # paid back to agents so far
+        self.asset_resales = 0       # assets bought from other agents
+        self.asset_resale_money = 0.0
         # Average units per living agent of each resource, one entry per step, for the
         # last scarcity_window steps; scarcity = how much that average fell over the window.
         self.per_agent_history = {r: deque(maxlen=self.rules.scarcity_window + 1) for r in economy.RESOURCES}
@@ -63,7 +69,7 @@ class World:
 
     def create_agent(self, *, inventory=None, money=None, production=None,
                      rates=None, sleep_recovery=None, movement=None, needs=None, name=None,
-                     x=None, y=None):
+                     x=None, y=None, assets=None):
         """Create an agent with the standard modules. Anything omitted comes from the rules.
 
         ``inventory`` / ``production`` override per resource;
@@ -90,6 +96,7 @@ class World:
                    Production({**{k: draw(v, True, "production") for k, v in r.production.items()},
                                **(production or {})}),
                    Consume()]
+        modules.append(Invest())
         if r.depression_enabled:
             modules.append(Mood())
         modules.append(Navigate())
@@ -102,11 +109,16 @@ class World:
             modules=modules,
         )
         agent.depression_factor = r.depression_factor
+        drawn = {k: draw(v, True, "assets") for k, v in r.assets.items()}
+        agent.assets = {k: v for k, v in {**drawn, **(assets or {})}.items() if v}
         return self.add_agent(agent)
 
     def update_agent(self, agent, *, name=None, x=None, y=None, needs=None, inventory=None,
-                     money=None, movement=None, production=None, rates=None, sleep_recovery=None):
+                     money=None, movement=None, production=None, rates=None, sleep_recovery=None,
+                     assets=None):
         """Change any of an existing agent's settings; omitted fields stay as they are."""
+        for resource, count in (assets or {}).items():
+            agent.assets[resource] = count
         if name:
             agent.name = name
         agent.x, agent.y = self.clamp_position(agent.x if x is None else x, agent.y if y is None else y)
@@ -141,8 +153,11 @@ class World:
         money = distributions.allocate(r.money, n, self.rng, False, *SPREADS["money"][1:3])
         stock = {k: distributions.allocate(v, n, self.rng, True, *SPREADS["inventory"][1:3])
                  for k, v in r.inventory.items()}
+        assets = {k: distributions.allocate(v, n, self.rng, True, *SPREADS["assets"][1:3])
+                  for k, v in r.assets.items()}
         for i in range(n):
-            self.create_agent(money=round(money[i], 2), inventory={k: v[i] for k, v in stock.items()})
+            self.create_agent(money=round(money[i], 2), inventory={k: v[i] for k, v in stock.items()},
+                              assets={k: v[i] for k, v in assets.items()})
 
     def in_cooldown(self, a, b):
         return self.cooldowns.get(frozenset((a.id, b.id)), -1) >= self.tick
@@ -201,9 +216,24 @@ class World:
         for r, price in self.current_prices().items():
             self.price_history[r].append(price)
 
+    def pay_builder(self, amount):
+        self.builder_funds += amount
+        self.asset_spending += amount
+
+    def pay_out_builder(self):
+        """The builder pays builder_payout_rate of its funds to all living agents, evenly."""
+        if not self.agents or self.builder_funds <= 0:
+            return
+        payout = self.builder_funds * self.rules.builder_payout_rate
+        share = payout / len(self.agents)
+        for agent in self.agents:
+            agent.money += share
+        self.builder_funds -= payout
+        self.builder_paid_out += payout
+
     def current_prices(self):
         """Base price (scarcity formula or fixed) x demand-pressure multiplier."""
-        base = economy.market_prices(self.agents, self.rules)
+        base = economy.market_prices(self.agents, self.rules, self.builder_funds)
         return {r: base[r] * self.price_multiplier[r] for r in economy.RESOURCES}
 
     def unit_markups(self):
@@ -230,6 +260,7 @@ class World:
         before the check ran.
         """
         self.tick += 1
+        self.pay_out_builder()
         self.update_scarcity()
         self.update_demand()
         for agent in list(self.agents):
@@ -307,18 +338,24 @@ class World:
             "rules": self.rules.to_dict(),
             "market": {
                 "prices": self.current_prices(),
-                "base_prices": economy.market_prices(self.agents, self.rules),
+                "base_prices": economy.market_prices(self.agents, self.rules, self.builder_funds),
                 "multiplier": self.price_multiplier,
                 "buyers": self.buyers,
                 "sellers": self.sellers,
                 "markups": self.unit_markups(),
                 "price_history": {r: list(h) for r, h in self.price_history.items()},
+                "assets": {r: sum(a.assets.get(r, 0) for a in self.agents) for r in economy.RESOURCES},
+                "asset_spending": self.asset_spending,
+                "builder_funds": self.builder_funds,
+                "builder_paid_out": self.builder_paid_out,
+                "asset_resales": self.asset_resales,
+                "asset_resale_money": self.asset_resale_money,
                 # Average units per agent over the scarcity window (oldest first) and how much it fell.
                 "per_agent_history": {r: list(h) for r, h in self.per_agent_history.items()},
                 "scarcity": self.scarcity,
                 "stockpiling": {r: self.rules.stockpiling_enabled and d >= self.rules.scarcity_trigger
                                 for r, d in self.scarcity.items()},
-                "money": sum(a.money for a in self.agents),
+                "money": sum(a.money for a in self.agents) + self.builder_funds,
                 "units": {r: sum(a.inventory.count(r) for a in self.agents) for r in economy.RESOURCES},
             },
             "agents": [dict(a.to_dict(self.rules), reserve={

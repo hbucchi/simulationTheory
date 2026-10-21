@@ -66,6 +66,7 @@ class Agent:
         self.sleeping = False  # set by the Rest module; a sleeping agent stays still
         self.depressed = False  # set by the Mood module; slows movement and sleep recovery
         self.depression_factor = 0.5  # set from the game rules by the World
+        self.assets = {}  # resource -> number of productive assets owned (Invest module)
         self.target_id = None
         self.seeking_for = None  # resource it is going to buy from target_id (Navigate)
         self.depart_heading = 0.0  # radians
@@ -115,6 +116,7 @@ class Agent:
             "money": round(self.money, 2),
             "movement": self.movement,
             "speed": self.speed,
+            "assets": dict(self.assets),
             "depressed": self.depressed,
             "inventory": self.inventory.to_dict(),
             "color": self.color,

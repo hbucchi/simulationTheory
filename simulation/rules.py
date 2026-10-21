@@ -22,6 +22,7 @@ class Rules:
     # Starting agents (spreads)
     agents: int = 3
     inventory: dict = field(default_factory=lambda: {"food": 100, "water": 100, "games": 100})
+    assets: dict = field(default_factory=lambda: {"food": 0, "water": 0, "games": 0})
     money: object = 100.0
     movement: object = field(default_factory=lambda: {"dist": "uniform", "min": 5, "max": 25})
     start_needs: object = field(default_factory=lambda: {"dist": "uniform", "min": 0.0, "max": 0.5})
@@ -52,6 +53,19 @@ class Rules:
     scarcity_trigger: float = 0.1
     stockpile_steps: int = 100
     stockpile_budget: float = 0.5
+
+    # Investment: agents keep liquidity (money for liquidity_units of every resource at
+    # current prices) and spend the rest on assets. One asset of a resource costs
+    # asset_price[r] and adds asset_return[r] (0.01 = 1%) to the owner's production of it.
+    # An investor first buys existing assets from agents short of cash (below their own
+    # liquidity), paying them; only when nobody sells does the asset builder make a new one.
+    # The builder pays builder_payout_rate of what it holds back to all living agents each
+    # step, split evenly (like wages).
+    investing_enabled: bool = True
+    builder_payout_rate: float = 0.01
+    asset_price: dict = field(default_factory=lambda: {"food": 10.0, "water": 10.0, "games": 10.0})
+    asset_return: dict = field(default_factory=lambda: {"food": 0.01, "water": 0.01, "games": 0.01})
+    liquidity_units: float = 3
 
     # Prices
     price_mode: str = "scarcity"       # "scarcity": money/units*(1-share); "fixed": fixed_prices
@@ -131,6 +145,7 @@ class Rules:
 # Only amounts that can be shared out between agents (inventory, money) may be tiered.
 SPREADS = {
     "inventory": (RESOURCES, 0, 1e9, True, True),
+    "assets": (RESOURCES, 0, 1e9, True, True),
     "money": (None, 0, 1e12, False, True),
     "movement": (None, 1, 200, True, False),
     "start_needs": (None, 0, 1, False, False),
@@ -157,6 +172,11 @@ LIMITS = {
     "price_floor": (0.01, 1, "float"),
     "price_cap": (1, 100, "float"),
     "unit_markup": (0, 1, "float"),
+    "investing_enabled": (None, None, "bool"),
+    "asset_price": ((RESOURCES, 0.01, 1e9, False), None, "map"),
+    "asset_return": ((RESOURCES, 0, 10, False), None, "map"),
+    "liquidity_units": (0, 1e6, "float"),
+    "builder_payout_rate": (0, 1, "float"),
     "purchase_min": (1, 10, "float"),
     "purchase_max": (1, 10, "float"),
     "price_mode": (PRICE_MODES, None, "choice"),

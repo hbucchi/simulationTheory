@@ -118,6 +118,34 @@ Overview market panel shows base price × multiplier, buyers vs sellers, an
 arrow and a price chart. All of it is set in *Market dynamics: demand
 pressure* on the setup screen.
 
+### Investment
+
+Each step an agent keeps **liquidity**: enough money to buy 3 units of every
+resource at current prices. Everything above that it spends on **assets**.
+
+- One asset per resource type. Owning n assets of a resource raises the
+  owner's production of it by n × asset return (1% by default): e.g. 9 water
+  assets make water come 9% faster. Asset price and return are set per
+  resource on the setup screen (10 money and 1% by default).
+- The agent buys as many as it can afford of the asset that adds the most
+  income per money spent: return ÷ steps per unit × current price ÷ asset
+  price. Assets for a resource it doesn't produce add nothing, so they are
+  never bought.
+- Agents can start with assets: the *Starting agents* section has a row per
+  asset with the usual distributions (fixed, uniform, normal, tiered).
+- The buyer first buys existing assets from agents that are **short of cash**
+  (less than their liquidity plus the cost of what they need to buy right
+  now), most cash-short first, and pays them; a seller stops once it has the
+  cash it needs. Only the rest are new assets.
+- Money for new assets goes to the **asset builder**, which pays 1% of what it holds
+  back to all living agents each step, split evenly (like wages). Total money
+  stays constant, and the builder's money still counts toward the price level.
+  Agents reinvest the income, so production keeps growing.
+
+The market panel shows assets owned, the builder's funds and the totals
+invested and paid back; cards show each agent's assets and production boost;
+*Manage agents* can edit assets.
+
 ### Prices
 
 Prices are recomputed from what everyone holds at the moment of each trade:

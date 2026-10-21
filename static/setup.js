@@ -35,6 +35,8 @@ const SETUP_SECTIONS = [
   { title: "Starting agents", wide: true,
     hint: "What each new agent begins with. Every row has its own distribution; “Copy to all resources” reuses one.", fields: [
     ...per(RESOURCES, r => ({ path: `inventory.${r}`, label: cap(r), kind: "spread", whole: true, tiered: true, min: 0 })),
+    ...per(RESOURCES, r => ({ path: `assets.${r}`, label: `${cap(r)} assets`, kind: "spread", whole: true, tiered: true,
+      min: 0 })),
     { path: "money", label: "Money", kind: "spread", tiered: true, min: 0, step: 0.01 },
     { path: "movement", label: "Movement (px)", kind: "spread", whole: true, min: 1, max: 200 },
     { path: "start_needs", label: "Starting needs", kind: "spread", min: 0, max: 1, step: 0.05 },
@@ -75,6 +77,18 @@ const SETUP_SECTIONS = [
       enabledWhen: v => v.demand_pricing_enabled },
     { path: "unit_markup", label: "Extra unit costs more (0.05 = +5%)", kind: "float", min: 0, max: 1, step: 0.01,
       full: true, enabledWhen: v => v.demand_pricing_enabled },
+  ]},
+  { title: "Investment", hint: "Agents keep money for a few units of every resource and invest the rest in " +
+      "assets that raise their production. Asset money goes to a builder that pays it back to all agents as income.", fields: [
+    { path: "investing_enabled", label: "Agents invest in assets", kind: "bool", full: true },
+    ...per(RESOURCES, r => ({ path: `asset_price.${r}`, label: `${cap(r)} asset price`, kind: "float", min: 0.01, step: 0.5,
+      enabledWhen: v => v.investing_enabled })),
+    ...per(RESOURCES, r => ({ path: `asset_return.${r}`, label: `${cap(r)} asset return (0.01 = 1%)`, kind: "float",
+      min: 0, max: 10, step: 0.005, enabledWhen: v => v.investing_enabled })),
+    { path: "liquidity_units", label: "Keep cash for (units of each)", kind: "float", min: 0, step: 1,
+      enabledWhen: v => v.investing_enabled },
+    { path: "builder_payout_rate", label: "Builder pays out per step (0.01 = 1%)", kind: "float", min: 0, max: 1,
+      step: 0.005, enabledWhen: v => v.investing_enabled },
   ]},
   { title: "Need thresholds", hint: "When agents act on a need, and what consuming does.", fields: [
     { path: "seek_threshold", label: "Act above", kind: "float", min: 0, max: 1, step: 0.05 },
@@ -563,6 +577,21 @@ function renderPreview(r, error) {
     line(`Demand pressure: 9 buyers for 1 seller → price ×${at(9, 1).toFixed(2)}; 1 buyer for 9 sellers → ` +
          `×${at(1, 9).toFixed(2)}. Prices close ${(r.price_adjust_speed * 100).toFixed(0)}% of the gap each step` +
          (r.unit_markup ? `, and the 5th unit in one deal costs ×${((1 + r.unit_markup) ** 4).toFixed(2)} the first.` : "."));
+  }
+
+  if (r.investing_enabled) {
+    const units = RESOURCES.map(x => avg(r.inventory[x]));
+    const total = units.reduce((a, b) => a + b, 0);
+    const parts = RESOURCES.map((x, i) => {
+      const price = r.price_mode === "fixed" ? r.fixed_prices[x] : (total ? avg(r.money) / total * (1 - units[i] / total) : 0);
+      const every = avg(r.production[x]);
+      const income = every ? r.asset_return[x] / every * price : 0;
+      return `${x} ${income ? "~" + Math.round(r.asset_price[x] / income).toLocaleString() + " steps" : "never"}`;
+    });
+    const cash = avg(r.money);
+    line(`Investment: an average agent starts with ${cash.toFixed(0)} money and buys about ` +
+         `${Math.floor(cash / Math.min(...RESOURCES.map(x => r.asset_price[x])))} assets at once. ` +
+         `At starting prices one asset pays for itself in: ${parts.join(", ")}.`);
   }
 
   const g = avg(r.rates.sleep), rec = avg(r.sleep_recovery);

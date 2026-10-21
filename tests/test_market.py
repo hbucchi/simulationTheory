@@ -7,7 +7,8 @@ CALM = {"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0}
 
 
 def world_with(**rules):
-    return World(seed=1, rules=Rules.from_dict(rules))
+    # Investing is off unless a test turns it on: asset purchases would spend the money under test.
+    return World(seed=1, rules=Rules.from_dict({"investing_enabled": False, **rules}))
 
 
 class ScarcityTests(unittest.TestCase):

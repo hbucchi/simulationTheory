@@ -22,7 +22,7 @@ MAX_STOCKPILE_LEVEL = 3
 # units per agent fell over the scarcity window); None means no stockpiling.
 
 
-def market_prices(agents, rules=DEFAULT_RULES):
+def market_prices(agents, rules=DEFAULT_RULES, extra_money=0.0):
     """Money price of one unit of each resource.
 
     "fixed" mode: the prices set in the rules. "scarcity" mode, from what
@@ -32,10 +32,12 @@ def market_prices(agents, rules=DEFAULT_RULES):
 
     where share of r = units of r / total units. The scarcer a resource
     (smaller share), the higher its price. No goods at all -> every price is 0.
+    ``extra_money`` is money held outside the agents that still belongs to the
+    economy (the asset builder's funds, on their way back to the agents).
     """
     if rules.price_mode == "fixed":
         return dict(rules.fixed_prices)
-    money = sum(a.money for a in agents)
+    money = sum(a.money for a in agents) + extra_money
     units = {r: sum(a.inventory.count(r) for a in agents) for r in RESOURCES}
     total = sum(units.values())
     if total == 0:

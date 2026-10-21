@@ -200,3 +200,6 @@ h2 .count { text-transform: none; letter-spacing: 0; font-weight: 400; }
 .price-move.down { color: #3f8f3a; }
 .market-row .pressure { font-size: 10px; }
 .spark.stock { opacity: .6; }
+
+/* ---------- Investment ---------- */
+.market-title.invest { margin: 8px 0 0; }

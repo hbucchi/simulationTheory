@@ -2,12 +2,18 @@ import math
 import unittest
 
 from simulation import Agent, Inventory, World, economy
+from simulation.rules import Rules
 from simulation.modules import NeedsDecay, Production
+
+
+def no_invest():
+    """These tests check other mechanics; asset purchases would add log lines and spend money."""
+    return Rules.from_dict({"investing_enabled": False})
 
 
 def bare_world():
     """World with no random agents; tests place their own."""
-    return World(seed=1)
+    return World(rules=no_invest(), seed=1)
 
 
 class AgentTests(unittest.TestCase):
@@ -261,7 +267,7 @@ class WorldTests(unittest.TestCase):
         self.assertEqual(agent.money, 100.0)
 
     def test_agents_stay_in_box_and_within_movement(self):
-        world = World(seed=7)
+        world = World(rules=no_invest(), seed=7)
         world.spawn_random_agents(3)
         for _ in range(500):
             before = [(a.x, a.y) for a in world.agents]
@@ -296,7 +302,7 @@ class WorldTests(unittest.TestCase):
 
     def test_slow_seeker_always_reaches_faster_agent(self):
         for seed in range(20):
-            world = World(seed=seed)
+            world = World(rules=no_invest(), seed=seed)
             seeker = world.create_agent(inventory={"water": 0}, needs={"thirst": 0.6},
                                         rates={"thirst": 0.005}, production={"water": 0},
                                         movement=5)  # survives the 45-step chase
@@ -382,7 +388,7 @@ class WorldTests(unittest.TestCase):
         self.assertIn(f"{seeker.name} got", world.events[0]["message"])
 
     def test_same_seed_is_reproducible(self):
-        a, b = World(seed=3), World(seed=3)
+        a, b = World(rules=no_invest(), seed=3), World(rules=no_invest(), seed=3)
         a.spawn_random_agents(3)
         b.spawn_random_agents(3)
         for _ in range(300):
