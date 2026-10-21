@@ -24,7 +24,8 @@ const SETUP_SECTIONS = [
     { path: "seed", label: "Seed", kind: "int", optional: true, placeholder: "random" },
     { path: "contact_distance", label: "Touch distance (px)", kind: "float", min: 1, max: 200, step: 1 },
     { path: "depart_steps", label: "Walk apart (steps)", kind: "int", min: 0, max: 1000 },
-    { path: "cooldown_steps", label: "Ignore each other (steps)", kind: "int", min: 0, max: 10000 },
+    { path: "cooldown_steps", label: "Ignore each other after a deal (steps)", kind: "int", min: 0, max: 10000 },
+    { path: "retry_steps", label: "… after no deal (steps)", kind: "int", min: 0, max: 10000 },
   ]},
   { title: "Prices", hint: "Scarcity: total money ÷ total units × (1 − share of that resource). Fixed: the prices below.", fields: [
     { path: "price_mode", label: "Price rule", kind: "choice", full: true,
@@ -35,14 +36,16 @@ const SETUP_SECTIONS = [
   { title: "Starting agents", wide: true,
     hint: "What each new agent begins with. Every row has its own distribution; “Copy to all resources” reuses one.", fields: [
     ...per(RESOURCES, r => ({ path: `inventory.${r}`, label: cap(r), kind: "spread", whole: true, tiered: true, min: 0 })),
-    ...per(RESOURCES, r => ({ path: `assets.${r}`, label: `${cap(r)} assets (shares)`, kind: "spread", tiered: true,
+    ...per(GOODS, r => ({ path: `assets.${r}`, label: `${cap(r)} assets (shares)`, kind: "spread", tiered: true,
       min: 0, step: 0.1 })),
     { path: "money", label: "Money", kind: "spread", tiered: true, min: 0, step: 0.01 },
     { path: "movement", label: "Movement (px)", kind: "spread", whole: true, min: 1, max: 200 },
     { path: "start_needs", label: "Starting needs", kind: "spread", min: 0, max: 1, step: 0.05 },
   ]},
-  { title: "Resource production", wide: true, hint: "Each agent makes 1 unit every N steps (0 = never). Lower N = faster.", fields:
-    per(RESOURCES, r => ({ path: `production.${r}`, label: cap(r), kind: "spread", whole: true, min: 0 })) },
+  { title: "Labour", wide: true, hint: "Labour is the only thing agents make themselves. Food, water and games are only " +
+      "made by assets worked by labour, so agents without assets live by selling labour to owners.", fields: [
+    { path: "labor_rate", label: "Labour per step", kind: "spread", min: 0, step: 0.05 },
+  ]},
   { title: "Resource consumption", wide: true, hint: "How fast each need grows per step, and how sleep recovers at rest.", fields: [
     ...per(NEEDS, n => ({ path: `rates.${n}`, label: `${cap(n)} / step`, kind: "spread", min: 0, max: 1, step: 0.001 })),
     { path: "sleep_recovery", label: "Sleep recovery", kind: "spread", min: 0, max: 1, step: 0.01 },
@@ -88,19 +91,22 @@ const SETUP_SECTIONS = [
     { path: "unit_markup", label: "Extra unit costs more (0.05 = +5%)", kind: "float", min: 0, max: 1, step: 0.01,
       full: true, enabledWhen: v => v.demand_pricing_enabled },
   ]},
-  { title: "Investment", hint: "Each resource has its own asset. The only assets are the starting ones; " +
-      "they change hands between agents and their output grows over time. Asset price = output per step × resource price " +
-      "÷ return, so a dearer resource makes its assets dearer. Agents invest spare cash in assets of what they lack, " +
-      "buying from owners that are short of cash or hold more than the stock cap of that resource.", fields: [
+  { title: "Assets, productivity and investment", hint: "Each good has its own asset. One asset share employs up to " +
+      "“jobs per asset” labour per step; each unit of labour makes “productivity” units of the good, and productivity grows " +
+      "over time. Output = productivity × min(labour, shares × jobs per asset). The only assets are the starting ones; they " +
+      "change hands between agents. Asset price = output per step × good price ÷ return. Agents invest spare cash in assets " +
+      "of what they lack, buying from owners short of cash or holding more than the stock cap of that good.", fields: [
     { path: "investing_enabled", label: "Agents buy and sell assets", kind: "bool", full: true },
-    ...per(RESOURCES, r => ({ path: `asset_output.${r}`, label: `${cap(r)} asset output/step`, kind: "float", min: 0,
-      step: 0.01, enabledWhen: v => v.investing_enabled })),
-    ...per(RESOURCES, r => ({ path: `asset_return.${r}`, label: `${cap(r)} return (0.01 = 1%)`, kind: "float",
+    ...per(GOODS, r => ({ path: `asset_labor.${r}`, label: `${cap(r)}: jobs per asset (labour/step)`, kind: "float",
+      min: 0, step: 0.05 })),
+    ...per(GOODS, r => ({ path: `productivity.${r}`, label: `${cap(r)}: units per labour`, kind: "float", min: 0,
+      step: 0.1 })),
+    ...per(GOODS, r => ({ path: `productivity_growth.${r}`, label: `${cap(r)}: productivity growth (0.05 = 5%)`,
+      kind: "float", min: -0.99, max: 100, step: 0.01 })),
+    { path: "productivity_growth_steps", label: "… every (steps)", kind: "int", min: 1, max: 100000 },
+    { path: "labor_buffer_steps", label: "Owners keep labour for (steps)", kind: "int", min: 1, max: 100000 },
+    ...per(GOODS, r => ({ path: `asset_return.${r}`, label: `${cap(r)} asset return (0.01 = 1%)`, kind: "float",
       min: 0.0001, max: 10, step: 0.001, enabledWhen: v => v.investing_enabled })),
-    ...per(RESOURCES, r => ({ path: `asset_growth.${r}`, label: `${cap(r)} output growth (0.05 = 5%)`, kind: "float",
-      min: -0.99, max: 100, step: 0.01, enabledWhen: v => v.investing_enabled })),
-    { path: "asset_growth_steps", label: "… every (steps)", kind: "int", min: 1, max: 100000,
-      enabledWhen: v => v.investing_enabled },
     { path: "liquidity_units", label: "Keep cash for (units of each)", kind: "float", min: 0, step: 1,
       enabledWhen: v => v.investing_enabled },
     { path: "min_investment", label: "Invest once spare cash ≥", kind: "float", min: 0.01, step: 1,
@@ -135,14 +141,14 @@ const PRESETS = [
   ["current", "This game's rules"],
   ["factory", "Factory defaults", {}],
   ["balanced", "Balanced (no shortages)", { rates: { thirst: 0.01 } }],
-  // Small stocks + production that differs between agents: some run short, others have surplus.
-  ["lean", "Lean start (small stocks, varied production: lots of trading)", {
-    inventory: { food: 10, water: 10, games: 10 }, rates: { thirst: 0.01 },
-    production: Object.fromEntries(RESOURCES.map(r => [r, { dist: "normal", mean: 10, std: 5, limit: 3, skew: 0 }])) }],
-  ["specialists", "Specialists (production varies a lot)", { production: Object.fromEntries(RESOURCES.map(r =>
-    [r, { dist: "normal", mean: 12, std: 10, limit: 3, skew: 4 }])) }],
+  // Small stocks: agents need each other (and owners need workers) from the start.
+  ["lean", "Lean start (small stocks: lots of trading)", {
+    inventory: { food: 10, water: 10, games: 10, labor: 0 }, stock_cap: 20 }],
+  ["spread", "Spread ownership (everyone owns some assets)", { assets: Object.fromEntries(GOODS.map(g =>
+    [g, { dist: "uniform", min: 0, max: 2 }])) }],
   ["unequal", "Unequal wealth (1% hold 50% of money)", { money: { dist: "tiered", average: 100, tiers: EXAMPLE_TIERS } }],
-  ["drought", "Drought (water is rare)", { inventory: { water: 30 }, production: { water: 40 } }],
+  ["drought", "Drought (few water assets)", { inventory: { water: 30 }, assets: { water: { dist: "tiered", average: 0.4,
+    tiers: [{ agents: 10, share: 100 }, { agents: 90, share: 0 }] } } }],
   ["easy", "Easy (no death or depression)", { death_enabled: false, depression_enabled: false }],
   ["barter", "Barter (fixed 1:1 prices)", { price_mode: "fixed", fixed_prices: { food: 1, water: 1, games: 1 } }],
 ];
@@ -204,7 +210,7 @@ function buildSpreadRow(f) {
     label.append(labels[p], numberInput(`${f.path}#${p}`, attrs[p]));
     params.append(label);
   }
-  // Rows of the same group (inventory.*, production.*, rates.*) can share a distribution.
+  // Rows of the same group (inventory.*, assets.*, rates.*) can share a distribution.
   const group = f.path.includes(".") ? f.path.split(".")[0] : null;
   const copy = document.createElement("button");
   copy.type = "button";
@@ -553,33 +559,37 @@ function renderPreview(r, error) {
   const avg = (spec) => spreadMean(spec);
   const varies = (spec) => typeof spec !== "number";
 
-  for (const res of RESOURCES) {
-    const need = NEED_FOR[res];
+  // Can the economy feed everyone? Goods need assets (capacity) and labour (to staff them).
+  const n = r.agents;
+  const sharesPerAgent = (g) => avg(r.assets[g]);
+  const perShare = (g) => r.asset_labor[g] * r.productivity[g];
+  for (const g of GOODS) {
+    const need = NEED_FOR[g];
     const rate = avg(r.rates[need]);
-    const every = avg(r.production[res]);
-    const used = rate / r.relief_per_unit;
-    const made = every ? 1 / every : 0;
-    const net = made - used;
-    const head = `${cap(res)}: an average agent uses ${used.toFixed(3)} and makes ${made.toFixed(3)} per step`;
-    if (Math.abs(net) < 1e-9) line(`${head} → balanced.`);
-    else if (net > 0) line(`${head} → surplus of ${net.toFixed(3)}/step to trade.`, "surplus");
+    const use = rate / r.relief_per_unit * n;
+    const capacity = sharesPerAgent(g) * n * perShare(g);
+    const head = `${cap(g)}: agents use ${use.toFixed(2)}/step; its assets can make ${capacity.toFixed(2)}/step when fully staffed`;
+    if (capacity >= use) line(`${head}.`, "surplus");
     else {
-      const lasts = Math.round(avg(r.inventory[res]) / -net);
-      let text = `${head} → short ${(-net).toFixed(3)}/step. Its starting stock lasts ~${lasts} steps.`;
+      const lasts = Math.round(avg(r.inventory[g]) / ((use - capacity) / n));
+      let text = `${head} → short ${(use - capacity).toFixed(2)}/step; stocks last ~${lasts} steps.`;
       const toCritical = rate ? Math.round((1 - r.seek_threshold) / rate) : Infinity;
       if (need !== "boredom" && r.death_enabled) text += ` Then ${need} kills in ~${toCritical} steps.`;
-      if (need === "boredom" && r.depression_enabled) text += ` Then depression after ~${toCritical} steps.`;
       line(text, "short");
     }
-    if (varies(r.production[res]) || varies(r.rates[need]) || varies(r.inventory[res])) {
-      line(`   ${cap(res)} differs between agents, so some will have surplus to sell to others.`);
-    }
   }
+  const supply = avg(r.labor_rate) * n;
+  const jobs = GOODS.reduce((sum, g) => sum + sharesPerAgent(g) * n * r.asset_labor[g], 0);
+  line(`Labour: agents make ${supply.toFixed(2)}/step and assets can employ ${jobs.toFixed(2)}/step → ` +
+       (supply >= jobs ? `${(supply - jobs).toFixed(2)}/step more work than jobs (labour will be cheap).`
+                       : `${(jobs - supply).toFixed(2)}/step more jobs than workers, so assets can't all run.`),
+       supply >= jobs ? "" : "short");
   const stock = RESOURCES.map(x => avg(r.inventory[x]));
-  const needPerStep = Math.max(...RESOURCES.map(x => avg(r.rates[NEED_FOR[x]]) / r.relief_per_unit));
-  if (Math.min(...stock) / needPerStep > 300) {
-    line(`Agents start with enough of everything for ${Math.round(Math.min(...stock) / needPerStep)}+ steps, ` +
-         "so they won't need to trade for a long time. Lower the starting inventory for more trading.");
+  const needPerStep = Math.max(...GOODS.map(x => avg(r.rates[NEED_FOR[x]]) / r.relief_per_unit));
+  const goodsStock = Math.min(...GOODS.map(x => avg(r.inventory[x])));
+  if (goodsStock / needPerStep > 300) {
+    line(`Agents start with enough of everything for ${Math.round(goodsStock / needPerStep)}+ steps, ` +
+         "so they won't need to trade goods for a long time. Lower the starting inventory for more trading.");
   }
 
   if (r.stockpiling_enabled) {
@@ -599,24 +609,21 @@ function renderPreview(r, error) {
          (r.unit_markup ? `, and the 5th unit in one deal costs ×${((1 + r.unit_markup) ** 4).toFixed(2)} the first.` : "."));
   }
 
-  if (r.investing_enabled) {
+  {
     // Starting prices as in the "Starting prices" line below.
-    const stock = RESOURCES.map(x => avg(r.inventory[x]));
     const units = stock.reduce((a, b) => a + b, 0);
     const startPrices = RESOURCES.map((x, i) => r.price_mode === "fixed" ? r.fixed_prices[x]
       : units ? avg(r.money) / units * (1 - stock[i] / units) : 0);
-    RESOURCES.forEach((x, i) => {
-      const out = r.asset_output[x];
-      const grown = out * (1 + r.asset_growth[x]) ** (500 / r.asset_growth_steps);
-      const use = avg(r.rates[NEED_FOR[x]]) / r.relief_per_unit;
-      line(`${cap(x)} asset: makes ${out} → ${grown.toFixed(3)} ${x}/step after 500 steps` +
-           (use ? ` (${(out / use).toFixed(1)}× an average agent's use)` : "") +
-           `; costs ${out} × ${startPrices[i].toFixed(3)} ÷ ${r.asset_return[x]} = ${(out * startPrices[i] / r.asset_return[x]).toFixed(2)} at starting prices.`,
-           out / (use || 1) > 3 ? "short" : "");
+    GOODS.forEach((x, i) => {
+      const out = perShare(x);
+      const grown = r.productivity[x] * (1 + r.productivity_growth[x]) ** (500 / r.productivity_growth_steps);
+      line(`${cap(x)} asset: employs ${r.asset_labor[x]} labour/step making ${out.toFixed(3)} ${x}/step ` +
+           `(productivity ${r.productivity[x]} → ${grown.toFixed(2)} after 500 steps); costs ` +
+           `${(out * startPrices[i] / r.asset_return[x]).toFixed(2)} at starting prices.`);
     });
-    const held = RESOURCES.reduce((sum, x) => sum + avg(r.assets[x]), 0);
-    line(`Assets: an average agent starts with ${held.toFixed(2)} assets in total. No new assets are ever made, ` +
-         (held ? "so investing means buying them from other agents." : "so with none to start, nobody can invest."),
+    const held = GOODS.reduce((sum, x) => sum + avg(r.assets[x]), 0);
+    line(`Assets: ${held.toFixed(2)} shares per agent on average. No new assets are ever made` +
+         (held ? "; they only change hands between agents." : ", and with none to start nothing can be made."),
          held ? "" : "short");
   }
 

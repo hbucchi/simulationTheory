@@ -35,7 +35,8 @@ const ui = {
 
 const DOT_RADIUS = 6;
 const NEEDS = ["hunger", "sleep", "thirst", "boredom"];
-const RESOURCES = ["food", "water", "games"];
+const GOODS = ["food", "water", "games"];   // consumed for needs; made only by assets
+const RESOURCES = [...GOODS, "labor"];      // everything held and traded
 const NEED_FOR = { food: "hunger", water: "thirst", games: "boredom" };
 const cap = (w) => w[0].toUpperCase() + w.slice(1);
 const getPath = (obj, path) => path.split(".").reduce((o, k) => o?.[k], obj);
@@ -114,9 +115,9 @@ const FIELD_GROUPS = [
     { path: "sleep_recovery", label: "Sleep recovery", min: 0, max: 1, step: 0.01, get: a => a.modules.Rest.recovery }]},
   { legend: "Inventory", fields: RESOURCES.map(r => (
     { path: `inventory.${r}`, label: cap(r), min: 0, step: 1, get: a => a.inventory[r] ?? 0 }))},
-  { legend: "Production: 1 unit every N steps (0 = never)", fields: RESOURCES.map(r => (
-    { path: `production.${r}`, label: cap(r), min: 0, step: 1, get: a => a.modules.Production.intervals[r] }))},
-  { legend: "Assets owned (shares; 1 = one whole asset)", fields: RESOURCES.map(r => (
+  { legend: "Labour", fields: [
+    { path: "labor_rate", label: "Labour made per step", min: 0, step: 0.05, get: a => a.modules.Production.labor_rate }]},
+  { legend: "Assets owned (shares; 1 = one whole asset)", fields: GOODS.map(r => (
     { path: `assets.${r}`, label: cap(r), min: 0, step: 0.01, get: a => +(a.assets[r] ?? 0).toFixed(4) }))},
 ];
 const FIELDS = FIELD_GROUPS.flatMap(g => g.fields);
@@ -331,11 +332,17 @@ function renderMarket() {
   if (state.rules.investing_enabled) {
     const inv = document.createElement("div");
     inv.className = "market-title invest";
-    inv.textContent = `Assets (price · shares · output/step) · ${RESOURCES.map(r =>
-      `${r} ${m.asset_prices[r].toFixed(2)} · ${m.assets[r].toFixed(2)} · ${m.asset_output[r].toFixed(2)}`).join(" | ")} · ` +
+    inv.textContent = `Assets (price · shares · output/step) · ${GOODS.map(r =>
+      `${r} ${m.asset_prices[r].toFixed(2)} · ${m.assets[r].toFixed(2)} · ${m.asset_output[r].toFixed(2)} ` +
+      `(productivity ${m.productivity[r].toFixed(2)})`).join(" | ")} · ` +
       `${m.asset_trades} trades between agents (${m.asset_trade_money.toFixed(2)} money)`;
     inv.title = "Asset price = output per step × resource price ÷ return. Assets only change hands between agents.";
     ui.market.append(inv);
+    const work = document.createElement("div");
+    work.className = "market-title invest";
+    work.textContent = `Labour · agents make ${m.labor_supply.toFixed(2)}/step · assets can employ ` +
+      `${m.labor_need.toFixed(2)}/step → ${m.labor_supply >= m.labor_need ? "more workers than jobs" : "more jobs than workers"}`;
+    ui.market.append(work);
   }
 }
 
@@ -349,7 +356,7 @@ const SORT_VALUE = {
   money: a => a.money,
   movement: a => a.movement,
   reserve: a => RESOURCES.reduce((sum, r) => sum + (a.reserve?.[r] || 0), 0),
-  assets: a => RESOURCES.reduce((sum, r) => sum + (a.assets?.[r] || 0), 0),
+  assets: a => GOODS.reduce((sum, r) => sum + (a.assets?.[r] || 0), 0),
   urgency: a => Math.max(...NEEDS.map(n => a.needs[n])),
   ...Object.fromEntries(RESOURCES.map(r => [r, a => a.inventory[r] ?? 0])),
   ...Object.fromEntries(NEEDS.map(n => [n, a => a.needs[n]])),
@@ -467,14 +474,14 @@ function renderAgents() {
       stats.append(label, bar, val);
     }
 
-    const production = a.modules.Production?.intervals || {};
+    const laborRate = a.modules.Production?.labor_rate ?? 0;
     const meta = document.createElement("div");
     meta.className = "meta";
     const fields = [
-      ...RESOURCES.map(r => [r, a.inventory[r] ?? 0, production[r] ? `+1 / ${production[r]} steps` : "no production"]),
+      ...RESOURCES.map(r => [r, a.inventory[r] ?? 0]),
       ["money", a.money.toFixed(2)],
       ["movement", a.depressed ? `${a.speed} px (depressed, ${a.movement} normally)` : `${a.speed} px`],
-      ...RESOURCES.filter(r => a.assets[r]).map(r => {
+      ...GOODS.filter(r => a.assets[r]).map(r => {
         const price = state.market.asset_prices[r];
         return [`${r} assets`, `${a.assets[r].toFixed(2)} (worth ${(a.assets[r] * price).toFixed(2)}, ` +
           `${(a.assets[r] * state.market.asset_output_each[r]).toFixed(2)}/step)`,
@@ -502,10 +509,13 @@ function renderAgents() {
       : a.activity === "meeting" && target ? `meeting ${target.name}`
       : a.activity === "stockpiling" && target ? `stockpiling ${a.seeking_for} from ${target.name}`
       : a.activity === "restocking" && target ? `restocking ${a.seeking_for} from ${target.name}`
+      : a.activity === "hiring" && target ? `hiring labour from ${target.name}`
       : a.activity === "selling" && target ? `selling ${a.seeking_for} to ${target.name}`
       : a.activity === "searching" ? `searching: nobody has ${a.wants.join(" or ")} to sell`
       : a.activity;
-    const prod = RESOURCES.map(r => production[r] ? `${r} 1/${production[r]}` : `${r} –`).join(" · ");
+    const owned = GOODS.filter(g => a.assets[g]);
+    const prod = `labour ${laborRate.toFixed(2)}/step` + (owned.length
+      ? ` · assets employ ${a.labor_need.toFixed(2)} labour/step` : " · no assets: lives by selling labour");
     activity.append(act);
     if (a.depressed) {
       const sad = document.createElement("b");
@@ -513,7 +523,7 @@ function renderAgents() {
       sad.textContent = "depressed";
       activity.append(" · ", sad);
     }
-    activity.append(` · produces ${prod}`);
+    activity.append(` · makes ${prod}`);
 
     card.append(head, stats, meta, activity);
     ui.agents.append(card);
@@ -601,7 +611,7 @@ function refreshForm(force = false) {
 
 // New agents start from the game's rules (set on the setup screen). A rule that is a
 // distribution shows blank: the server draws a value from it.
-const RULE_BACKED = ["inventory", "assets", "production", "rates", "money", "sleep_recovery", "movement"];
+const RULE_BACKED = ["inventory", "assets", "labor_rate", "rates", "money", "sleep_recovery", "movement"];
 function defaultValue(path) {
   if (!RULE_BACKED.includes(path.split(".")[0])) return "";  // name, x, y, needs: server picks
   const spec = getPath(state.rules, path);
@@ -650,20 +660,24 @@ function setStatus(message, isError = false) {
 // Per resource: units used per step (need rate / relief per unit) vs units made per step (1 / N).
 function updateBalance() {
   ui.balance.innerHTML = "";
-  for (const r of RESOURCES) {
+  // Goods come only from its assets (when staffed); labour from the agent itself.
+  for (const r of GOODS) {
     const used = fieldValue(`rates.${NEED_FOR[r]}`) / state.rules.relief_per_unit;
-    const every = fieldValue(`production.${r}`);
-    // Own production plus what its asset shares make at the current asset value.
-    const assetOutput = fieldValue(`assets.${r}`) * state.market.asset_output_each[r];
-    const made = (every ? 1 / every : 0) + assetOutput;
+    const made = fieldValue(`assets.${r}`) * state.market.asset_output_each[r];
     const net = made - used;
     const line = document.createElement("span");
     const even = Math.abs(net) < 1e-9;
     line.className = even ? "" : net < 0 ? "short" : "surplus";
-    const verdict = even ? "balanced" : net < 0 ? `short ${(-net).toFixed(3)}/step` : `surplus ${net.toFixed(3)}/step`;
-    line.textContent = `${r}: uses ${used.toFixed(3)} · makes ${made.toFixed(3)} per step → ${verdict}`;
+    const verdict = even ? "balanced" : net < 0 ? `buys ${(-net).toFixed(3)}/step` : `sells ${net.toFixed(3)}/step`;
+    line.textContent = `${r}: uses ${used.toFixed(3)} · its assets make ${made.toFixed(3)} per step when staffed → ${verdict}`;
     ui.balance.append(line);
   }
+  const jobs = GOODS.reduce((sum, g) => sum + fieldValue(`assets.${g}`) * state.rules.asset_labor[g], 0);
+  const work = fieldValue("labor_rate");
+  const labourLine = document.createElement("span");
+  labourLine.textContent = `labour: makes ${work.toFixed(3)} · its assets employ ${jobs.toFixed(3)} per step → ` +
+    (work >= jobs ? `sells ${(work - jobs).toFixed(3)}/step` : `hires ${(jobs - work).toFixed(3)}/step`);
+  ui.balance.append(labourLine);
   // Sleep rises at g while awake (0.3 -> 0.5) and falls at r while resting (0.5 -> 0.3),
   // so the agent spends g / (g + r) of its time asleep.
   const g = fieldValue("rates.sleep");

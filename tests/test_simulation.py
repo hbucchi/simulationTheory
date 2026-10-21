@@ -74,7 +74,7 @@ class EconomyTests(unittest.TestCase):
 
     def test_no_goods_means_zero_prices(self):
         self.assertEqual(economy.market_prices([Agent(0, 0, money=50)]),
-                         {"food": 0.0, "water": 0.0, "games": 0.0})
+                         {"food": 0.0, "water": 0.0, "games": 0.0, "labor": 0.0})
 
     def test_barter_settles_the_price_difference_in_money(self):
         a = Agent(0, 0, thirst=0.8, money=10, inventory=Inventory({"food": 20}))
@@ -115,37 +115,37 @@ class EconomyTests(unittest.TestCase):
 
 
 class ProductionTests(unittest.TestCase):
-    def test_one_unit_every_n_steps(self):
+    def test_agents_make_labour_and_no_goods_without_assets(self):
         world = bare_world()
-        agent = world.add_agent(Agent(0, 0, modules=[Production({"food": 3, "water": 0, "games": 10})]))
+        agent = world.add_agent(Agent(0, 0, modules=[Production(labor_rate=0.5)]))
         for _ in range(9):
             world.step()
-        self.assertEqual(agent.inventory.to_dict(), {"food": 3})
+        self.assertEqual(agent.inventory.to_dict(), {"labor": 4})     # 4.5 made; the half carries over
 
 
 class ConfigurationTests(unittest.TestCase):
-    def test_create_agent_with_custom_rates_and_production(self):
+    def test_create_agent_with_custom_rates_and_labour(self):
         world = bare_world()
-        agent = world.create_agent(rates={"thirst": 0.05}, production={"water": 2},
+        agent = world.create_agent(rates={"thirst": 0.05}, labor_rate=1,
                                    needs={"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0},
                                    inventory={"food": 0, "water": 0, "games": 0})
         for _ in range(4):
             world.step()
         self.assertAlmostEqual(agent.thirst, 0.2)
         self.assertAlmostEqual(agent.hunger, 0.04)  # default rate untouched
-        self.assertEqual(agent.inventory.count("water"), 2)
+        self.assertEqual(agent.inventory.count("labor"), 4)
 
     def test_configure_existing_agent(self):
         world = bare_world()
         agent = world.create_agent(needs={"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0},
                                    inventory={"food": 0, "water": 0, "games": 0})
-        world.update_agent(agent, production={"food": 1, "games": 0}, rates={"hunger": 0})
+        world.update_agent(agent, rates={"hunger": 0}, labor_rate=2)
         for _ in range(5):
             world.step()
-        self.assertEqual([agent.inventory.count(r) for r in ("food", "water", "games")], [5, 0, 0])
+        self.assertEqual(agent.inventory.count("labor"), 10)
         self.assertEqual(agent.hunger, 0)
         modules = agent.to_dict()["modules"]
-        self.assertEqual(modules["Production"]["intervals"], {"food": 1, "water": 10, "games": 0})
+        self.assertEqual(modules["Production"]["labor_rate"], 2)
         self.assertEqual(modules["NeedsDecay"]["rates"]["hunger"], 0)
 
 
@@ -245,11 +245,11 @@ class EditingTests(unittest.TestCase):
         world = bare_world()
         agent = world.create_agent()
         world.update_agent(agent, name="Bob", x=10, y=2000, needs={"sleep": 0.7}, inventory={"games": 3},
-                           money=12.5, movement=40, production={"water": 2}, rates={"boredom": 0.1})
+                           money=12.5, movement=40, rates={"boredom": 0.1}, labor_rate=2)
         d = agent.to_dict()
         self.assertEqual((d["name"], d["x"], d["y"], d["needs"]["sleep"]), ("Bob", 10, 1024, 0.7))
         self.assertEqual((d["inventory"]["games"], d["money"], d["movement"]), (3, 12.5, 40))
-        self.assertEqual(d["modules"]["Production"]["intervals"]["water"], 2)
+        self.assertEqual(d["modules"]["Production"]["labor_rate"], 2)
         self.assertEqual(d["modules"]["NeedsDecay"]["rates"]["boredom"], 0.1)
 
     def test_remove_agent_keeps_ids_unique(self):
@@ -265,7 +265,7 @@ class WorldTests(unittest.TestCase):
     def test_default_agent_resources(self):
         world = bare_world()
         agent = world.create_agent()
-        self.assertEqual(agent.inventory.to_dict(), {"food": 100, "water": 100, "games": 100})
+        self.assertEqual(agent.inventory.to_dict(), {"food": 100, "water": 100, "games": 100, "labor": 0})
         self.assertEqual(agent.money, 100.0)
 
     def test_agents_stay_in_box_and_within_movement(self):
@@ -306,7 +306,7 @@ class WorldTests(unittest.TestCase):
         for seed in range(20):
             world = World(rules=no_invest(), seed=seed)
             seeker = world.create_agent(inventory={"water": 0}, needs={"thirst": 0.6},
-                                        rates={"thirst": 0.005}, production={"water": 0},
+                                        rates={"thirst": 0.005},
                                         movement=5)  # survives the 45-step chase
             runner = world.create_agent(movement=25)
             seeker.x, seeker.y, runner.x, runner.y = 50, 50, 1000, 1000

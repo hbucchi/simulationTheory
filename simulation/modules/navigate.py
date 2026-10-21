@@ -9,7 +9,8 @@ class Navigate(Module):
 
     0. sleeping  - resting to recover sleep (Rest module): stay still. Others
                    can still walk up to it and trade.
-    1. leaving   - just traded: walk along the departure heading.
+    1. leaving   - just traded: walk along the departure heading (unless someone is
+                   coming to buy from it: then it meets them, see 3).
     2. seeking   - a need is above the seek threshold and stock is gone: every
                    step, find the closest agent that has spare of what it
                    needs (most urgent need first) and walk straight at it.
@@ -17,10 +18,11 @@ class Navigate(Module):
     2b. stockpiling - not in need, but below its reserve of a resource that is
                    becoming scarce: go to the nearest agent with spare of it.
         restocking  - same, because its stock fell below the floor of its stock band.
+        hiring      - same, for labour its assets need.
     3. meeting   - another agent is seeking this one: walk toward that seeker,
                    so both close the gap and are guaranteed to touch.
-    3b. selling  - holds more than the stock cap of a resource: go to the nearest
-                   agent that wants it and has money, to sell the surplus.
+    3b. selling  - holds more than the stock cap of a good, or labour beyond what its own
+                   assets need: go to the nearest agent that wants it and has money.
     4. wandering - otherwise: random walk between random points.
     """
 
@@ -31,6 +33,14 @@ class Navigate(Module):
         if agent.sleeping:
             agent.activity = "sleeping"
             agent.target_id = None
+            return
+
+        # Someone coming to buy from it beats walking away from the last deal: a busy
+        # seller that keeps leaving can't be caught by slower buyers, who then starve.
+        seekers = world.seekers_of(agent)
+        if seekers and agent.depart_steps > 0:
+            agent.depart_steps = 0
+            self._go_to(agent, "meeting", min(seekers, key=agent.distance_to), world)
             return
 
         if agent.depart_steps > 0:
@@ -56,7 +66,8 @@ class Navigate(Module):
                 # Stockpiling: building a reserve because it is getting scarce. Restocking:
                 # back up to the cap after falling below the floor.
                 hoarding = economy.stockpile_shortfall(agent, resource, world.rules, world.scarcity) > 0
-                self._go_to(agent, "stockpiling" if hoarding else "restocking", seller, world)
+                activity = "hiring" if resource == economy.LABOR else "stockpiling" if hoarding else "restocking"
+                self._go_to(agent, activity, seller, world)
                 return
         seekers = world.seekers_of(agent)
         if seekers:

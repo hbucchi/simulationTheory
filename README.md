@@ -52,7 +52,7 @@ Every step each agent runs its modules in this order:
 
 1. **NeedsDecay** – needs rise each step (defaults: hunger +0.010, sleep +0.005,
    thirst +0.015, boredom +0.008; configurable per agent).
-2. **Production** – +1 food / water / games every N steps (default N = 10, configurable per agent).
+2. **Production** – labour from the agent; goods only from its assets, worked by labour (see below).
 3. **Consume** – a need above **0.5** is fed from own stock until it is **below 0.3**.
    1 food = −0.1 hunger, 1 water = −0.1 thirst, 1 game = −0.1 boredom.
 4. **Navigate** – in priority order:
@@ -77,9 +77,12 @@ the seller needs (barter, with the price difference settled in money),
 otherwise money, otherwise any other spare resource. If a need can't be met
 the log says why (e.g. *"No trade: Agent 4 still needs 7 water: Agent 2 has
 none"*). After a trade both walk **away from each other**, turned by a random
-angle in ±90° (a 180° window that never points back), for 15 steps. Either
-way the pair ignores each other for 60 steps, so a needy agent moves on to the
-next-closest agent instead of retrying the same one. Agents that bump into
+angle in ±90° (a 180° window that never points back), for 15 steps, unless
+someone is coming to buy from them (then they go and meet that buyer) or they
+are still in need themselves. The pair then ignores each other for 60 steps
+after a deal, or 10 steps when nothing could be traded, so a needy agent moves
+on to the next-closest agent instead of retrying the same one. Sellers never
+sell below their stock floor, even to an agent in need. Agents that bump into
 each other without needing anything just carry on.
 
 ### Market dynamics: stockpiling
@@ -127,27 +130,41 @@ All of it is set in the *Market dynamics* section of the setup screen.
 The Overview market panel shows base × multiplier with both parts, buyers vs
 sellers, C, an arrow and a price chart.
 
+### Labour, assets and productivity
+
+**Labour is the only thing agents make themselves** (`labor_rate`, 0.5 per
+step by default). Food, water and games are made **only by assets**, and
+assets need labour:
+
+    output of a good = productivity × min(labour available, shares × jobs per asset)
+
+- One asset share can employ up to `asset_labor` (0.2) labour per step, and
+  each unit of labour makes `productivity` (1.0) units of the good. An asset
+  with no labour makes nothing.
+- Productivity grows by `productivity_growth` (5%) every
+  `productivity_growth_steps` (50) steps, compounding a little each step.
+- By default, for each good 10% of the agents own all its assets (drawn
+  separately per good), so about a quarter of the agents are **owners** and
+  most are **workers** who own nothing and live by selling labour.
+- Owners keep labour for `labor_buffer_steps` (10) steps of what their
+  assets can employ and go out **hiring** when they fall below half of that;
+  workers go out **selling** their labour to owners who need it. Labour is a
+  tradable resource with its own price (same formula as the goods) but meets
+  no need and has no asset.
+
 ### Investment
 
-Each resource has its own **asset** (food assets, water assets, games assets),
-each with its own output, return and growth (set on the setup screen).
-
 - **No assets are created.** The only ones are the starting assets (*Starting
-  agents*, random 0–2 shares of each by default, any distribution). They only
-  change hands between agents. Agents hold **shares**, so 0.5 of a food asset
-  makes half as much.
-- One whole asset makes `asset_output` (0.1) units per step. That output grows
-  by `asset_growth` (5%) every `asset_growth_steps` (50) steps, compounding a
-  little each step.
-- **Asset price = output per step × current price of the resource ÷ return**
-  (1%). A dearer resource makes its assets dearer, and an asset always earns 1%
-  of its price per step.
+  agents*, any distribution). They only change hands between agents, as
+  **shares** (0.5 of a food asset employs half as much labour).
+- **Asset price = full-capacity output per step × current price of the good
+  ÷ return** (1%). A dearer good, or higher productivity, makes its assets
+  dearer.
 - Each step an agent keeps cash for what it needs to buy now plus 3 units of
   every resource. Once at least `min_investment` (10) is spare, it buys shares
-  of the best-returning asset of a resource it **lacks** (needs it, or is below
-  the stock floor), from owners that:
+  of the best-returning asset of a good it **lacks**, from owners that:
   - are **short of cash**: just enough shares to cover the gap, or
-  - hold **more than the stock cap** of that resource: up to a quarter of those
+  - hold **more than the stock cap** of that good: up to a quarter of those
     assets per deal.
 
 ### Stock band

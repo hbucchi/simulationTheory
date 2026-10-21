@@ -12,7 +12,9 @@ from dataclasses import asdict, dataclass, field, fields
 
 from . import distributions
 
-RESOURCES = ("food", "water", "games")
+GOODS = ("food", "water", "games")   # consumed for needs; produced only by assets
+LABOR = "labor"                       # produced by every agent; used by assets to make goods
+RESOURCES = GOODS + (LABOR,)          # everything that is held and traded
 NEEDS = ("hunger", "sleep", "thirst", "boredom")
 PRICE_MODES = ("scarcity", "fixed")
 
@@ -21,16 +23,21 @@ PRICE_MODES = ("scarcity", "fixed")
 class Rules:
     # Starting agents (spreads)
     agents: int = 3
-    inventory: dict = field(default_factory=lambda: {"food": 100, "water": 100, "games": 100})
-    # Starting asset shares: random 0-2 of each, so agents specialise in different resources.
-    assets: dict = field(default_factory=lambda: {r: {"dist": "uniform", "min": 0.0, "max": 2.0}
-                                                   for r in ("food", "water", "games")})
+    inventory: dict = field(default_factory=lambda: {"food": 100, "water": 100, "games": 100, "labor": 0})
+    # Starting asset shares: for each good, 10% of the agents own all its assets (10 shares each
+    # on average), drawn separately per good, so about a quarter of the agents own something.
+    # Most agents own none and live by selling labour.
+    assets: dict = field(default_factory=lambda: {g: {"dist": "tiered", "average": 1.0, "tiers": [
+        {"agents": 10, "share": 100}, {"agents": 90, "share": 0}]} for g in ("food", "water", "games")})
     money: object = 100.0
     movement: object = field(default_factory=lambda: {"dist": "uniform", "min": 5, "max": 25})
     start_needs: object = field(default_factory=lambda: {"dist": "uniform", "min": 0.0, "max": 0.5})
 
-    # Production: 1 unit every N steps (0 = never) (spreads)
-    production: dict = field(default_factory=lambda: {"food": 10, "water": 10, "games": 10})
+    # Labour: every agent makes labor_rate units of labour per step (spread). Goods are only
+    # made by assets worked by labour (see Investment). Owners buy labour to keep
+    # labor_buffer_steps steps of what their assets can employ.
+    labor_rate: object = 0.5
+    labor_buffer_steps: int = 10
 
     # Consumption: how fast needs grow (spreads), and what consuming does
     rates: dict = field(default_factory=lambda: {"hunger": 0.010, "sleep": 0.005, "thirst": 0.015,
@@ -56,20 +63,25 @@ class Rules:
     stockpile_steps: int = 100
     stockpile_budget: float = 0.5
 
-    # Investment. Each resource has its own asset type; the only assets are the starting
-    # ones (``assets`` above) and they only change hands between agents. One whole asset
-    # makes asset_output[r] units of r per step at the start; that output grows by
-    # asset_growth[r] (0.05 = 5%) every asset_growth_steps steps, compounding a little each step.
-    # Asset price = output per step x current price of r / asset_return[r], so an asset always
-    # earns asset_return (1%) of its price per step and its price moves with the commodity's.
+    # Assets and production. Each good has its own asset type; the only assets are the
+    # starting ones (``assets`` above) and they only change hands between agents.
+    # One whole asset employs up to asset_labor[g] units of labour per step, and each unit of
+    # labour makes productivity[g] units of the good, so
+    #     output = productivity x min(labour available, shares x asset_labor).
+    # Productivity grows by productivity_growth[g] (0.05 = 5%) every productivity_growth_steps
+    # steps, compounding a little each step.
+    # Asset price = full-capacity output per step x current price of g / asset_return[g], so an
+    # asset always earns asset_return (1%) of its price per step; its price moves with the
+    # good's price and with productivity.
     # Agents hold shares (fractions). They keep cash for their needs plus liquidity_units of
     # every resource at current prices, and once at least min_investment is spare they buy
     # shares from owners that are short of cash.
     investing_enabled: bool = True
-    asset_output: dict = field(default_factory=lambda: {"food": 0.1, "water": 0.1, "games": 0.1})
+    asset_labor: dict = field(default_factory=lambda: {"food": 0.2, "water": 0.2, "games": 0.2})
+    productivity: dict = field(default_factory=lambda: {"food": 1.0, "water": 1.0, "games": 1.0})
+    productivity_growth: dict = field(default_factory=lambda: {"food": 0.05, "water": 0.05, "games": 0.05})
+    productivity_growth_steps: int = 50
     asset_return: dict = field(default_factory=lambda: {"food": 0.01, "water": 0.01, "games": 0.01})
-    asset_growth: dict = field(default_factory=lambda: {"food": 0.05, "water": 0.05, "games": 0.05})
-    asset_growth_steps: int = 50
     liquidity_units: float = 3
     min_investment: float = 10
 
@@ -83,7 +95,7 @@ class Rules:
 
     # Prices
     price_mode: str = "scarcity"       # "scarcity": money/units*(1-share); "fixed": fixed_prices
-    fixed_prices: dict = field(default_factory=lambda: {"food": 1.0, "water": 1.0, "games": 1.0})
+    fixed_prices: dict = field(default_factory=lambda: {"food": 1.0, "water": 1.0, "games": 1.0, "labor": 1.0})
 
     # Market adjustment on top of the base price, per resource:
     #   demand pressure = ((buyers + 1) / (sellers + 1)) ** price_elasticity[r]
@@ -95,8 +107,9 @@ class Rules:
     # multiplier moves price_adjust_speed of the way to the target each step. When buyers
     # outnumber sellers, each extra unit in the same deal costs unit_markup more (compounding).
     demand_pricing_enabled: bool = True
-    price_elasticity: dict = field(default_factory=lambda: {"food": 0.5, "water": 0.5, "games": 0.5})
-    concentration_weight: dict = field(default_factory=lambda: {"food": 1.0, "water": 1.0, "games": 1.0})
+    price_elasticity: dict = field(default_factory=lambda: {"food": 0.5, "water": 0.5, "games": 0.5, "labor": 0.5})
+    concentration_weight: dict = field(default_factory=lambda: {"food": 1.0, "water": 1.0, "games": 1.0,
+                                                                "labor": 1.0})
     price_adjust_speed: float = 0.2
     price_floor: float = 0.25
     price_cap: float = 4.0
@@ -110,7 +123,8 @@ class Rules:
     # Meetings
     contact_distance: float = 12       # px between centres to count as touching
     depart_steps: int = 15             # steps two traders walk apart
-    cooldown_steps: int = 60           # steps a pair ignores each other after meeting
+    cooldown_steps: int = 60           # steps a pair ignores each other after a deal
+    retry_steps: int = 10              # ... and after a meeting where nothing could be traded
 
     def to_dict(self):
         return asdict(self)
@@ -164,11 +178,11 @@ class Rules:
 # Only amounts that can be shared out between agents (inventory, money) may be tiered.
 SPREADS = {
     "inventory": (RESOURCES, 0, 1e9, True, True),
-    "assets": (RESOURCES, 0, 1e9, False, True),   # shares of assets: fractions allowed
+    "assets": (GOODS, 0, 1e9, False, True),   # shares of assets: fractions allowed
     "money": (None, 0, 1e12, False, True),
     "movement": (None, 1, 200, True, False),
     "start_needs": (None, 0, 1, False, False),
-    "production": (RESOURCES, 0, 1e6, True, False),
+    "labor_rate": (None, 0, 1e6, False, False),
     "rates": (NEEDS, 0, 1, False, False),
     "sleep_recovery": (None, 0, 1, False, False),
 }
@@ -193,10 +207,12 @@ LIMITS = {
     "price_cap": (1, 100, "float"),
     "unit_markup": (0, 1, "float"),
     "investing_enabled": (None, None, "bool"),
-    "asset_output": ((RESOURCES, 0, 1e6, False), None, "map"),
-    "asset_return": ((RESOURCES, 0.0001, 10, False), None, "map"),
-    "asset_growth": ((RESOURCES, -0.99, 100, False), None, "map"),
-    "asset_growth_steps": (1, 100000, "int"),
+    "asset_labor": ((GOODS, 0, 1e6, False), None, "map"),
+    "productivity": ((GOODS, 0, 1e6, False), None, "map"),
+    "asset_return": ((GOODS, 0.0001, 10, False), None, "map"),
+    "productivity_growth": ((GOODS, -0.99, 100, False), None, "map"),
+    "labor_buffer_steps": (1, 100000, "int"),
+    "productivity_growth_steps": (1, 100000, "int"),
     "min_investment": (0.01, 1e9, "float"),
     "liquidity_units": (0, 1e6, "float"),
     "selling_enabled": (None, None, "bool"),
@@ -212,6 +228,7 @@ LIMITS = {
     "contact_distance": (1, 200, "float"),
     "depart_steps": (0, 1000, "int"),
     "cooldown_steps": (0, 10000, "int"),
+    "retry_steps": (0, 10000, "int"),
 }
 
 

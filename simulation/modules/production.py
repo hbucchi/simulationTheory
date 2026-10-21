@@ -1,39 +1,44 @@
-from ..rules import DEFAULT_RULES
+from ..rules import GOODS, LABOR
 from .base import Module
 
 
 class Production(Module):
-    """The agent's own production (1 unit every N steps) plus its assets' output.
+    """Labour from the agent itself; goods only from its assets, worked by labour.
 
-    ``intervals`` maps resource -> N (steps per unit). 0 or None disables it.
-    Assets add shares x current asset value x asset_return units per step;
-    fractions accumulate until a whole unit is made.
+    Each step the agent adds ``labor_rate`` units of labour. Each asset share can
+    employ up to rules.asset_labor[good] labour per step, and each unit of labour
+    makes the good's current productivity in units. With less labour than its
+    assets can employ, all its assets run at the same reduced share.
+    Fractions of goods and of labour carry over until they make a whole unit.
+
+    ``agent.labor_need`` is set to the labour its assets can employ per step and
+    ``agent.output_capacity`` to what they make per step when fully staffed; the
+    economy uses them to decide how much labour to hire and what to stockpile.
     """
 
-    def __init__(self, intervals=None):
-        self.intervals = {**DEFAULT_RULES.production, **(intervals or {})}
-        self.counters = {r: 0 for r in self.intervals}
-        self.asset_progress = {}  # resource -> fraction of a unit made by assets so far
-
-    def set_intervals(self, intervals):
-        self.intervals.update(intervals)
-        for resource in intervals:
-            self.counters.setdefault(resource, 0)
+    def __init__(self, labor_rate=0.0):
+        self.labor_rate = labor_rate
+        self.labor_fraction = 0.0  # labour held below one whole unit
+        self.asset_progress = {}   # good -> fraction of a unit made so far
 
     def on_step(self, agent, world):
-        for resource, every in self.intervals.items():
-            if not every:
-                continue
-            self.counters[resource] += 1
-            if self.counters[resource] >= every:
-                self.counters[resource] = 0
-                agent.inventory.add(resource)
-        for resource, shares in agent.assets.items():
-            made = self.asset_progress.get(resource, 0) + world.asset_output(resource, shares)
+        jobs = {g: world.asset_jobs(g, shares) for g, shares in agent.assets.items() if g in GOODS}
+        agent.labor_need = sum(jobs.values())
+        agent.output_capacity = {g: employed * world.productivity_now[g] for g, employed in jobs.items()}
+
+        labor = agent.inventory.count(LABOR) + self.labor_fraction + self.labor_rate
+        ratio = min(1.0, labor / agent.labor_need) if agent.labor_need else 1.0
+        labor -= agent.labor_need * ratio
+        whole = int(labor + 1e-9)
+        agent.inventory.set(LABOR, whole)
+        self.labor_fraction = max(0.0, labor - whole)
+
+        for good, employed in jobs.items():
+            made = self.asset_progress.get(good, 0) + employed * ratio * world.productivity_now[good]
             whole = int(made + 1e-9)
             if whole:
-                agent.inventory.add(resource, whole)
-            self.asset_progress[resource] = made - whole
+                agent.inventory.add(good, whole)
+            self.asset_progress[good] = made - whole
 
     def to_dict(self):
-        return {"intervals": self.intervals}
+        return {"labor_rate": self.labor_rate}

@@ -36,8 +36,8 @@ class World:
         self.cooldowns = {}  # frozenset({id_a, id_b}) -> tick until which they ignore each other
         self.asset_trades = 0        # purchases of asset shares between agents
         self.asset_trade_money = 0.0
-        # Units per step one whole asset of each resource makes right now (grows every step).
-        self.asset_output_now = dict(self.rules.asset_output)
+        # Units of each good one unit of labour makes right now (grows every step).
+        self.productivity_now = dict(self.rules.productivity)
         # Average units per living agent of each resource, one entry per step, for the
         # last scarcity_window steps; scarcity = how much that average fell over the window.
         self.per_agent_history = {r: deque(maxlen=self.rules.scarcity_window + 1) for r in economy.RESOURCES}
@@ -68,12 +68,12 @@ class World:
         self.agents.append(agent)
         return agent
 
-    def create_agent(self, *, inventory=None, money=None, production=None,
+    def create_agent(self, *, inventory=None, money=None, labor_rate=None,
                      rates=None, sleep_recovery=None, movement=None, needs=None, name=None,
                      x=None, y=None, assets=None):
         """Create an agent with the standard modules. Anything omitted comes from the rules.
 
-        ``inventory`` / ``production`` override per resource;
+        ``inventory`` overrides per resource; ``labor_rate`` is labour made per step;
         ``rates`` overrides how fast each need grows per step;
         ``sleep_recovery`` is how much sleep drops per step while resting;
         ``needs`` overrides starting need levels;
@@ -94,8 +94,7 @@ class World:
         # Rest runs first so a resting agent's sleep never grows that step.
         modules = [Rest(draw(r.sleep_recovery, field="sleep_recovery") if sleep_recovery is None else sleep_recovery),
                    NeedsDecay({**{n: draw(v, field="rates") for n, v in r.rates.items()}, **(rates or {})}),
-                   Production({**{k: draw(v, True, "production") for k, v in r.production.items()},
-                               **(production or {})}),
+                   Production(draw(r.labor_rate, field="labor_rate") if labor_rate is None else labor_rate),
                    Consume()]
         modules.append(Invest())
         if r.depression_enabled:
@@ -115,7 +114,7 @@ class World:
         return self.add_agent(agent)
 
     def update_agent(self, agent, *, name=None, x=None, y=None, needs=None, inventory=None,
-                     money=None, movement=None, production=None, rates=None, sleep_recovery=None,
+                     money=None, movement=None, labor_rate=None, rates=None, sleep_recovery=None,
                      assets=None):
         """Change any of an existing agent's settings; omitted fields stay as they are."""
         for resource, count in (assets or {}).items():
@@ -132,8 +131,8 @@ class World:
         if movement is not None:
             agent.movement = int(movement)
         for module in agent.modules:
-            if isinstance(module, Production) and production:
-                module.set_intervals(production)
+            if isinstance(module, Production) and labor_rate is not None:
+                module.labor_rate = labor_rate
             if isinstance(module, NeedsDecay) and rates:
                 module.rates.update(rates)
             if isinstance(module, Rest) and sleep_recovery is not None:
@@ -181,11 +180,12 @@ class World:
         if stockpile:
             wanted = [r for r in economy.RESOURCES
                       if economy.stockpile_shortfall(agent, r, self.rules, self.scarcity) > 0
-                      or economy.restock_shortfall(agent, r, self.rules) > 0]
+                      or economy.restock_shortfall(agent, r, self.rules) > 0
+                      or (r == economy.LABOR and economy.demand(agent, r, self.rules) > 0)]
             wanted.sort(key=lambda r: self.scarcity[r], reverse=True)
         else:
             wanted = [r for r in economy.RESOURCES if economy.demand(agent, r, self.rules) > 0]
-            wanted.sort(key=lambda r: getattr(agent, economy.NEED_FOR_RESOURCE[r]), reverse=True)
+            wanted.sort(key=lambda r: economy.need_level(agent, r), reverse=True)
         for resource in wanted:
             sellers = [o for o in self.agents if o is not agent and not self.in_cooldown(agent, o)
                        and economy.spare(o, resource, self.rules, self.scarcity) > 0]
@@ -222,17 +222,24 @@ class World:
         for r, price in self.current_prices().items():
             self.price_history[r].append(price)
 
-    def asset_growth_per_step(self, resource):
-        """Per-step growth so that value grows asset_growth over asset_growth_steps steps."""
-        return (1 + self.rules.asset_growth[resource]) ** (1 / self.rules.asset_growth_steps) - 1
+    def productivity_growth_per_step(self, good):
+        """Per-step growth so productivity grows productivity_growth over productivity_growth_steps."""
+        return (1 + self.rules.productivity_growth[good]) ** (1 / self.rules.productivity_growth_steps) - 1
 
     def grow_assets(self):
-        for r in self.asset_output_now:
-            self.asset_output_now[r] *= 1 + self.asset_growth_per_step(r)
+        for g in self.productivity_now:
+            self.productivity_now[g] *= 1 + self.productivity_growth_per_step(g)
 
-    def asset_output(self, resource, shares):
-        """Units per step made by ``shares`` of a ``resource`` asset right now."""
-        return shares * self.asset_output_now[resource]
+    def asset_jobs(self, good, shares):
+        """Labour per step ``shares`` of a ``good`` asset can employ."""
+        return shares * self.rules.asset_labor[good]
+
+    def asset_output(self, good, shares, labor=None):
+        """Units per step made by ``shares`` of a ``good`` asset: productivity x labour used,
+        where labour used is at most what the asset can employ (all of it if ``labor`` is None)."""
+        jobs = self.asset_jobs(good, shares)
+        used = jobs if labor is None else min(labor, jobs)
+        return used * self.productivity_now[good]
 
     def asset_prices(self, prices=None):
         """Price of one whole asset: output per step x commodity price / asset_return.
@@ -241,7 +248,7 @@ class World:
         rises and falls with the price of what it makes.
         """
         prices = prices or self.current_prices()
-        return {r: self.asset_output_now[r] * prices[r] / self.rules.asset_return[r] for r in economy.RESOURCES}
+        return {g: self.asset_output(g, 1) * prices[g] / self.rules.asset_return[g] for g in economy.GOODS}
 
     def nearest_buyer(self, agent, resource):
         """Closest agent (not just met) that wants ``resource`` and has money, or None.
@@ -315,8 +322,11 @@ class World:
     def interact(self, a, b):
         """Two agents touched. If either needs something they trade, then walk apart.
 
-        Afterwards the pair ignores each other for rules.cooldown_steps, so a needy
-        agent moves on to the next-closest agent instead of retrying the same one.
+        Afterwards the pair ignores each other for rules.cooldown_steps after a deal,
+        or rules.retry_steps when nothing could be traded (the seller may have some
+        to spare again soon, and with few sellers a long wait can be fatal). An agent
+        that is still in need after the deal doesn't walk away: it goes straight on
+        to the next seller.
         """
         rules = self.rules
         scarcity = self.scarcity
@@ -334,9 +344,13 @@ class World:
         for reason in economy.unmet(a, b, rules, scarcity) + economy.unmet(b, a, rules, scarcity):
             self.log(f"No trade: {reason}")
 
-        self.cooldowns[frozenset((a.id, b.id))] = self.tick + rules.cooldown_steps
+        wait = rules.cooldown_steps if deals else rules.retry_steps
+        self.cooldowns[frozenset((a.id, b.id))] = self.tick + wait
         if deals:
             self.depart(a, b)
+            for agent in (a, b):
+                if economy.is_needy(agent, rules):
+                    agent.depart_steps = 0
 
     def depart(self, a, b):
         """Send a and b off in roughly opposite directions."""
@@ -372,11 +386,15 @@ class World:
                 "sellers": self.sellers,
                 "markups": self.unit_markups(),
                 "price_history": {r: list(h) for r, h in self.price_history.items()},
-                "assets": {r: sum(a.assets.get(r, 0) for a in self.agents) for r in economy.RESOURCES},
+                "assets": {g: sum(a.assets.get(g, 0) for a in self.agents) for g in economy.GOODS},
                 "asset_prices": self.asset_prices(),
-                "asset_output_each": self.asset_output_now,
-                "asset_output": {r: self.asset_output(r, sum(a.assets.get(r, 0) for a in self.agents))
-                                 for r in economy.RESOURCES},
+                "asset_output_each": {g: self.asset_output(g, 1) for g in economy.GOODS},
+                "productivity": self.productivity_now,
+                "asset_output": {g: self.asset_output(g, sum(a.assets.get(g, 0) for a in self.agents))
+                                 for g in economy.GOODS},
+                "labor_need": sum(a.labor_need for a in self.agents),
+                "labor_supply": sum(next((m.labor_rate for m in a.modules if hasattr(m, "labor_rate")), 0)
+                                    for a in self.agents),
                 "asset_trades": self.asset_trades,
                 "asset_trade_money": self.asset_trade_money,
                 # Average units per agent over the scarcity window (oldest first) and how much it fell.

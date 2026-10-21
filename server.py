@@ -18,7 +18,7 @@ Agent fields: name, x, y, movement, money,
               needs      {hunger, sleep, thirst, boredom: 0..1}   current levels
               rates      {hunger, sleep, thirst, boredom: 0..1}   growth per step
               inventory  {food, water, games: int >= 0}
-              production {food, water, games: int >= 0}          1 unit every N steps
+              labor_rate >= 0                                     labour made per step
               assets     {food, water, games: >= 0}              shares of productive assets owned
               sleep_recovery  0..1                              sleep recovered per step at rest
 """
@@ -33,7 +33,7 @@ from pathlib import Path
 from simulation import World
 from simulation.rules import Rules
 from simulation.agent import NEED_NAMES
-from simulation.economy import RESOURCES
+from simulation.economy import GOODS, RESOURCES
 
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_STEPS_PER_REQUEST = 1000
@@ -124,8 +124,8 @@ def parse_agent_config(body):
         "needs": _number_map(body, "needs", NEED_NAMES, 0, 1),
         "rates": _number_map(body, "rates", NEED_NAMES, 0, 1),
         "inventory": _number_map(body, "inventory", RESOURCES, 0, 1e9, whole=True),
-        "assets": _number_map(body, "assets", RESOURCES, 0, 1e9),
-        "production": _number_map(body, "production", RESOURCES, 0, 1e6, whole=True),
+        "assets": _number_map(body, "assets", GOODS, 0, 1e9),
+
     }
     if body.get("name") is not None:
         name = str(body["name"]).strip()
@@ -134,7 +134,7 @@ def parse_agent_config(body):
         config["name"] = name
     for key, low, high, whole in (("x", 0, world_size, False), ("y", 0, world_size, False),
                                   ("money", 0, 1e12, False), ("movement", 1, MAX_MOVEMENT, True),
-                                  ("sleep_recovery", 0, 1, False)):
+                                  ("sleep_recovery", 0, 1, False), ("labor_rate", 0, 1e6, False)):
         if body.get(key) is not None:
             config[key] = _number(body[key], key, low, high, whole)
     return {k: v for k, v in config.items() if v is not None}
