@@ -227,8 +227,16 @@ sooner. Income = money received, tagged by source. Income and consumption
 inequality use each agent's smoothed per-step income/consumption.
 `GET /api/report?window=N` returns the same data.
 
-Money is counted in units 100× those of the goods (agents start with 10,000),
-so prices land roughly between 1 and 100 and are shown with two decimals.
+Money is shown in dollars with two decimals. Agents start with $22,500, so at
+the default stock (100 of each good) the starting price is
+22,500 / 300 units × (1 − 1/3) = **$50** for every good. The "lean start" preset
+cuts money to $2,250 to keep that $50.
+
+When an agent dies, its goods and asset shares are **sold at market price** to
+the nearest agents who can pay (nearest first). Buyers spend only the money
+above what they want on hand (the same cash rule as investing), so a poor
+neighbour can't buy. What nobody can afford is lost, and the sale price leaves
+the economy together with the dead agent's own money.
 
 ### Central government
 

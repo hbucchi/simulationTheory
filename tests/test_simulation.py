@@ -265,7 +265,7 @@ class WorldTests(unittest.TestCase):
         world = bare_world()
         agent = world.create_agent()
         self.assertEqual(agent.inventory.to_dict(), {"food": 100, "water": 100, "games": 100})
-        self.assertEqual(agent.money, 10000.0)
+        self.assertEqual(agent.money, 22500.0)
 
     def test_agents_stay_in_box_and_within_movement(self):
         world = World(rules=no_invest(), seed=7)
@@ -395,6 +395,26 @@ class WorldTests(unittest.TestCase):
         for _ in range(300):
             a.step(); b.step()
         self.assertEqual(a.to_dict(), b.to_dict())
+
+
+class EstateTests(unittest.TestCase):
+    def test_dead_agents_goods_and_assets_go_to_the_nearest_buyer(self):
+        world = World(seed=1, rules=Rules.from_dict({"investing_enabled": False, "selling_enabled": False}))
+        calm = {"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0}
+        dying = world.create_agent(x=500, y=500, needs={**calm, "thirst": 1.0}, rates=calm, money=0,
+                                   inventory={"food": 5, "water": 0, "games": 10}, assets={"food": 1, "water": 0, "games": 0})
+        near = world.create_agent(x=510, y=500, needs=calm, rates=calm, inventory={"food": 0, "water": 10, "games": 10})
+        far = world.create_agent(x=900, y=900, needs=calm, rates=calm, inventory={"food": 0, "water": 10, "games": 10})
+        poor = world.create_agent(x=505, y=500, needs=calm, rates=calm, money=0, inventory={"food": 0, "water": 10, "games": 10})
+        before = near.money
+        world.step()
+        self.assertNotIn(dying, world.agents)
+        self.assertEqual(near.inventory.count("food"), 5)         # nearest agent that can pay
+        self.assertEqual(far.inventory.count("food"), 0)
+        self.assertEqual(poor.inventory.count("food"), 0)         # closer, but can't pay
+        self.assertGreater(near.assets.get("food", 0), 0)
+        self.assertLess(near.money, before)
+        self.assertTrue(any("estate sold" in e["message"] for e in world.events))
 
 
 if __name__ == "__main__":

@@ -50,6 +50,8 @@ const RESOURCES = GOODS;                    // what agents hold and trade face t
 const PRICED = [...GOODS, "labor"];         // everything with a price (labour's is the wage)
 const NEED_FOR = { food: "hunger", water: "thirst", games: "boredom" };
 const cap = (w) => w[0].toUpperCase() + w.slice(1);
+// Prices and money are shown in dollars, two decimals.
+const usd = (v) => `${v < 0 ? "−" : ""}$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const getPath = (obj, path) => path.split(".").reduce((o, k) => o?.[k], obj);
 
 // A rule "spread" is a number (every agent gets it) or one of
@@ -295,7 +297,7 @@ function renderMarket() {
   ui.market.innerHTML = "";
   const title = document.createElement("div");
   title.className = "market-title";
-  title.textContent = `Market · ${m.money.toFixed(2)} money / ${total} units = ${(total ? m.money / total : 0).toFixed(2)} per unit`;
+  title.textContent = `Market · ${usd(m.money)} / ${total} units = ${usd(total ? m.money / total : 0)} per unit`;
   ui.market.append(title);
   const row = document.createElement("div");
   row.className = "market-row";
@@ -303,7 +305,7 @@ function renderMarket() {
     const share = total ? m.units[r] / total : 0;
     const cell = document.createElement("div");
     const price = document.createElement("b");
-    price.textContent = m.prices[r].toFixed(2);
+    price.textContent = usd(m.prices[r]);
     const mult = m.multiplier[r];
     const arrow = document.createElement("span");
     arrow.className = "price-move " + (mult > 1.02 ? "up" : mult < 0.98 ? "down" : "");
@@ -316,7 +318,7 @@ function renderMarket() {
     // Demand pressure: base price x multiplier from buyers vs sellers.
     const pressure = document.createElement("span");
     pressure.className = "pressure";
-    pressure.textContent = `base ${m.base_prices[r].toFixed(2)} × ${mult.toFixed(2)} ` +
+    pressure.textContent = `base ${usd(m.base_prices[r])} × ${mult.toFixed(2)} ` +
       `(demand ${m.pressure[r].toFixed(2)}: ${m.buyers[r]} want / ${m.sellers[r]} sell · ` +
       `concentration ${m.concentration_factor[r].toFixed(2)}: C ${m.concentration[r].toFixed(2)})` +
       (m.markups[r] ? ` · +${(m.markups[r] * 100).toFixed(0)}%/unit` : "");
@@ -352,9 +354,9 @@ function renderMarket() {
     const inv = document.createElement("div");
     inv.className = "market-title invest";
     inv.textContent = `Assets (price · shares · output/step) · ${GOODS.map(r =>
-      `${r} ${m.asset_prices[r].toFixed(2)} · ${m.assets[r].toFixed(2)} · ${m.asset_output[r].toFixed(2)} ` +
+      `${r} ${usd(m.asset_prices[r])} · ${m.assets[r].toFixed(2)} · ${m.asset_output[r].toFixed(2)} ` +
       `(productivity ${m.productivity[r].toFixed(2)})`).join(" | ")} · ` +
-      `${m.asset_trades} trades between agents (${m.asset_trade_money.toFixed(2)} money)`;
+      `${m.asset_trades} trades between agents (${usd(m.asset_trade_money)})`;
     inv.title = "Asset price = output per step × resource price ÷ return. Assets only change hands between agents.";
     ui.market.append(inv);
   }
@@ -371,11 +373,11 @@ function renderLaborCard() {
   const head = document.createElement("div");
   head.className = "labor-head";
   const name = Object.assign(document.createElement("span"), { className: "res-name", textContent: "Labour market" });
-  const wage = Object.assign(document.createElement("b"), { textContent: L.wage.toFixed(2) });
+  const wage = Object.assign(document.createElement("b"), { textContent: usd(L.wage) });
   const unit = Object.assign(document.createElement("span"), { className: "unit", textContent: "wage per unit" });
   head.append(name, wage, unit);
   const rows = [
-    ["Wage", `base ${L.base_wage.toFixed(2)} × ${L.multiplier.toFixed(2)} (labour wanted ÷ offered → ${L.pressure.toFixed(2)})`],
+    ["Wage", `base ${usd(L.base_wage)} × ${L.multiplier.toFixed(2)} (labour wanted ÷ offered → ${L.pressure.toFixed(2)})`],
     ["Capacity", `${L.capacity.toFixed(2)}/step · own assets ${L.own_use.toFixed(2)} · offered ${L.offered.toFixed(2)}`],
     ["Jobs", `${L.wanted.toFixed(2)} wanted · ${L.hired.toFixed(2)} hired (${L.workers_hired} workers)` +
       (L.gov_hired ? ` · government ${L.gov_hired.toFixed(2)}` : "")],
@@ -527,13 +529,13 @@ function renderAgents() {
     meta.className = "meta";
     const fields = [
       ...RESOURCES.map(r => [r, a.inventory[r] ?? 0]),
-      ["money", a.money.toFixed(2)],
+      ["money", usd(a.money)],
       ["movement", a.depressed ? `${a.speed} px (depressed, ${a.movement} normally)` : `${a.speed} px`],
       ...GOODS.filter(r => a.assets[r]).map(r => {
         const price = state.market.asset_prices[r];
-        return [`${r} assets`, `${a.assets[r].toFixed(2)} (worth ${(a.assets[r] * price).toFixed(2)}, ` +
+        return [`${r} assets`, `${a.assets[r].toFixed(2)} (worth ${usd(a.assets[r] * price)}, ` +
           `${(a.assets[r] * state.market.asset_output_each[r]).toFixed(2)}/step)`,
-          `One whole ${r} asset costs ${price.toFixed(2)} now`];
+          `One whole ${r} asset costs ${usd(price)} now`];
       }),
       // Reserve it wants to hold because the resource is becoming scarce.
       ...RESOURCES.filter(r => a.reserve?.[r]).map(r => [`${r} reserve`, a.reserve[r],
@@ -565,7 +567,7 @@ function renderAgents() {
     const worked = Object.entries(lab.employers).map(([who, u]) => `${u.toFixed(2)} for ${who}`).join(", ");
     const prod = `labour ${lab.capacity_now.toFixed(2)}/step (capacity ${lab.capacity.toFixed(2)} × efficiency ` +
       `${lab.efficiency.toFixed(2)}) · wellbeing ${lab.wellbeing.toFixed(2)} · need for a job ${lab.job_need.toFixed(2)}` +
-      (lab.offered ? ` · offers ${lab.offered.toFixed(2)} at ${lab.asking_wage.toFixed(2)}` : "") +
+      (lab.offered ? ` · offers ${lab.offered.toFixed(2)} at ${usd(lab.asking_wage)}` : "") +
       (worked ? ` · worked ${worked}` : "") +
       (owned.length ? ` · its assets employ ${a.labor_need.toFixed(2)}/step` +
         (lab.bought ? ` (hired ${lab.bought.toFixed(2)})` : "") : "");
@@ -636,10 +638,10 @@ function renderGovernment() {
   const stats = [
     ["Policy rate", `${(g.min_rate * 100).toFixed(2)}%`, "minimum return on assets"],
     ["Labour hired", `${g.labor_purchase} / step`, "with newly created money"],
-    ["Money created", g.money_created.toFixed(1), `${g.last_spent.toFixed(2)} in the last step`],
+    ["Money created", usd(g.money_created), `${usd(g.last_spent)} in the last step`],
     ["Labour used up", g.labor_bought.toFixed(1), "in public works so far"],
-    ["Money in the economy", m.money.toFixed(1), "held by agents"],
-    ["Labour price", m.prices.labor.toFixed(2), `food ${m.prices.food.toFixed(2)} · water ${m.prices.water.toFixed(2)}`],
+    ["Money in the economy", usd(m.money), "held by agents"],
+    ["Labour price", usd(m.prices.labor), `food ${usd(m.prices.food)} · water ${usd(m.prices.water)}`],
   ];
   ui.govStats.innerHTML = "";
   for (const [label, value, note] of stats) {

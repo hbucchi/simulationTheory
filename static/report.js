@@ -19,7 +19,7 @@ let reportLast = 0;
 const SERIES = ["var(--s1)", "var(--s2)", "var(--s3)", "var(--s4)"];
 
 const fmt = {
-  money: (v) => v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+  money: (v) => usd(v),
   num: (v, d = 2) => v.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }),
   pct: (v, d = 1) => `${(v * 100).toFixed(d)}%`,
   signedPct: (v) => `${v >= 0 ? "+" : "−"}${Math.abs(v * 100).toFixed(1)}%`,

@@ -166,10 +166,11 @@ const PRESETS = [
   ["balanced", "Balanced (no shortages)", { rates: { thirst: 0.01 } }],
   // Small stocks: agents need each other (and owners need workers) from the start.
   ["lean", "Lean start (small stocks: lots of trading)", {
-    inventory: { food: 10, water: 10, games: 10 }, stock_cap: 20 }],
+    inventory: { food: 10, water: 10, games: 10 }, stock_cap: 20,
+    money: 2250 }],   // keeps the starting price at $50
   ["spread", "Spread ownership (everyone owns some assets)", { assets: Object.fromEntries(GOODS.map(g =>
     [g, { dist: "uniform", min: 0, max: 2 }])) }],
-  ["unequal", "Unequal wealth (1% hold 50% of money)", { money: { dist: "tiered", average: 10000, tiers: EXAMPLE_TIERS } }],
+  ["unequal", "Unequal wealth (1% hold 50% of money)", { money: { dist: "tiered", average: 22500, tiers: EXAMPLE_TIERS } }],
   ["drought", "Drought (few water assets)", { inventory: { water: 30 }, assets: { water: { dist: "tiered", average: 0.4,
     tiers: [{ agents: 10, share: 100 }, { agents: 90, share: 0 }] } } }],
   ["easy", "Easy (no death or depression)", { death_enabled: false, depression_enabled: false }],
@@ -645,7 +646,7 @@ function renderPreview(r, error) {
       const grown = r.productivity[x] * (1 + r.productivity_growth[x]) ** (500 / r.productivity_growth_steps);
       line(`${cap(x)} asset: employs ${r.asset_labor[x]} labour/step making ${out.toFixed(3)} ${x}/step ` +
            `(productivity ${r.productivity[x]} → ${grown.toFixed(2)} after 500 steps); costs ` +
-           `${(out * startPrices[i] / r.asset_return[x]).toFixed(2)} at starting prices.`);
+           `${usd(out * startPrices[i] / r.asset_return[x])} at starting prices.`);
     });
     const held = GOODS.reduce((sum, x) => sum + avg(r.assets[x]), 0);
     line(`Assets: ${held.toFixed(2)} shares per agent on average. No new assets are ever made` +
@@ -663,7 +664,7 @@ function renderPreview(r, error) {
   if (r.gov_min_rate || r.gov_labor_purchase) {
     line(`Government: no asset valued below ${(r.gov_min_rate * 100).toFixed(2)}% per step` +
          (r.gov_labor_purchase ? `; buys ${r.gov_labor_purchase} labour per step with new money ` +
-          `(about ${(r.gov_labor_purchase * startLaborPrice()).toFixed(2)} money created per step at the starting labour price).` : "."));
+          `(about ${usd(r.gov_labor_purchase * startLaborPrice())} created per step at the starting labour price).` : "."));
   }
 
   const g = avg(r.rates.sleep), rec = avg(r.sleep_recovery);
@@ -672,12 +673,12 @@ function renderPreview(r, error) {
     : "Sleep: recovery is 0, so a tired agent stops forever.", rec ? "" : "short");
 
   if (r.price_mode === "fixed") {
-    line(`Prices are fixed: ${RESOURCES.map(x => `${x} ${r.fixed_prices[x]}`).join(", ")}.`);
+    line(`Prices are fixed: ${RESOURCES.map(x => `${x} ${usd(r.fixed_prices[x])}`).join(", ")}.`);
   } else {
     const total = stock.reduce((a, b) => a + b, 0);
     const money = avg(r.money);
     const prices = RESOURCES.map((x, i) => total ? (money / total) * (1 - stock[i] / total) : 0);
-    line(`Starting prices (roughly): ${RESOURCES.map((x, i) => `${x} ${prices[i].toFixed(2)}`).join(", ")}. ` +
+    line(`Starting prices (roughly): ${RESOURCES.map((x, i) => `${x} ${usd(prices[i])}`).join(", ")}. ` +
          "Scarcer resources get dearer as stocks change.");
   }
 }

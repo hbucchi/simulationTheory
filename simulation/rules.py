@@ -30,7 +30,7 @@ class Rules:
     # Most agents own none and live by selling labour.
     assets: dict = field(default_factory=lambda: {g: {"dist": "tiered", "average": 1.0, "tiers": [
         {"agents": 10, "share": 100}, {"agents": 90, "share": 0}]} for g in ("food", "water", "games")})
-    money: object = 10000.0           # x100 vs. units, so prices (money / units) land around 1-100
+    money: object = 22500.0           # 22,500 / 300 units x (1 - 1/3) = $50 starting price at the default stock
     movement: object = field(default_factory=lambda: {"dist": "uniform", "min": 5, "max": 25})
     start_needs: object = field(default_factory=lambda: {"dist": "uniform", "min": 0.0, "max": 0.5})
 
@@ -117,7 +117,7 @@ class Rules:
 
     # Prices
     price_mode: str = "scarcity"       # "scarcity": money/units*(1-share); "fixed": fixed_prices
-    fixed_prices: dict = field(default_factory=lambda: {"food": 20.0, "water": 20.0, "games": 20.0, "labor": 20.0})
+    fixed_prices: dict = field(default_factory=lambda: {"food": 50.0, "water": 50.0, "games": 50.0, "labor": 50.0})
 
     # Market adjustment on top of the base price, per resource:
     #   demand pressure = ((buyers + 1) / (sellers + 1)) ** price_elasticity[r]

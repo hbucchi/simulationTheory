@@ -10,6 +10,7 @@ from .inventory import Inventory
 from .modules import Consume, Invest, Mood, Navigate, NeedsDecay, Production, Rest
 from .government import Government
 from .labor import LaborMarket
+from .modules.invest import cash_needed, transfer_shares
 from .report import Recorder
 from .rules import SPREADS, Rules
 
@@ -343,7 +344,10 @@ class World:
             return False
         for need in ("hunger", "thirst"):
             if getattr(agent, need) >= economy.CRITICAL_LEVEL:
+                prices = self.current_prices()
+                asset_prices = self.asset_prices(prices)
                 self.remove_agent(agent)
+                self.settle_estate(agent, prices, asset_prices)
                 self._dead_flows.append(agent.flow)
                 self.recorder.count("deaths")
                 cause = "hunger" if need == "hunger" else "thirst"
@@ -351,6 +355,51 @@ class World:
                 self.log(f"{agent.name} died of {cause}")
                 return True
         return False
+
+    def settle_estate(self, dead, prices, asset_prices):
+        """Sell a dead agent's goods and asset shares at market price to whoever is nearest
+        and can pay, nearest first. Buyers only spend money above what they need on hand
+        (the same rule as investing); what nobody can afford is lost. The sale price and the
+        dead agent's own money leave the economy with it."""
+        near = sorted(self.agents, key=lambda o: math.hypot(o.x - dead.x, o.y - dead.y))
+        sold = {}   # buyer name -> {"goods": money, "units": n, "shares": n}
+        rules = self.rules
+
+        def sell(price, quantity, whole):
+            """Hand ``quantity`` to buyers in turn; yields (buyer, amount, cost)."""
+            for buyer in near:
+                if quantity <= 1e-9:
+                    return
+                budget = max(0.0, buyer.money - cash_needed(buyer, prices, rules))
+                amount = quantity if price <= 0 else min(quantity, budget / price)
+                if whole:
+                    amount = math.floor(amount + 1e-9)
+                if amount <= (0 if whole else 1e-6):
+                    continue
+                quantity -= amount
+                yield buyer, amount, amount * price
+
+        for resource in economy.GOODS:
+            for buyer, units, cost in sell(prices[resource], math.floor(dead.inventory.count(resource) + 1e-9), True):
+                economy.transfer(dead, buyer, resource, units)
+                buyer.money -= cost
+                got = sold.setdefault(buyer.name, {"cost": 0.0, "items": []})
+                got["cost"] += cost
+                got["items"].append(f"{units:g} {resource}")
+        for resource, shares in list(dead.assets.items()):
+            for buyer, amount, cost in sell(asset_prices.get(resource, 0.0), shares, False):
+                transfer_shares(dead, buyer, resource, amount)
+                buyer.money -= cost
+                got = sold.setdefault(buyer.name, {"cost": 0.0, "items": []})
+                got["cost"] += cost
+                got["items"].append(f"{amount:.2f} {resource} asset")
+                self.asset_trades += 1
+                self.asset_trade_money += cost
+        if sold:
+            parts = "; ".join(f"{name} bought {', '.join(g['items'])} for ${g['cost']:,.2f}" for name, g in sold.items())
+            self.log(f"{dead.name}'s estate sold at market price: {parts}")
+        else:
+            self.log(f"{dead.name}'s estate found no buyer")
 
     def interact(self, a, b):
         """Two agents touched. If either needs something they trade, then walk apart.
