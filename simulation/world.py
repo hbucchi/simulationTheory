@@ -7,7 +7,7 @@ from . import distributions, economy
 from .agent import Agent
 from .inventory import Inventory
 from .modules import Consume, Mood, Navigate, NeedsDecay, Production, Rest
-from .rules import Rules
+from .rules import SPREADS, Rules
 
 AGENT_COLORS = ["#e4572e", "#29335c", "#f3a712", "#669bbc", "#a8c686", "#8e44ad", "#16a085", "#c0392b"]
 
@@ -63,26 +63,30 @@ class World:
         """
         r = self.rules
 
-        def draw(spec, whole=False):
-            return distributions.sample(spec, self.rng, whole)
+        def draw(spec, whole=False, field=None):
+            low, high = SPREADS[field][1:3] if field else (-math.inf, math.inf)
+            return distributions.sample(spec, self.rng, whole, low, high)
 
         rx, ry = self.random_position()
         x, y = self.clamp_position(rx if x is None else x, ry if y is None else y)
-        start_needs = {n: round(draw(r.start_needs), 2) for n in ("hunger", "sleep", "thirst", "boredom")}
+        start_needs = {n: round(draw(r.start_needs, field="start_needs"), 2)
+                       for n in ("hunger", "sleep", "thirst", "boredom")}
         start_needs.update(needs or {})
         # Rest runs first so a resting agent's sleep never grows that step.
-        modules = [Rest(draw(r.sleep_recovery) if sleep_recovery is None else sleep_recovery),
-                   NeedsDecay({**{n: draw(v) for n, v in r.rates.items()}, **(rates or {})}),
-                   Production({**{k: draw(v, True) for k, v in r.production.items()}, **(production or {})}),
+        modules = [Rest(draw(r.sleep_recovery, field="sleep_recovery") if sleep_recovery is None else sleep_recovery),
+                   NeedsDecay({**{n: draw(v, field="rates") for n, v in r.rates.items()}, **(rates or {})}),
+                   Production({**{k: draw(v, True, "production") for k, v in r.production.items()},
+                               **(production or {})}),
                    Consume()]
         if r.depression_enabled:
             modules.append(Mood())
         modules.append(Navigate())
         agent = Agent(
             x, y, name=name, **start_needs,
-            money=round(draw(r.money), 2) if money is None else money,
-            movement=draw(r.movement, True) if movement is None else movement,
-            inventory=Inventory({**{k: draw(v, True) for k, v in r.inventory.items()}, **(inventory or {})}),
+            money=round(draw(r.money, field="money"), 2) if money is None else money,
+            movement=draw(r.movement, True, "movement") if movement is None else movement,
+            inventory=Inventory({**{k: draw(v, True, "inventory") for k, v in r.inventory.items()},
+                                 **(inventory or {})}),
             modules=modules,
         )
         agent.depression_factor = r.depression_factor
@@ -118,8 +122,15 @@ class World:
                 other.target_id = None
 
     def spawn_random_agents(self, count=None):
-        for _ in range(self.rules.agents if count is None else count):
-            self.create_agent()
+        """Create the starting agents. Tiered inventory/money is shared out between them
+        exactly (e.g. the top 1% really hold 50%); other values are drawn per agent."""
+        n = self.rules.agents if count is None else count
+        r = self.rules
+        money = distributions.allocate(r.money, n, self.rng, False, *SPREADS["money"][1:3])
+        stock = {k: distributions.allocate(v, n, self.rng, True, *SPREADS["inventory"][1:3])
+                 for k, v in r.inventory.items()}
+        for i in range(n):
+            self.create_agent(money=round(money[i], 2), inventory={k: v[i] for k, v in stock.items()})
 
     def in_cooldown(self, a, b):
         return self.cooldowns.get(frozenset((a.id, b.id)), -1) >= self.tick
@@ -191,7 +202,7 @@ class World:
         if not (economy.is_needy(a, rules) or economy.is_needy(b, rules)):
             return  # a casual bump: nobody needs anything
         prices = economy.market_prices(self.agents, rules)
-        deals = economy.trade(a, b, prices, rules)
+        deals = economy.trade(a, b, prices, rules, self.rng)
         for buyer, seller, bought, paid in deals:
             self.log(f"{buyer.name} got {economy.describe(bought)} from {seller.name} "
                      f"for {economy.describe_payment(paid)}")

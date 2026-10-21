@@ -35,12 +35,18 @@ const NEED_FOR = { food: "hunger", water: "thirst", games: "boredom" };
 const cap = (w) => w[0].toUpperCase() + w.slice(1);
 const getPath = (obj, path) => path.split(".").reduce((o, k) => o?.[k], obj);
 
-// A rule "spread" is a number (every agent gets it) or {dist, min, max, mean?, std?, skew?}.
+// A rule "spread" is a number (every agent gets it) or one of
+//   {dist: "uniform", min, max}
+//   {dist: "normal", mean, std, limit (cut at mean ± limit·std), skew}
+//   {dist: "tiered", average, tiers: [{agents: %, share: %}, ...]}
 // Same meaning as simulation/distributions.py.
 function spreadMean(spec) {
   if (typeof spec === "number") return spec;
-  return spec.dist === "uniform" ? (spec.min + spec.max) / 2 : spec.mean;
+  if (spec.dist === "uniform") return (spec.min + spec.max) / 2;
+  return spec.dist === "tiered" ? spec.average : spec.mean;
 }
+
+const tierAmount = (spec, tier) => spec.average * tier.share / tier.agents;
 
 function gauss() {
   let u = 0;
@@ -58,15 +64,31 @@ function skewNormal(alpha) {
   return (z - m) / Math.sqrt(1 - m * m);
 }
 
-function sampleSpread(spec) {
-  if (typeof spec === "number") return spec;
-  const { min, max } = spec;
-  if (spec.dist === "uniform") return min + Math.random() * (max - min);
-  for (let i = 0; i < 100; i++) {
-    const v = spec.mean + spec.std * (spec.dist === "skewed" ? skewNormal(spec.skew) : gauss());
-    if (v >= min && v <= max) return v;
+// Range a spread's values fall in, within the field's own limits.
+function spreadBounds(spec, low = -Infinity, high = Infinity) {
+  if (spec.dist === "uniform") return [spec.min, spec.max];
+  if (spec.dist === "normal") {
+    const reach = spec.limit * spec.std;
+    return [Math.max(low, spec.mean - reach), Math.min(high, spec.mean + reach)];
   }
-  return Math.min(Math.max(spec.mean, min), max);
+  const amounts = spec.tiers.map(t => tierAmount(spec, t));
+  return [Math.min(...amounts), Math.max(...amounts)];
+}
+
+function sampleSpread(spec, low = -Infinity, high = Infinity) {
+  if (typeof spec === "number") return spec;
+  if (spec.dist === "uniform") return spec.min + Math.random() * (spec.max - spec.min);
+  if (spec.dist === "tiered") {
+    let pick = Math.random() * 100;
+    const tier = spec.tiers.find(t => (pick -= t.agents) < 0) || spec.tiers[spec.tiers.length - 1];
+    return tierAmount(spec, tier);
+  }
+  const [lo, hi] = spreadBounds(spec, low, high);
+  for (let i = 0; i < 100; i++) {
+    const v = spec.mean + spec.std * (spec.skew ? skewNormal(spec.skew) : gauss());
+    if (v >= lo && v <= hi) return v;
+  }
+  return Math.min(Math.max(spec.mean, lo), hi);
 }
 
 // Every editable agent field. `path` is "field" or "group.key" (matches the API body),

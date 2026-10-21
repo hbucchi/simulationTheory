@@ -3,7 +3,7 @@ import statistics
 import unittest
 
 from simulation import World, economy
-from simulation.distributions import normalize, sample
+from simulation.distributions import allocate, normalize, sample
 from simulation.rules import Rules
 
 
@@ -27,35 +27,64 @@ class DistributionTests(unittest.TestCase):
         self.assertAlmostEqual(statistics.fmean(values), 3, delta=0.05)
 
     def test_normal_has_requested_mean_and_std(self):
-        values = draws({"dist": "normal", "min": 0, "max": 100, "mean": 50, "std": 5})
+        values = draws({"dist": "normal", "mean": 50, "std": 5, "limit": 10, "skew": 0})
         self.assertAlmostEqual(statistics.fmean(values), 50, delta=0.3)
         self.assertAlmostEqual(statistics.pstdev(values), 5, delta=0.3)
 
-    def test_normal_is_truncated_at_min_and_max(self):
-        values = draws({"dist": "normal", "min": 9, "max": 11, "mean": 10, "std": 5})
-        self.assertTrue(all(9 <= v <= 11 for v in values))
+    def test_normal_is_cut_at_limit_stds_and_field_bounds(self):
+        values = draws({"dist": "normal", "mean": 10, "std": 5, "limit": 1, "skew": 0})
+        self.assertTrue(all(5 <= v <= 15 for v in values))
+        rng = random.Random(1)
+        floored = [sample({"dist": "normal", "mean": 1, "std": 5, "limit": 3, "skew": 0}, rng, low=0)
+                   for _ in range(2000)]
+        self.assertGreaterEqual(min(floored), 0)
 
     def test_skew_direction_and_mean(self):
-        right = draws({"dist": "skewed", "min": 0, "max": 100, "mean": 50, "std": 5, "skew": 5})
-        left = draws({"dist": "skewed", "min": 0, "max": 100, "mean": 50, "std": 5, "skew": -5})
+        right = draws({"dist": "normal", "mean": 50, "std": 5, "limit": 10, "skew": 5})
+        left = draws({"dist": "normal", "mean": 50, "std": 5, "limit": 10, "skew": -5})
         self.assertGreater(skewness(right), 0.5)
         self.assertLess(skewness(left), -0.5)
         self.assertAlmostEqual(statistics.fmean(right), 50, delta=0.3)
         self.assertAlmostEqual(statistics.pstdev(right), 5, delta=0.3)
 
     def test_whole_numbers(self):
-        values = draws({"dist": "normal", "min": 3, "max": 12, "mean": 8, "std": 3}, whole=True)
-        self.assertTrue(all(isinstance(v, int) and 3 <= v <= 12 for v in values))
+        values = draws({"dist": "normal", "mean": 8, "std": 3, "limit": 2, "skew": 0}, whole=True)
+        self.assertTrue(all(isinstance(v, int) and 2 <= v <= 14 for v in values))
+
+    def test_tiered_allocation_matches_the_tiers(self):
+        spec = normalize({"dist": "tiered", "average": 100, "tiers": [
+            {"agents": 1, "share": 50}, {"agents": 10, "share": 20}, {"agents": 89, "share": 30}]},
+            "money", 0, 1e9, tiered=True)
+        values = sorted(allocate(spec, 100, random.Random(3), whole=True), reverse=True)
+        self.assertEqual(sum(values), 10000)
+        self.assertEqual(values[0], 5000)              # top 1 agent holds 50%
+        self.assertEqual(sum(values[1:11]), 2000)      # next 10 hold 20%
+        self.assertEqual(sum(values[11:]), 3000)       # the other 89 share 30%
+
+    def test_tiered_with_fewer_agents_than_tiers_keeps_the_total(self):
+        spec = {"dist": "tiered", "average": 10, "tiers": [
+            {"agents": 1, "share": 50}, {"agents": 10, "share": 20}, {"agents": 89, "share": 30}]}
+        values = allocate(spec, 2, random.Random(1), whole=True)
+        self.assertEqual(sum(values), 20)
+
+    def test_tiered_single_draw_uses_tier_probabilities(self):
+        spec = {"dist": "tiered", "average": 10, "tiers": [{"agents": 20, "share": 80}, {"agents": 80, "share": 20}]}
+        values = draws(spec, n=4000)
+        self.assertEqual(set(values), {40.0, 2.5})      # 10*80/20 and 10*20/80
+        self.assertAlmostEqual(values.count(40.0) / len(values), 0.2, delta=0.03)
 
     def test_validation(self):
         with self.assertRaisesRegex(ValueError, "min can't be larger"):
             normalize({"dist": "uniform", "min": 5, "max": 1}, "x", 0, 10)
         with self.assertRaisesRegex(ValueError, "x.mean must be between"):
-            normalize({"dist": "normal", "min": 0, "max": 1, "mean": 3, "std": 1}, "x", 0, 10)
-        with self.assertRaisesRegex(ValueError, "dist must be one of"):
-            normalize({"dist": "poisson", "min": 0, "max": 1}, "x", 0, 10)
-        with self.assertRaisesRegex(ValueError, "unexpected skew"):
-            normalize({"dist": "normal", "min": 0, "max": 1, "mean": 0.5, "std": 1, "skew": 2}, "x", 0, 10)
+            normalize({"dist": "normal", "mean": 30, "std": 1, "limit": 3, "skew": 0}, "x", 0, 10)
+        with self.assertRaisesRegex(ValueError, "dist must be one of uniform, normal$"):
+            normalize({"dist": "tiered", "average": 1, "tiers": []}, "x", 0, 10)
+        with self.assertRaisesRegex(ValueError, "add up to 90"):
+            normalize({"dist": "tiered", "average": 1, "tiers": [{"agents": 80, "share": 50},
+                                                                 {"agents": 10, "share": 50}]}, "x", 0, 10, tiered=True)
+        with self.assertRaisesRegex(ValueError, "unexpected min"):
+            normalize({"dist": "normal", "mean": 1, "std": 1, "min": 0}, "x", 0, 10)
 
 
 class RulesTests(unittest.TestCase):
@@ -69,15 +98,19 @@ class RulesTests(unittest.TestCase):
                              ({"gravity": 1}, "unknown rule"),
                              ({"price_mode": "auction"}, "price_mode must be one of"),
                              ({"death_enabled": "yes"}, "true or false"),
-                             ({"production": {"food": 2.5}}, "whole number")]:
+                             ({"production": {"food": 2.5}}, "whole number"),
+                             ({"purchase_min": 3, "purchase_max": 2}, "purchase_min can't be larger"),
+                             ({"production": {"food": {"dist": "tiered", "average": 1,
+                                                       "tiers": [{"agents": 100, "share": 100}]}}},
+                              "dist must be one of uniform, normal")]:
             with self.assertRaisesRegex(ValueError, message):
                 Rules.from_dict(bad)
 
     def test_world_draws_each_agent_from_the_spreads(self):
         rules = Rules.from_dict({
             "agents": 200,
-            "production": {"water": {"dist": "skewed", "min": 2, "max": 40, "mean": 10, "std": 6, "skew": 4}},
-            "money": {"dist": "normal", "min": 0, "max": 1000, "mean": 100, "std": 20},
+            "production": {"water": {"dist": "normal", "mean": 10, "std": 6, "limit": 3, "skew": 4}},
+            "money": {"dist": "normal", "mean": 100, "std": 20, "limit": 3, "skew": 0},
             "movement": 7,
         })
         world = World(seed=2, rules=rules)
@@ -85,11 +118,38 @@ class RulesTests(unittest.TestCase):
         water = [a.modules[2].intervals["water"] for a in world.agents]
         money = [a.money for a in world.agents]
         self.assertEqual(len(world.agents), 200)
-        self.assertTrue(all(2 <= w <= 40 for w in water))
+        self.assertTrue(all(0 <= w <= 28 for w in water))
         self.assertGreater(len(set(water)), 10)
         self.assertGreater(skewness(water), 0)
         self.assertAlmostEqual(statistics.fmean(money), 100, delta=6)
         self.assertEqual({a.movement for a in world.agents}, {7})
+
+    def test_spawn_shares_tiered_money_exactly(self):
+        rules = Rules.from_dict({"agents": 10, "money": {"dist": "tiered", "average": 100, "tiers": [
+            {"agents": 10, "share": 60}, {"agents": 90, "share": 40}]}})
+        world = World(seed=5, rules=rules)
+        world.spawn_random_agents()
+        money = sorted(a.money for a in world.agents)
+        self.assertEqual(money[-1], 600)
+        self.assertAlmostEqual(sum(money[:-1]), 400, delta=0.1)  # 400 / 9 rounded to cents
+
+    def test_buyer_stocks_up_between_one_and_three_times_its_need(self):
+        bought = []
+        for seed in range(200):
+            buyer = World(seed=seed).create_agent(inventory={"water": 0}, needs={"thirst": 0.8}, money=1000)
+            seller = World(seed=seed).create_agent(inventory={"water": 1000}, needs={"thirst": 0})
+            economy.buy(buyer, seller, {"food": 1, "water": 1, "games": 1}, Rules(), random.Random(seed))
+            bought.append(buyer.inventory.count("water"))
+        need = economy.units_to_satisfy(0.8)          # 6
+        self.assertTrue(all(need <= b <= 3 * need for b in bought))
+        self.assertGreater(len(set(bought)), 5)
+
+    def test_purchase_is_capped_by_money_and_seller_spare(self):
+        buyer = World(seed=1).create_agent(inventory={"water": 0, "food": 0, "games": 0}, needs={"thirst": 0.8},
+                                           money=4)  # nothing else to barter with
+        seller = World(seed=1).create_agent(inventory={"water": 1000}, needs={"thirst": 0})
+        economy.buy(buyer, seller, {"food": 1, "water": 1, "games": 1}, Rules(), random.Random(1))
+        self.assertEqual(buyer.inventory.count("water"), 4)
 
     def test_world_rules_change_mechanics(self):
         rules = Rules.from_dict({"price_mode": "fixed", "fixed_prices": {"water": 4},

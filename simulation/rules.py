@@ -37,6 +37,10 @@ class Rules:
     target_level: float = 0.3          # ... until the need is below this
     sleep_recovery: object = 0.05      # sleep recovered per step while resting (spread)
 
+    # Trading: a buyer buys a random multiple of what it needs, in [purchase_min, purchase_max]
+    purchase_min: float = 1.0
+    purchase_max: float = 3.0
+
     # Prices
     price_mode: str = "scarcity"       # "scarcity": money/units*(1-share); "fixed": fixed_prices
     fixed_prices: dict = field(default_factory=lambda: {"food": 1.0, "water": 1.0, "games": 1.0})
@@ -68,19 +72,20 @@ class Rules:
             raise ValueError(f"unknown rule(s): {', '.join(sorted(unknown))}")
         rules = cls()
         for key, value in data.items():
+            if key in SPREADS:
+                names, low, high, whole, tiered = SPREADS[key]
+                if names is None:
+                    setattr(rules, key, distributions.normalize(value, key, low, high, whole, tiered))
+                    continue
+                if not isinstance(value, dict) or set(value) - set(names):
+                    raise ValueError(f"{key} must map {', '.join(names)} to values")
+                setattr(rules, key, {**getattr(rules, key), **{
+                    n: distributions.normalize(v, f"{key}.{n}", low, high, whole, tiered) for n, v in value.items()}})
+                continue
             low, high, kind = LIMITS[key]
             if kind == "map":
                 names, low, high, whole = low
                 setattr(rules, key, {**getattr(rules, key), **_number_map(value, key, names, low, high, whole)})
-            elif kind == "spreadmap":
-                names, low, high, whole = low
-                if not isinstance(value, dict) or set(value) - set(names):
-                    raise ValueError(f"{key} must map {', '.join(names)} to values")
-                setattr(rules, key, {**getattr(rules, key), **{
-                    n: distributions.normalize(v, f"{key}.{n}", low, high, whole) for n, v in value.items()}})
-            elif kind == "spread":
-                low, whole = low
-                setattr(rules, key, distributions.normalize(value, key, low, high, whole))
             elif kind == "bool":
                 if not isinstance(value, bool):
                     raise ValueError(f"{key} must be true or false")
@@ -93,23 +98,32 @@ class Rules:
                 setattr(rules, key, _number(value, key, low, high, whole=kind == "int"))
         if rules.target_level >= rules.seek_threshold:
             raise ValueError("target_level must be below seek_threshold")
+        if rules.purchase_min > rules.purchase_max:
+            raise ValueError("purchase_min can't be larger than purchase_max")
         return rules
 
 
-# key -> (low, high, kind). For "map"/"spreadmap": ((names, low, high, whole), None, kind);
-# for "spread": ((low, whole), high, "spread").
+# Per-agent values ("spreads"): key -> (sub-keys or None, low, high, whole number, tiered allowed).
+# Only amounts that can be shared out between agents (inventory, money) may be tiered.
+SPREADS = {
+    "inventory": (RESOURCES, 0, 1e9, True, True),
+    "money": (None, 0, 1e12, False, True),
+    "movement": (None, 1, 200, True, False),
+    "start_needs": (None, 0, 1, False, False),
+    "production": (RESOURCES, 0, 1e6, True, False),
+    "rates": (NEEDS, 0, 1, False, False),
+    "sleep_recovery": (None, 0, 1, False, False),
+}
+
+
+# Other rules: key -> (low, high, kind). For "map": ((names, low, high, whole), None, "map").
 LIMITS = {
     "agents": (1, 500, "int"),
-    "inventory": ((RESOURCES, 0, 1e9, True), None, "spreadmap"),
-    "money": ((0, False), 1e12, "spread"),
-    "movement": ((1, True), 200, "spread"),
-    "start_needs": ((0, False), 1, "spread"),
-    "production": ((RESOURCES, 0, 1e6, True), None, "spreadmap"),
-    "rates": ((NEEDS, 0, 1, False), None, "spreadmap"),
     "relief_per_unit": (0.001, 1, "float"),
     "seek_threshold": (0, 1, "float"),
     "target_level": (0, 1, "float"),
-    "sleep_recovery": ((0, False), 1, "spread"),
+    "purchase_min": (1, 10, "float"),
+    "purchase_max": (1, 10, "float"),
     "price_mode": (PRICE_MODES, None, "choice"),
     "fixed_prices": ((RESOURCES, 0, 1e9, False), None, "map"),
     "death_enabled": (None, None, "bool"),

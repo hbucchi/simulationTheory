@@ -118,16 +118,32 @@ def _settle_one(buyer, seller, buying, prices, rules):
     return None
 
 
-def buy(buyer, seller, prices, rules=DEFAULT_RULES):
-    """Buyer acquires what it needs from seller at market prices.
+def purchase_goal(buyer, resource, rules, rng=None):
+    """How many units the buyer wants to hold after buying ``resource``.
 
-    Returns (bought, paid): bought = {resource: units}; paid = {resource: units,
-    "money": net money buyer -> seller (negative = buyer received change)}.
+    It needs units_to_satisfy(level); it buys that times a random multiplier in
+    [purchase_min, purchase_max] (rounded up), so it stocks up for later. With no
+    rng the multiplier is purchase_min. Returns 0 if it doesn't need the resource.
+    """
+    if not demand(buyer, resource, rules):
+        return 0
+    needed = units_to_satisfy(getattr(buyer, NEED_FOR_RESOURCE[resource]), rules)
+    multiplier = rng.uniform(rules.purchase_min, rules.purchase_max) if rng else rules.purchase_min
+    return math.ceil(round(needed * multiplier, 9))
+
+
+def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None):
+    """Buyer acquires what it needs (times a random multiplier) from seller at market prices.
+
+    It stops when it reaches its goal, the seller has no spare left, or it
+    can't pay. Returns (bought, paid): bought = {resource: units}; paid =
+    {resource: units, "money": net money buyer -> seller (negative = change)}.
     """
     bought, paid = {}, {}
     wants = sorted(RESOURCES, key=lambda r: getattr(buyer, NEED_FOR_RESOURCE[r]), reverse=True)
     for resource in wants:
-        while demand(buyer, resource, rules) > 0 and spare(seller, resource, rules) > 0:
+        goal = purchase_goal(buyer, resource, rules, rng)
+        while buyer.inventory.count(resource) < goal and spare(seller, resource, rules) > 0:
             settled = _settle_one(buyer, seller, resource, prices, rules)
             if settled is None:
                 return bought, paid
@@ -142,11 +158,11 @@ def buy(buyer, seller, prices, rules=DEFAULT_RULES):
     return bought, paid
 
 
-def trade(a, b, prices, rules=DEFAULT_RULES):
+def trade(a, b, prices, rules=DEFAULT_RULES, rng=None):
     """Both agents buy what they need from each other, then consume. Returns a list of deals."""
     deals = []
     for buyer, seller in ((a, b), (b, a)):
-        bought, paid = buy(buyer, seller, prices, rules)
+        bought, paid = buy(buyer, seller, prices, rules, rng)
         if bought:
             deals.append((buyer, seller, bought, paid))
     consume(a, rules)

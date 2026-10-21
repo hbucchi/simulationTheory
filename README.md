@@ -22,19 +22,27 @@ New game*). Everything there applies to the whole game:
   and ignore each other.
 - **Starting agents**, **production**, **consumption**: every per-agent value
   (food, water, games, money, movement, starting needs, production intervals,
-  need growth rates, sleep recovery) is either **fixed** or drawn per agent from
-  a distribution:
+  need growth rates, sleep recovery) has its own distribution:
+  - *Fixed*: every agent gets the same value.
   - *Uniform*: anywhere between min and max.
-  - *Normal (Gaussian)*: mean and std.
-  - *Skewed*: mean and std plus a skew (positive = long tail to the right).
+  - *Normal (Gaussian)*: mean and std, cut off at mean ± N std (values
+    outside are re-drawn). Optional skew: 0 = symmetric, positive = most
+    agents low and a few high.
+  - *Tiered* (inventory and money only): an average per agent and any number
+    of tiers, e.g. top 1% of agents hold 50% of the total, next 10% hold 20%,
+    everyone else shares the rest. At the start the total is shared out
+    exactly; agents added later land in a tier at random with those odds.
 
-  For normal and skewed, min and max are hard limits (values outside are
-  re-drawn). A small histogram shows the shape.
+  A histogram (or, for tiers, the agents per tier and what each gets) shows
+  the result. *Copy to all resources / needs* reuses a row's distribution.
+- **Trading**: a buyer buys its need × a random multiplier (1–3 by default),
+  limited by what the seller can spare and what the buyer can pay, so it
+  stocks up for later.
 - **Need thresholds**: act above / until below, and how much 1 unit relieves.
 - **Prices**: scarcity formula or fixed prices.
 - **Life and death**: turn death and depression on/off, depression strength.
 
-Presets (balanced, specialists, unequal wealth, drought, easy, barter) are
+Presets (balanced, lean start, specialists, unequal wealth, drought, easy, barter) are
 starting points. A preview explains what the rules mean for an average agent
 (shortages, how long stocks last, time asleep, starting prices). *Restart* in
 the toolbar starts over with the same rules.
@@ -60,7 +68,8 @@ Every step each agent runs its modules in this order:
 
 Contacts are checked right after each agent moves (not once at the end of the
 tick). When two agents touch and at least one needs something, they **trade**
-at market prices: each buys exactly enough to bring its needs below 0.3. The
+at market prices: each buys what brings its needs below 0.3, times a random
+multiplier between `purchase_min` and `purchase_max` (1–3 by default). The
 seller only sells what it doesn't need itself. The buyer pays with something
 the seller needs (barter, with the price difference settled in money),
 otherwise money, otherwise any other spare resource. If a need can't be met
