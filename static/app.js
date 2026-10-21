@@ -286,7 +286,20 @@ function renderMarket() {
     const cell = document.createElement("div");
     const price = document.createElement("b");
     price.textContent = m.prices[r].toFixed(3);
-    cell.append(`${r} `, price);
+    const mult = m.multiplier[r];
+    const arrow = document.createElement("span");
+    arrow.className = "price-move " + (mult > 1.02 ? "up" : mult < 0.98 ? "down" : "");
+    arrow.textContent = mult > 1.02 ? "▲" : mult < 0.98 ? "▼" : "";
+    cell.append(`${r} `, price, arrow);
+    // Demand pressure: base price x multiplier from buyers vs sellers.
+    const pressure = document.createElement("span");
+    pressure.className = "pressure";
+    pressure.textContent = `base ${m.base_prices[r].toFixed(3)} × ${mult.toFixed(2)} · ` +
+      `${m.buyers[r]} want / ${m.sellers[r]} sell` + (m.markups[r] ? ` · +${(m.markups[r] * 100).toFixed(0)}%/unit` : "");
+    pressure.title = "Buyers: agents that need it or are short of their reserve. Sellers: agents with some to spare.";
+    const priceChart = sparkline(m.price_history[r]);
+    priceChart.title = "Price, last 200 steps";
+    cell.append(pressure, priceChart);
     const detail = document.createElement("span");
     detail.textContent = `${m.units[r]} units · ${(share * 100).toFixed(0)}% share`;
     // Average units per agent and how much it fell over the scarcity window.
@@ -297,7 +310,10 @@ function renderMarket() {
     trend.textContent = `${perAgent.toFixed(1)} per agent` +
       (decline > 0 ? ` · ▼ ${(decline * 100).toFixed(0)}% in ${history.length - 1} steps` : "");
     trend.className = m.stockpiling[r] ? "scarce" : "";
-    cell.append(detail, trend, sparkline(history));
+    const stockChart = sparkline(history);
+    stockChart.title = "Units per agent over the scarcity window";
+    stockChart.classList.add("stock");
+    cell.append(detail, trend, stockChart);
     if (m.stockpiling[r]) {
       const badge = document.createElement("span");
       badge.className = "badge";

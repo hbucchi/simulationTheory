@@ -172,33 +172,40 @@ def purchase_goal(buyer, resource, rules, rng=None):
     return math.ceil(round(needed * multiplier, 9))
 
 
-def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None):
+def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, markups=None):
     """Buyer acquires what it needs (times a random multiplier) from seller at market prices,
     plus any stockpile reserve it is missing.
 
     It stops when it reaches its goal, the seller has no spare left, or it
     can't pay. Units bought only for the reserve are paid in money, up to
-    stockpile_budget of the money the buyer had at the start.
-    Returns (bought, paid, stocked): bought = {resource: units}; paid =
-    {resource: units, "money": net money buyer -> seller (negative = change)};
-    stocked = {resource: units of bought that went to the reserve}.
+    stockpile_budget of the money the buyer had at the start. ``markups``
+    ({resource: rate}) makes each extra unit of a resource in this deal cost
+    that much more than the previous one (price x (1 + rate) ** k).
+    Returns (bought, paid, stocked, unit_prices): bought = {resource: units};
+    paid = {resource: units, "money": net money buyer -> seller (negative =
+    change)}; stocked = {resource: units of bought that went to the reserve};
+    unit_prices = {resource: [first unit price, last unit price]}.
     """
-    bought, paid, stocked = {}, {}, {}
+    bought, paid, stocked, unit_prices = {}, {}, {}, {}
     budget = buyer.money * rules.stockpile_budget
     spent_on_reserve = 0.0
     wants = sorted(RESOURCES, key=lambda r: getattr(buyer, NEED_FOR_RESOURCE[r]), reverse=True)
     for resource in wants:
         need_goal = purchase_goal(buyer, resource, rules, rng)
         goal = max(need_goal, stockpile_target(buyer, resource, rules, scarcity))
+        markup = (markups or {}).get(resource, 0)
         while buyer.inventory.count(resource) < goal and spare(seller, resource, rules, scarcity) > 0:
+            unit_price = prices[resource] * (1 + markup) ** bought.get(resource, 0)
             for_reserve = buyer.inventory.count(resource) >= need_goal
-            if for_reserve and spent_on_reserve + prices[resource] > budget:
+            if for_reserve and spent_on_reserve + unit_price > budget:
                 break
-            settled = _settle_one(buyer, seller, resource, prices, rules, scarcity, money_only=for_reserve)
+            settled = _settle_one(buyer, seller, resource, {**prices, resource: unit_price}, rules, scarcity,
+                                  money_only=for_reserve)
             if settled is None:
-                return bought, paid, stocked
+                return bought, paid, stocked, unit_prices
+            unit_prices.setdefault(resource, [unit_price, unit_price])[1] = unit_price
             if for_reserve:
-                spent_on_reserve += prices[resource]
+                spent_on_reserve += unit_price
                 stocked[resource] = stocked.get(resource, 0) + 1
             given, money = settled
             transfer(seller, buyer, resource)
@@ -208,19 +215,19 @@ def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None):
             pay(buyer, seller, money)
             paid["money"] = paid.get("money", 0.0) + money
             bought[resource] = bought.get(resource, 0) + 1
-    return bought, paid, stocked
+    return bought, paid, stocked, unit_prices
 
 
-def trade(a, b, prices, rules=DEFAULT_RULES, rng=None, scarcity=None):
+def trade(a, b, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, markups=None):
     """Both agents buy what they need (and any stockpile) from each other, then consume.
 
-    Returns a list of deals: (buyer, seller, bought, paid, stocked).
+    Returns a list of deals: (buyer, seller, bought, paid, stocked, unit_prices).
     """
     deals = []
     for buyer, seller in ((a, b), (b, a)):
-        bought, paid, stocked = buy(buyer, seller, prices, rules, rng, scarcity)
+        bought, paid, stocked, unit_prices = buy(buyer, seller, prices, rules, rng, scarcity, markups)
         if bought:
-            deals.append((buyer, seller, bought, paid, stocked))
+            deals.append((buyer, seller, bought, paid, stocked, unit_prices))
     consume(a, rules)
     consume(b, rules)
     return deals
@@ -242,6 +249,17 @@ def unmet(buyer, seller, rules=DEFAULT_RULES, scarcity=None):
             why = "nothing left to pay with"
         reasons.append(f"{buyer.name} still needs {missing} {resource}: {why}")
     return reasons
+
+
+def demand_multiplier_target(buyers, sellers, rules=DEFAULT_RULES):
+    """Where demand pressure pushes a resource's price multiplier.
+
+    ((buyers + 1) / (sellers + 1)) ** price_elasticity, kept within
+    [price_floor, price_cap]. The +1s keep it finite when nobody sells, and
+    make 0 buyers vs 0 sellers neutral (x1).
+    """
+    ratio = ((buyers + 1) / (sellers + 1)) ** rules.price_elasticity
+    return min(max(ratio, rules.price_floor), rules.price_cap)
 
 
 def describe(items):

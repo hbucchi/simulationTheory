@@ -19,6 +19,7 @@ class World:
     # Departure = straight away from the partner, turned by a random angle in
     # [-MAX_TURN, +MAX_TURN]: a 180-degree window that never points back at them.
     MAX_TURN = math.radians(90)
+    PRICE_HISTORY = 200  # steps of price history kept for the charts
 
     def __init__(self, width=1024, height=1024, seed=None, rules=None):
         self.width = width
@@ -37,6 +38,12 @@ class World:
         # last scarcity_window steps; scarcity = how much that average fell over the window.
         self.per_agent_history = {r: deque(maxlen=self.rules.scarcity_window + 1) for r in economy.RESOURCES}
         self.scarcity = {r: 0.0 for r in economy.RESOURCES}
+        # Demand pressure: buyers/sellers counted each step, the price multiplier they push
+        # toward, and the last PRICE_HISTORY prices for the charts.
+        self.buyers = {r: 0 for r in economy.RESOURCES}
+        self.sellers = {r: 0 for r in economy.RESOURCES}
+        self.price_multiplier = {r: 1.0 for r in economy.RESOURCES}
+        self.price_history = {r: deque(maxlen=self.PRICE_HISTORY) for r in economy.RESOURCES}
         self.next_id = 1
 
     def clamp_position(self, x, y):
@@ -178,6 +185,33 @@ class World:
             full = len(history) == history.maxlen
             self.scarcity[r] = max(0.0, 1 - now / past) if full and past > 0 else 0.0
 
+    def update_demand(self):
+        """Count buyers and sellers of each resource and move its price multiplier toward
+        the demand-pressure target (a fraction price_adjust_speed of the way per step)."""
+        rules = self.rules
+        for r in economy.RESOURCES:
+            self.buyers[r] = sum(1 for a in self.agents if economy.demand(a, r, rules) > 0
+                                 or economy.stockpile_shortfall(a, r, rules, self.scarcity) > 0)
+            self.sellers[r] = sum(1 for a in self.agents if economy.spare(a, r, rules, self.scarcity) > 0)
+            if rules.demand_pricing_enabled:
+                target = economy.demand_multiplier_target(self.buyers[r], self.sellers[r], rules)
+                self.price_multiplier[r] += rules.price_adjust_speed * (target - self.price_multiplier[r])
+            else:
+                self.price_multiplier[r] = 1.0
+        for r, price in self.current_prices().items():
+            self.price_history[r].append(price)
+
+    def current_prices(self):
+        """Base price (scarcity formula or fixed) x demand-pressure multiplier."""
+        base = economy.market_prices(self.agents, self.rules)
+        return {r: base[r] * self.price_multiplier[r] for r in economy.RESOURCES}
+
+    def unit_markups(self):
+        """Per-unit price rise inside a deal: only where buyers outnumber sellers."""
+        rules = self.rules
+        return {r: rules.unit_markup if rules.demand_pricing_enabled and self.buyers[r] > self.sellers[r] else 0
+                for r in economy.RESOURCES}
+
     def contacts(self):
         """All pairs of agents currently close enough to interact."""
         pairs = []
@@ -197,6 +231,7 @@ class World:
         """
         self.tick += 1
         self.update_scarcity()
+        self.update_demand()
         for agent in list(self.agents):
             if agent not in self.agents:
                 continue
@@ -233,10 +268,13 @@ class World:
         scarcity = self.scarcity
         if not (economy.wants_anything(a, rules, scarcity) or economy.wants_anything(b, rules, scarcity)):
             return  # a casual bump: nobody needs anything
-        prices = economy.market_prices(self.agents, rules)
-        deals = economy.trade(a, b, prices, rules, self.rng, scarcity)
-        for buyer, seller, bought, paid, stocked in deals:
+        prices = self.current_prices()
+        deals = economy.trade(a, b, prices, rules, self.rng, scarcity, self.unit_markups())
+        for buyer, seller, bought, paid, stocked, unit_prices in deals:
             note = f" ({economy.describe(stocked)} to stockpile)" if stocked else ""
+            rising = [f"{r} {lo:.2f}→{hi:.2f}" for r, (lo, hi) in unit_prices.items() if hi > lo + 1e-9]
+            if rising:
+                note += f" [price rose per unit: {', '.join(rising)}]"
             self.log(f"{buyer.name} got {economy.describe(bought)} from {seller.name} "
                      f"for {economy.describe_payment(paid)}{note}")
         for reason in economy.unmet(a, b, rules, scarcity) + economy.unmet(b, a, rules, scarcity):
@@ -268,7 +306,13 @@ class World:
             "seed": self.seed,
             "rules": self.rules.to_dict(),
             "market": {
-                "prices": economy.market_prices(self.agents, self.rules),
+                "prices": self.current_prices(),
+                "base_prices": economy.market_prices(self.agents, self.rules),
+                "multiplier": self.price_multiplier,
+                "buyers": self.buyers,
+                "sellers": self.sellers,
+                "markups": self.unit_markups(),
+                "price_history": {r: list(h) for r, h in self.price_history.items()},
                 # Average units per agent over the scarcity window (oldest first) and how much it fell.
                 "per_agent_history": {r: list(h) for r, h in self.per_agent_history.items()},
                 "scarcity": self.scarcity,

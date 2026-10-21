@@ -62,6 +62,20 @@ const SETUP_SECTIONS = [
     { path: "stockpile_budget", label: "Spend at most (0.5 = half its money)", kind: "float", min: 0, max: 1, step: 0.05,
       enabledWhen: v => v.stockpiling_enabled },
   ]},
+  { title: "Market dynamics: demand pressure", hint: "Prices follow buyers vs sellers: many agents wanting what few " +
+      "hold pushes the price up; many sellers for few buyers pushes it down. Under pressure, each extra unit in a deal costs more.", fields: [
+    { path: "demand_pricing_enabled", label: "Prices react to demand", kind: "bool", full: true },
+    { path: "price_elasticity", label: "Sensitivity (0 = none)", kind: "float", min: 0, max: 3, step: 0.1,
+      enabledWhen: v => v.demand_pricing_enabled },
+    { path: "price_adjust_speed", label: "Speed (share of gap per step)", kind: "float", min: 0.01, max: 1, step: 0.05,
+      enabledWhen: v => v.demand_pricing_enabled },
+    { path: "price_floor", label: "Never below base ×", kind: "float", min: 0.01, max: 1, step: 0.05,
+      enabledWhen: v => v.demand_pricing_enabled },
+    { path: "price_cap", label: "Never above base ×", kind: "float", min: 1, max: 100, step: 0.5,
+      enabledWhen: v => v.demand_pricing_enabled },
+    { path: "unit_markup", label: "Extra unit costs more (0.05 = +5%)", kind: "float", min: 0, max: 1, step: 0.01,
+      full: true, enabledWhen: v => v.demand_pricing_enabled },
+  ]},
   { title: "Need thresholds", hint: "When agents act on a need, and what consuming does.", fields: [
     { path: "seek_threshold", label: "Act above", kind: "float", min: 0, max: 1, step: 0.05 },
     { path: "target_level", label: "Until below", kind: "float", min: 0, max: 1, step: 0.05 },
@@ -542,6 +556,13 @@ function renderPreview(r, error) {
     line(`Stockpiling: when a resource's average per agent falls ${(r.scarcity_trigger * 100).toFixed(0)}% within ` +
          `${r.scarcity_window} steps, agents short of it want ${r.stockpile_steps} steps of their own use in reserve ` +
          `(up to 3× if it falls faster), spending at most ${(r.stockpile_budget * 100).toFixed(0)}% of their money per trade.`);
+  }
+
+  if (r.demand_pricing_enabled) {
+    const at = (b, s) => Math.min(Math.max(((b + 1) / (s + 1)) ** r.price_elasticity, r.price_floor), r.price_cap);
+    line(`Demand pressure: 9 buyers for 1 seller → price ×${at(9, 1).toFixed(2)}; 1 buyer for 9 sellers → ` +
+         `×${at(1, 9).toFixed(2)}. Prices close ${(r.price_adjust_speed * 100).toFixed(0)}% of the gap each step` +
+         (r.unit_markup ? `, and the 5th unit in one deal costs ×${((1 + r.unit_markup) ** 4).toFixed(2)} the first.` : "."));
   }
 
   const g = avg(r.rates.sleep), rec = avg(r.sleep_recovery);

@@ -102,6 +102,22 @@ The Overview market panel shows units per agent, the fall over the window, a
 trend line and an *agents stockpiling* badge; cards show each agent's reserve.
 All of it is set in the *Market dynamics* section of the setup screen.
 
+### Market dynamics: demand pressure
+
+Each step, for every resource the world counts **buyers** (agents that need it
+or are short of their reserve) and **sellers** (agents with some to spare):
+
+    target multiplier = ((buyers + 1) / (sellers + 1)) ^ sensitivity     (0.5)
+    multiplier += speed × (target − multiplier)                          (0.2 per step)
+    price = base price × multiplier, kept within base × [0.25, 4]
+
+Many buyers for few sellers push the price up; many sellers for few buyers
+push it down. When buyers outnumber sellers, each extra unit in the same deal
+costs 5% more than the one before, and the event log shows the rise. The
+Overview market panel shows base price × multiplier, buyers vs sellers, an
+arrow and a price chart. All of it is set in *Market dynamics: demand
+pressure* on the setup screen.
+
 ### Prices
 
 Prices are recomputed from what everyone holds at the moment of each trade:

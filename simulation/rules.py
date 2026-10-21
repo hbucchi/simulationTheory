@@ -57,6 +57,18 @@ class Rules:
     price_mode: str = "scarcity"       # "scarcity": money/units*(1-share); "fixed": fixed_prices
     fixed_prices: dict = field(default_factory=lambda: {"food": 1.0, "water": 1.0, "games": 1.0})
 
+    # Demand pressure on prices. Each step, per resource: buyers = agents that need it or are
+    # short of their reserve; sellers = agents with some to spare. Target multiplier =
+    # ((buyers + 1) / (sellers + 1)) ** price_elasticity, kept within [price_floor, price_cap];
+    # the multiplier moves price_adjust_speed of the way to the target each step. When buyers
+    # outnumber sellers, each extra unit in the same deal costs unit_markup more (compounding).
+    demand_pricing_enabled: bool = True
+    price_elasticity: float = 0.5
+    price_adjust_speed: float = 0.2
+    price_floor: float = 0.25
+    price_cap: float = 4.0
+    unit_markup: float = 0.05
+
     # Life
     death_enabled: bool = True         # hunger or thirst at 1.00 kills
     depression_enabled: bool = True    # boredom at 1.00 depresses
@@ -139,6 +151,12 @@ LIMITS = {
     "scarcity_trigger": (0.01, 0.9, "float"),
     "stockpile_steps": (0, 5000, "int"),
     "stockpile_budget": (0, 1, "float"),
+    "demand_pricing_enabled": (None, None, "bool"),
+    "price_elasticity": (0, 3, "float"),
+    "price_adjust_speed": (0.01, 1, "float"),
+    "price_floor": (0.01, 1, "float"),
+    "price_cap": (1, 100, "float"),
+    "unit_markup": (0, 1, "float"),
     "purchase_min": (1, 10, "float"),
     "purchase_max": (1, 10, "float"),
     "price_mode": (PRICE_MODES, None, "choice"),
