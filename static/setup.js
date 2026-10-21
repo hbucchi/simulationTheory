@@ -71,11 +71,14 @@ const SETUP_SECTIONS = [
     { path: "stockpile_budget", label: "Spend at most (0.5 = half its money)", kind: "float", min: 0, max: 1, step: 0.05,
       enabledWhen: v => v.stockpiling_enabled },
   ]},
-  { title: "Market dynamics: demand pressure", hint: "Prices follow buyers vs sellers: many agents wanting what few " +
-      "hold pushes the price up; many sellers for few buyers pushes it down. Under pressure, each extra unit in a deal costs more.", fields: [
-    { path: "demand_pricing_enabled", label: "Prices react to demand", kind: "bool", full: true },
-    { path: "price_elasticity", label: "Sensitivity (0 = none)", kind: "float", min: 0, max: 3, step: 0.1,
-      enabledWhen: v => v.demand_pricing_enabled },
+  { title: "Market dynamics: demand and concentration", hint: "Price = money ÷ units × (1 − share) × demand pressure × " +
+      "concentration. Pressure = ((buyers+1) ÷ (sellers+1)) ^ elasticity. Concentration = 1 + weight × C, where C is 0 when the " +
+      "sellable supply is spread evenly and 1 when one agent holds it all. Under pressure, each extra unit in a deal costs more.", fields: [
+    { path: "demand_pricing_enabled", label: "Prices react to demand and concentration", kind: "bool", full: true },
+    ...per(RESOURCES, r => ({ path: `price_elasticity.${r}`, label: `${cap(r)} elasticity (0 = none)`, kind: "float",
+      min: 0, max: 3, step: 0.1, enabledWhen: v => v.demand_pricing_enabled })),
+    ...per(RESOURCES, r => ({ path: `concentration_weight.${r}`, label: `${cap(r)} concentration weight`, kind: "float",
+      min: 0, max: 10, step: 0.1, enabledWhen: v => v.demand_pricing_enabled })),
     { path: "price_adjust_speed", label: "Speed (share of gap per step)", kind: "float", min: 0.01, max: 1, step: 0.05,
       enabledWhen: v => v.demand_pricing_enabled },
     { path: "price_floor", label: "Never below base ×", kind: "float", min: 0.01, max: 1, step: 0.05,
@@ -586,9 +589,13 @@ function renderPreview(r, error) {
   }
 
   if (r.demand_pricing_enabled) {
-    const at = (b, s) => Math.min(Math.max(((b + 1) / (s + 1)) ** r.price_elasticity, r.price_floor), r.price_cap);
-    line(`Demand pressure: 9 buyers for 1 seller → price ×${at(9, 1).toFixed(2)}; 1 buyer for 9 sellers → ` +
-         `×${at(1, 9).toFixed(2)}. Prices close ${(r.price_adjust_speed * 100).toFixed(0)}% of the gap each step` +
+    const clamp = (v) => Math.min(Math.max(v, r.price_floor), r.price_cap);
+    for (const x of RESOURCES) {
+      const at = (b, s) => clamp(((b + 1) / (s + 1)) ** r.price_elasticity[x]);
+      line(`${cap(x)}: 9 buyers for 1 seller → ×${at(9, 1).toFixed(2)}; 1 buyer for 9 sellers → ×${at(1, 9).toFixed(2)}; ` +
+           `supply held by one agent → ×${clamp(1 + r.concentration_weight[x]).toFixed(2)}.`);
+    }
+    line(`Prices close ${(r.price_adjust_speed * 100).toFixed(0)}% of the gap each step` +
          (r.unit_markup ? `, and the 5th unit in one deal costs ×${((1 + r.unit_markup) ** 4).toFixed(2)} the first.` : "."));
   }
 

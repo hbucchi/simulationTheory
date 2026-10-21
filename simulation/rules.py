@@ -85,13 +85,18 @@ class Rules:
     price_mode: str = "scarcity"       # "scarcity": money/units*(1-share); "fixed": fixed_prices
     fixed_prices: dict = field(default_factory=lambda: {"food": 1.0, "water": 1.0, "games": 1.0})
 
-    # Demand pressure on prices. Each step, per resource: buyers = agents that need it or are
-    # short of their reserve; sellers = agents with some to spare. Target multiplier =
-    # ((buyers + 1) / (sellers + 1)) ** price_elasticity, kept within [price_floor, price_cap];
-    # the multiplier moves price_adjust_speed of the way to the target each step. When buyers
+    # Market adjustment on top of the base price, per resource:
+    #   demand pressure = ((buyers + 1) / (sellers + 1)) ** price_elasticity[r]
+    #     buyers = agents that want it (need, reserve, below the stock floor);
+    #     sellers = agents with some to spare.
+    #   concentration  = 1 + concentration_weight[r] x C, where C is 0 when the available
+    #     (sellable) supply is spread evenly over its holders and 1 when one agent holds it all.
+    # Target multiplier = pressure x concentration, kept within [price_floor, price_cap]; the
+    # multiplier moves price_adjust_speed of the way to the target each step. When buyers
     # outnumber sellers, each extra unit in the same deal costs unit_markup more (compounding).
     demand_pricing_enabled: bool = True
-    price_elasticity: float = 0.5
+    price_elasticity: dict = field(default_factory=lambda: {"food": 0.5, "water": 0.5, "games": 0.5})
+    concentration_weight: dict = field(default_factory=lambda: {"food": 1.0, "water": 1.0, "games": 1.0})
     price_adjust_speed: float = 0.2
     price_floor: float = 0.25
     price_cap: float = 4.0
@@ -181,7 +186,8 @@ LIMITS = {
     "stockpile_steps": (0, 5000, "int"),
     "stockpile_budget": (0, 1, "float"),
     "demand_pricing_enabled": (None, None, "bool"),
-    "price_elasticity": (0, 3, "float"),
+    "price_elasticity": ((RESOURCES, 0, 3, False), None, "map"),
+    "concentration_weight": ((RESOURCES, 0, 10, False), None, "map"),
     "price_adjust_speed": (0.01, 1, "float"),
     "price_floor": (0.01, 1, "float"),
     "price_cap": (1, 100, "float"),

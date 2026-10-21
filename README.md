@@ -102,21 +102,30 @@ The Overview market panel shows units per agent, the fall over the window, a
 trend line and an *agents stockpiling* badge; cards show each agent's reserve.
 All of it is set in the *Market dynamics* section of the setup screen.
 
-### Market dynamics: demand pressure
+### Market dynamics: demand and concentration
 
-Each step, for every resource the world counts **buyers** (agents that need it
-or are short of their reserve) and **sellers** (agents with some to spare):
+    price = base price × multiplier
+    base price = total money / total units × (1 − share of the resource)
+    multiplier → demand pressure × concentration   (closing 20% of the gap each step,
+                                                    kept within base × [0.25, 4])
+    demand pressure = ((buyers + 1) / (sellers + 1)) ^ elasticity[resource]
+    concentration   = 1 + weight[resource] × C
 
-    target multiplier = ((buyers + 1) / (sellers + 1)) ^ sensitivity     (0.5)
-    multiplier += speed × (target − multiplier)                          (0.2 per step)
-    price = base price × multiplier, kept within base × [0.25, 4]
+- **Base price**: how much of the resource exists compared with money and the
+  other commodities.
+- **Demand pressure**: buyers are agents that want it (need it, are short of
+  their reserve, or are below the stock floor); sellers are agents with some
+  to spare. The **elasticity is set per resource** (0.5 by default): with 0
+  buyers and sellers don't matter, with 1 twice as many buyers doubles the price.
+- **Concentration**: C measures how concentrated the sellable supply is:
+  0 when it is spread evenly over the agents, 1 when one agent holds all of it
+  (a normalised Herfindahl index). With weight 1 (per resource) a monopoly
+  doubles the price.
+- When buyers outnumber sellers, each extra unit in the same deal costs 5% more
+  than the one before, and the event log shows the rise.
 
-Many buyers for few sellers push the price up; many sellers for few buyers
-push it down. When buyers outnumber sellers, each extra unit in the same deal
-costs 5% more than the one before, and the event log shows the rise. The
-Overview market panel shows base price × multiplier, buyers vs sellers, an
-arrow and a price chart. All of it is set in *Market dynamics: demand
-pressure* on the setup screen.
+The Overview market panel shows base × multiplier with both parts, buyers vs
+sellers, C, an arrow and a price chart.
 
 ### Investment
 

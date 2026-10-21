@@ -296,9 +296,12 @@ function renderMarket() {
     // Demand pressure: base price x multiplier from buyers vs sellers.
     const pressure = document.createElement("span");
     pressure.className = "pressure";
-    pressure.textContent = `base ${m.base_prices[r].toFixed(3)} × ${mult.toFixed(2)} · ` +
-      `${m.buyers[r]} want / ${m.sellers[r]} sell` + (m.markups[r] ? ` · +${(m.markups[r] * 100).toFixed(0)}%/unit` : "");
-    pressure.title = "Buyers: agents that need it or are short of their reserve. Sellers: agents with some to spare.";
+    pressure.textContent = `base ${m.base_prices[r].toFixed(3)} × ${mult.toFixed(2)} ` +
+      `(demand ${m.pressure[r].toFixed(2)}: ${m.buyers[r]} want / ${m.sellers[r]} sell · ` +
+      `concentration ${m.concentration_factor[r].toFixed(2)}: C ${m.concentration[r].toFixed(2)})` +
+      (m.markups[r] ? ` · +${(m.markups[r] * 100).toFixed(0)}%/unit` : "");
+    pressure.title = "Price = base × multiplier. The multiplier moves toward demand × concentration each step. " +
+      "Buyers: agents that want it. Sellers: agents with some to spare. C: 0 = sellable supply spread evenly, 1 = one agent holds it all.";
     const priceChart = sparkline(m.price_history[r]);
     priceChart.title = "Price, last 200 steps";
     cell.append(pressure, priceChart);

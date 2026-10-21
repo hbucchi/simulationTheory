@@ -48,6 +48,8 @@ class World:
         self.buyer_agents = {r: [] for r in economy.RESOURCES}  # who wants each resource (this step)
         self.sellers = {r: 0 for r in economy.RESOURCES}
         self.price_multiplier = {r: 1.0 for r in economy.RESOURCES}
+        # Concentration of each resource's available (sellable) supply: 0 even, 1 one holder.
+        self.concentration = {r: 0.0 for r in economy.RESOURCES}
         self.price_history = {r: deque(maxlen=self.PRICE_HISTORY) for r in economy.RESOURCES}
         self.next_id = 1
 
@@ -201,15 +203,19 @@ class World:
             self.scarcity[r] = max(0.0, 1 - now / past) if full and past > 0 else 0.0
 
     def update_demand(self):
-        """Count buyers and sellers of each resource and move its price multiplier toward
-        the demand-pressure target (a fraction price_adjust_speed of the way per step)."""
+        """Count buyers and sellers of each resource, measure how concentrated its sellable
+        supply is, and move its price multiplier toward demand pressure x concentration
+        (a fraction price_adjust_speed of the way per step)."""
         rules = self.rules
         for r in economy.RESOURCES:
             self.buyer_agents[r] = [a for a in self.agents if economy.wants_to_buy(a, r, rules, self.scarcity)]
             self.buyers[r] = len(self.buyer_agents[r])
-            self.sellers[r] = sum(1 for a in self.agents if economy.spare(a, r, rules, self.scarcity) > 0)
+            spares = [economy.spare(a, r, rules, self.scarcity) for a in self.agents]
+            self.sellers[r] = sum(1 for s in spares if s > 0)
+            self.concentration[r] = economy.concentration(spares)
             if rules.demand_pricing_enabled:
-                target = economy.demand_multiplier_target(self.buyers[r], self.sellers[r], rules)
+                target = economy.demand_multiplier_target(self.buyers[r], self.sellers[r], r, rules,
+                                                          self.concentration[r])
                 self.price_multiplier[r] += rules.price_adjust_speed * (target - self.price_multiplier[r])
             else:
                 self.price_multiplier[r] = 1.0
@@ -357,6 +363,11 @@ class World:
                 "prices": self.current_prices(),
                 "base_prices": economy.market_prices(self.agents, self.rules),
                 "multiplier": self.price_multiplier,
+                "pressure": {r: economy.demand_pressure(self.buyers[r], self.sellers[r], r, self.rules)
+                             for r in economy.RESOURCES},
+                "concentration": self.concentration,
+                "concentration_factor": {r: economy.concentration_factor(self.concentration[r], r, self.rules)
+                                         for r in economy.RESOURCES},
                 "buyers": self.buyers,
                 "sellers": self.sellers,
                 "markups": self.unit_markups(),

@@ -279,15 +279,39 @@ def unmet(buyer, seller, rules=DEFAULT_RULES, scarcity=None):
     return reasons
 
 
-def demand_multiplier_target(buyers, sellers, rules=DEFAULT_RULES):
-    """Where demand pressure pushes a resource's price multiplier.
+def demand_pressure(buyers, sellers, resource, rules=DEFAULT_RULES):
+    """((buyers + 1) / (sellers + 1)) ** price_elasticity[resource].
 
-    ((buyers + 1) / (sellers + 1)) ** price_elasticity, kept within
-    [price_floor, price_cap]. The +1s keep it finite when nobody sells, and
-    make 0 buyers vs 0 sellers neutral (x1).
+    The +1s keep it finite when nobody sells, and make 0 buyers vs 0 sellers neutral (x1).
     """
-    ratio = ((buyers + 1) / (sellers + 1)) ** rules.price_elasticity
-    return min(max(ratio, rules.price_floor), rules.price_cap)
+    return ((buyers + 1) / (sellers + 1)) ** rules.price_elasticity[resource]
+
+
+def concentration(holdings):
+    """How concentrated a supply is: 0 = spread evenly over its holders, 1 = one holder has it all.
+
+    Normalised Herfindahl index over the agents: HHI = sum of squared shares, which
+    is 1/n when n agents hold equal amounts and 1 for a single holder. Returns 0 when
+    there is no supply or only one agent in the world.
+    """
+    total = sum(holdings)
+    n = len(holdings)
+    if total <= 0 or n < 2:
+        return 0.0
+    hhi = sum((h / total) ** 2 for h in holdings)
+    return (hhi - 1 / n) / (1 - 1 / n)
+
+
+def concentration_factor(level, resource, rules=DEFAULT_RULES):
+    """1 + concentration_weight[resource] x level: x2 for a monopoly at weight 1."""
+    return 1 + rules.concentration_weight[resource] * level
+
+
+def demand_multiplier_target(buyers, sellers, resource, rules=DEFAULT_RULES, level=0.0):
+    """Where the market pushes a resource's price multiplier: demand pressure x
+    concentration factor, kept within [price_floor, price_cap]."""
+    target = demand_pressure(buyers, sellers, resource, rules) * concentration_factor(level, resource, rules)
+    return min(max(target, rules.price_floor), rules.price_cap)
 
 
 def describe(items):

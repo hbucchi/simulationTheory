@@ -89,14 +89,43 @@ class StockpilingTests(unittest.TestCase):
 class DemandPricingTests(unittest.TestCase):
     def test_target_multiplier_follows_buyers_over_sellers(self):
         rules = Rules()  # elasticity 0.5, floor 0.25, cap 4
-        self.assertEqual(economy.demand_multiplier_target(0, 0, rules), 1)
-        self.assertAlmostEqual(economy.demand_multiplier_target(8, 0, rules), 3)       # (9/1) ** 0.5
-        self.assertAlmostEqual(economy.demand_multiplier_target(0, 8, rules), 1 / 3)   # (1/9) ** 0.5
-        self.assertEqual(economy.demand_multiplier_target(1000, 0, rules), 4)          # capped
-        self.assertEqual(economy.demand_multiplier_target(0, 1000, rules), 0.25)       # floored
+        target = lambda b, s, level=0.0: economy.demand_multiplier_target(b, s, "water", rules, level)
+        self.assertEqual(target(0, 0), 1)
+        self.assertAlmostEqual(target(8, 0), 3)            # (9/1) ** 0.5
+        self.assertAlmostEqual(target(0, 8), 1 / 3)        # (1/9) ** 0.5
+        self.assertEqual(target(1000, 0), 4)               # capped
+        self.assertEqual(target(0, 1000), 0.25)            # floored
+        self.assertAlmostEqual(target(0, 0, 1.0), 2)       # one holder of all supply, weight 1
+
+    def test_elasticity_is_set_per_resource(self):
+        rules = Rules.from_dict({"price_elasticity": {"food": 0, "water": 1}})
+        self.assertEqual(economy.demand_pressure(8, 0, "food", rules), 1)    # food ignores demand
+        self.assertEqual(economy.demand_pressure(8, 0, "water", rules), 9)   # water fully reacts
+        self.assertEqual(economy.demand_pressure(8, 0, "games", rules), 3)   # default 0.5
+
+    def test_concentration_measure(self):
+        self.assertEqual(economy.concentration([5, 5, 5, 5]), 0)             # spread evenly
+        self.assertEqual(economy.concentration([20, 0, 0, 0]), 1)            # one holder
+        self.assertAlmostEqual(economy.concentration([10, 10, 0, 0]), 1 / 3)  # HHI 0.5 -> (0.5-0.25)/0.75
+        self.assertEqual(economy.concentration([0, 0, 0]), 0)                # no supply
+
+    def test_concentrated_supply_raises_the_price(self):
+        rules = {"demand_pricing_enabled": True, "price_elasticity": {"water": 0}, "price_adjust_speed": 1,
+                 "concentration_weight": {"water": 1}}
+        spread = world_with(**rules)
+        alone = world_with(**rules)
+        for i in range(4):
+            spread.create_agent(inventory={"water": 50}, needs=CALM, x=10 * i, y=0)
+            alone.create_agent(inventory={"water": 200 if i == 0 else 0}, needs=CALM, x=10 * i, y=0)
+        spread.update_demand()
+        alone.update_demand()
+        self.assertEqual(spread.price_multiplier["water"], 1)
+        self.assertEqual(alone.price_multiplier["water"], 2)
 
     def make_world(self, thirsty, sellers, **rules):
-        world = world_with(stockpiling_enabled=False, **rules)
+        # Demand pressure on its own: no concentration factor.
+        world = world_with(stockpiling_enabled=False,
+                           concentration_weight={"food": 0, "water": 0, "games": 0}, **rules)
         for i in range(thirsty):
             world.create_agent(inventory={"water": 0}, needs={**CALM, "thirst": 0.9}, rates={"thirst": 0},
                                production={"water": 0}, x=10 * i, y=0)
