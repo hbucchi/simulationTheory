@@ -101,6 +101,9 @@ class Rules:
     asset_return: dict = field(default_factory=lambda: {"food": 0.01, "water": 0.01, "games": 0.01})
     liquidity_units: float = 3
     min_investment: float = 1000
+    # Capitalists keep cash to pay for the labour their assets need: a purchase must leave them
+    # holding at least capital_cash_ratio x (value of all their assets, the new one included) in cash.
+    capital_cash_ratio: float = 0.2
 
     # Stock band: agents keep between stock_cap x restock_below and stock_cap units of each
     # resource. Above the cap they go out to sell the surplus to agents that want it; below
@@ -245,6 +248,7 @@ LIMITS = {
     "productivity_growth_steps": (1, 100000, "int"),
     "min_investment": (0.01, 1e9, "float"),
     "liquidity_units": (0, 1e6, "float"),
+    "capital_cash_ratio": (0, 100, "float"),
     "selling_enabled": (None, None, "bool"),
     "stock_cap": (1, 1e9, "int"),
     "restock_below": (0, 1, "float"),

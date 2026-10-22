@@ -180,11 +180,21 @@ labour.
   good or higher productivity makes assets dearer; higher wages make them
   cheaper.
 - Each step an agent keeps cash for what it needs to buy now plus 3 units of
-  every resource. Once at least `min_investment` (10) is spare, it buys shares
+  every resource. Once at least `min_investment` is spare, it also checks the
+  **capitalist cash rule**: after the purchase it must still hold at least
+  `capital_cash_ratio` (0.2) × the value of all its assets in cash, so it can pay
+  the labour those assets need (it spends at most (cash − r × assets) / (1 + r)).
+  Then it buys shares
   of the best-returning asset of a good it **lacks**, from owners that:
   - are **short of cash**: just enough shares to cover the gap, or
   - hold **more than the stock cap** of that good: up to a quarter of those
     assets per deal.
+
+**Funded labour demand.** Employers only *want* the labour they can pay for
+(their spare cash ÷ the last wage), not everything their assets could employ.
+Wages respond to funded demand, so unaffordable jobs no longer push wages up
+while workers sit idle. The full job capacity is still shown in the Report's
+"Economy capacity" scorecards.
 
 ### Report
 

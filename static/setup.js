@@ -128,6 +128,8 @@ const SETUP_SECTIONS = [
       enabledWhen: v => v.investing_enabled },
     { path: "min_investment", label: "Invest once spare cash ≥", kind: "float", min: 0.01, step: 1,
       enabledWhen: v => v.investing_enabled },
+    { path: "capital_cash_ratio", label: "Capitalist keeps cash ÷ assets ≥", kind: "float", min: 0, max: 100, step: 0.05,
+      enabledWhen: v => v.investing_enabled },
   ]},
   { title: "Central government", hint: "A minimum interest rate that no asset's return can fall below (higher rates " +
       "make assets cheaper), and labour bought every step with newly created money. Both can be changed during the game " +

@@ -120,5 +120,30 @@ class LabourSavingTests(unittest.TestCase):
         self.assertAlmostEqual(world.asset_output("food", 1), 0.97 * 1.05)   # more output, less labour
 
 
+class FundedDemandTests(unittest.TestCase):
+    def test_unfunded_jobs_do_not_count_as_labour_wanted(self):
+        world = world_with(asset_labor={"food": 1}, participation_floor=1)
+        world.create_agent(needs=CALM, rates=CALM, money=0, labor_capacity=0, assets={"food": 3},
+                           inventory={"food": 0})                                   # 3 jobs, no cash
+        world.create_agent(needs=CALM, money=0, labor_capacity=1)
+        world.step()
+        stats = world.labor.stats
+        self.assertAlmostEqual(stats["wanted_full"], 3)
+        self.assertAlmostEqual(stats["wanted"], 0)                                  # can't pay anyone
+        self.assertAlmostEqual(stats["job_capacity"], 3)
+        self.assertAlmostEqual(stats["jobs_funded"], 0)
+        self.assertAlmostEqual(stats["hired"], 0)
+
+    def test_a_rich_owner_funds_its_jobs(self):
+        world = world_with(asset_labor={"food": 1}, participation_floor=1)
+        world.create_agent(needs=CALM, rates=CALM, money=1e6, labor_capacity=0, assets={"food": 3},
+                           inventory={"food": 0})
+        world.create_agent(needs=CALM, money=0, labor_capacity=1)
+        world.step()
+        stats = world.labor.stats
+        self.assertAlmostEqual(stats["wanted"], 3)
+        self.assertAlmostEqual(stats["jobs_funded"], 3)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2,6 +2,7 @@ import unittest
 
 from simulation import World, economy
 from simulation.modules import Invest
+from simulation.modules.invest import purchase_limit
 from simulation.rules import Rules
 
 CALM = {"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0}
@@ -184,6 +185,26 @@ class StockBandTests(unittest.TestCase):
         world.step()
         self.assertEqual((seller.activity, seller.target_id, seller.seeking_for), ("selling", buyer.id, "water"))
         self.assertEqual((buyer.activity, buyer.seeking_for), ("restocking", "water"))
+
+
+class CapitalistCashTests(unittest.TestCase):
+    def test_purchase_limit_keeps_cash_to_assets_ratio(self):
+        agent = World(seed=1).create_agent(money=1000, assets={"food": 2, "water": 0, "games": 0})
+        prices = {"food": 100.0, "water": 100.0, "games": 100.0}      # holds assets worth 200
+        # ratio 0.5: spends x so that 1000 - x >= 0.5 * (200 + x)  ->  x = 600
+        self.assertAlmostEqual(purchase_limit(agent, prices, 0.5), 600)
+        self.assertAlmostEqual(purchase_limit(agent, prices, 0), 1000)      # no rule: all the cash
+        agent.money = 50
+        self.assertEqual(purchase_limit(agent, prices, 1), 0)               # too little cash to buy any
+
+    def test_higher_ratio_means_fewer_asset_purchases(self):
+        def trades(ratio):
+            world = World(seed=3, rules=Rules.from_dict({"agents": 20, "capital_cash_ratio": ratio}))
+            world.spawn_random_agents()
+            for _ in range(150):
+                world.step()
+            return world.asset_trades
+        self.assertGreaterEqual(trades(0), trades(5))
 
 
 if __name__ == "__main__":

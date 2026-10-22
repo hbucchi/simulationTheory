@@ -24,6 +24,11 @@ class Invest(Module):
     (Owners sell above the cap, so the band between floor and cap keeps the same
     shares from going back and forth.) With the stock band off, any resource.
 
+    Capitalist cash rule: the purchase must also leave the agent holding at least
+    rules.capital_cash_ratio x the value of all its assets (the new one included) in cash,
+    so it can still pay the labour those assets need. With ratio r, cash M and assets worth A,
+    it spends at most (M - r x A) / (1 + r).
+
     Owners sell for two reasons:
     - short of cash (by at least MIN_SALE_SHARE of min_investment): just enough shares to cover the gap,
       most cash-short first;
@@ -41,6 +46,9 @@ class Invest(Module):
         if spare < rules.min_investment:
             return
         asset_prices = world.asset_prices(prices)
+        spare = min(spare, purchase_limit(agent, asset_prices, rules.capital_cash_ratio))
+        if spare < rules.min_investment:
+            return
         # Owners short of cash, worked out once: {agent: shortfall}, most short first.
         short = {o: cash_needed(o, prices, rules) - o.money for o in world.agents if o is not agent and o.assets}
         min_sale = rules.min_investment * MIN_SALE_SHARE
@@ -90,6 +98,12 @@ def transfer_shares(seller, buyer, resource, shares):
     if seller.assets[resource] <= 1e-9:
         del seller.assets[resource]
     buyer.assets[resource] = buyer.assets.get(resource, 0) + shares
+
+
+def purchase_limit(agent, asset_prices, ratio):
+    """Most the agent can spend on a new asset and still hold ``ratio`` x its assets in cash."""
+    held = sum(shares * asset_prices.get(g, 0.0) for g, shares in agent.assets.items())
+    return max(0.0, (agent.money - ratio * held) / (1 + ratio))
 
 
 def cash_needed(agent, prices, rules):

@@ -74,6 +74,7 @@ class LaborMarket:
     @staticmethod
     def _empty_stats():
         return {"capacity": 0.0, "own_use": 0.0, "offered": 0.0, "wanted": 0.0, "hired": 0.0,
+                "wanted_full": 0.0, "job_capacity": 0.0, "jobs_funded": 0.0,
                 "gov_hired": 0.0, "unused": 0.0, "withheld": 0.0, "idle": 0.0, "hires": 0, "workers_hired": 0, "base_wage": 0.0, "pressure": 1.0}
 
     def base_wage(self, world, prices, jobs):
@@ -87,6 +88,7 @@ class LaborMarket:
 
     def clear(self, world):
         """Run this step's labour market. Sets agent.labor_available and labour flows."""
+        from .modules.invest import cash_needed  # local import: invest imports economy, not labor
         rules = world.rules
         prices = world.current_prices(include_labor=False)
         stats = self._empty_stats()
@@ -117,10 +119,20 @@ class LaborMarket:
             if a.labor_need - own > 1e-9:
                 employers.append(a)
         stats["offered"] = sum(a.offered for a in offers)
-        stats["wanted"] = sum(a.labor_need - a.labor_available for a in employers)
+        stats["job_capacity"] = sum(a.labor_need for a in world.agents)
+        stats["wanted_full"] = sum(a.labor_need - a.labor_available for a in employers)
+
+        base = self.base_wage(world, prices, jobs_by_good)
+        # What employers actually want to hire is what they can pay for (at last step's wage),
+        # not everything their assets could employ: unfunded jobs don't push wages up.
+        ref_wage = self.wage if self.wage > 0 else base
+        stats["wanted"] = sum(
+            min(e.labor_need - e.labor_available,
+                max(0.0, e.money - cash_needed(e, prices, rules)) / ref_wage if ref_wage > 0 else 0.0)
+            for e in employers)
+        stats["jobs_funded"] = stats["own_use"] + stats["wanted"]
 
         # Market wage.
-        base = self.base_wage(world, prices, jobs_by_good)
         pressure = economy.demand_pressure(stats["wanted"], stats["offered"], economy.LABOR, rules)
         if rules.price_mode == "fixed":
             self.multiplier, base = 1.0, rules.fixed_prices[economy.LABOR]
@@ -138,7 +150,6 @@ class LaborMarket:
         offers.sort(key=lambda a: a.asking_wage)
         remaining = {a: a.offered for a in offers}
         world.rng.shuffle(employers)
-        from .modules.invest import cash_needed  # local import: invest imports economy, not labor
         for employer in employers:
             want = employer.labor_need - employer.labor_available
             budget = max(0.0, employer.money - cash_needed(employer, prices, rules))

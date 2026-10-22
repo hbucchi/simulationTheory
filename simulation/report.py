@@ -13,6 +13,8 @@ Definitions
 - Gini = 0 when everyone holds the same, 1 when one agent holds everything. Income
   and consumption inequality use each agent's smoothed per-step income/consumption.
 - Asset ownership concentration uses shares owned (not their value, which can be 0).
+- job capacity = labour all assets could employ at full capacity; funded jobs = the part
+  employers can actually pay for (their spare cash ÷ the wage).
 - employment rate = share of agents that worked this step (own assets or hired);
   participation = share that offered labour; unemployment = offered labour nobody
   hired / labour offered; capacity used = labour used on assets / capacity;
@@ -145,6 +147,10 @@ class Recorder:
             "participation": offering / n,
             "unemployment": (L["idle"] / L["offered"]) if L["offered"] else 0.0,
             "utilisation": (L["own_use"] + L["hired"]) / L["capacity"] if L["capacity"] else 0.0,
+            "job_capacity": L["job_capacity"],
+            "jobs_funded": L["jobs_funded"],
+            "funded_share": (L["jobs_funded"] / L["job_capacity"]) if L["job_capacity"] else 0.0,
+            "supply_vs_jobs": (L["capacity"] / L["job_capacity"]) if L["job_capacity"] else 0.0,
             "unfilled_jobs": (max(0.0, L["wanted"] - L["hired"]) / L["wanted"]) if L["wanted"] else 0.0,
             "in_need": sum(1 for a in agents if economy.is_needy(a, world.rules)) / n,
             "struggling": sum(1 for a in agents if a.job_need > 0.5) / n,
