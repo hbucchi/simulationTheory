@@ -13,8 +13,7 @@ CALM = {n: 0 for n in NEEDS}
 
 CLASSIC = {
     "inputs": {},
-    "satisfies": {"food": {"need": "hunger", "fit": 1}, "water": {"need": "thirst", "fit": 1},
-                  "games": {"need": "boredom", "fit": 1}},
+    "effects": {"food": {"hunger": 1}, "water": {"thirst": 1}, "games": {"boredom": 1}},
     "expiry_enabled": False,
     "stock_steps": 1000,
     # the old per-asset numbers for these three goods

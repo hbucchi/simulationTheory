@@ -14,9 +14,8 @@ from . import distributions
 from .catalog import BY_ID, CATALOG
 
 GOODS = tuple(e["id"] for e in CATALOG)   # every good; each is made by its own industry (assets)
-# Default split (a game's rules can change which need a good relieves, see Rules.satisfies):
-CONSUMABLES = tuple(e["id"] for e in CATALOG if e["need"])   # relieve a need when consumed
-RAW = tuple(e["id"] for e in CATALOG if not e["need"])       # only used as industry inputs
+# Default split (a game's rules can change what each good does, see Rules.effects):
+CONSUMABLES = tuple(e["id"] for e in CATALOG if any(f > 0 for f in e["effects"].values()))  # relieve a need
 LABOR = "labor"                       # a capacity sold each step in the labour market; never held
 RESOURCES = GOODS                     # what agents hold and trade face to face
 PRICED = GOODS + (LABOR,)             # everything with a price (labour's price is the wage)
@@ -48,6 +47,24 @@ def _catalog_layers(inputs):
 
 
 _DEFAULT_LAYERS = _catalog_layers({e["id"]: e["inputs"] for e in CATALOG if e["inputs"]})
+RAW = tuple(g for g in GOODS if g not in CONSUMABLES)   # only used as industry inputs
+
+# Labour per unit falls with depth: a layer-1 industry makes 4 units per unit of labour, each
+# layer deeper 1 more (layer 6: 9), so deeper industries need less labour per unit on average.
+# Labour-intensive exceptions set their own productivity in the catalog (housing, healthcare...).
+BASE_PRODUCTIVITY = 4.0
+PRODUCTIVITY_PER_LAYER = 1.0
+
+
+def default_productivity(good, layer):
+    override = BY_ID[good].get("productivity")
+    return override if override is not None else BASE_PRODUCTIVITY + PRODUCTIVITY_PER_LAYER * (layer - 1)
+
+
+def main_need(effects):
+    """The need a good relieves most (its biggest positive effect), or None."""
+    best = max(((f, n) for n, f in effects.items() if f > 0), default=None)
+    return best[1] if best else None
 
 
 @dataclass
@@ -90,15 +107,17 @@ class Rules:
     rates: dict = field(default_factory=lambda: {"hunger": 0.010, "sleep": 0.005, "thirst": 0.015,
                                                  "boredom": 0.008, "health": 0.003, "energy": 0.004,
                                                  "shelter": 0.002})
-    # Consuming 1 unit of a good lowers the need it relieves by
+    # What consuming one unit of a good does to each need: effects[good] = {need: fit}, fit in
+    # [-1, 1]. A positive fit relieves the need by
     #     relief_per_unit x fit x (1 + layer_bonus x (layer - 1))
-    # so goods from deeper industry layers relieve more per unit (layer 1: x1, layer 3: x2 at 0.5).
+    # so goods from deeper industry layers relieve more per unit (layer 1: x1, layer 3: x2 at 0.5);
+    # a negative fit worsens it by relief_per_unit x |fit| (harm isn't scaled by layer). A good can
+    # do several things at once: fast food relieves hunger and boredom but harms health. Goods
+    # missing here do nothing to needs (pure industry inputs). Sleep can only be harmed (it is
+    # recovered by resting). Sending this replaces the whole table.
     relief_per_unit: float = 0.1
     layer_bonus: float = 0.5
-    # Which need each good relieves and how well: {good: {"need": n, "fit": 0..1}}. Goods missing
-    # here relieve nothing (pure industry inputs). Sending this replaces the whole table.
-    satisfies: dict = field(default_factory=lambda: {e["id"]: {"need": e["need"], "fit": e["fit"]}
-                                                     for e in CATALOG if e["need"]})
+    effects: dict = field(default_factory=lambda: {e["id"]: dict(e["effects"]) for e in CATALOG if e["effects"]})
     seek_threshold: float = 0.5        # above this: consume / seek a trade / rest
     target_level: float = 0.3          # ... until the need is below this
     sleep_recovery: object = 0.05      # sleep recovered per step while resting (spread)
@@ -138,7 +157,7 @@ class Rules:
     # making 2 units each. Every asset makes 0.4 units per step when fully staffed. (Seven needs
     # served by 33 industries need about twice the output per worker of the old 3-good economy.)
     asset_labor: dict = field(default_factory=lambda: {g: 0.1 if _DEFAULT_LAYERS[g] == 1 else 0.2 for g in GOODS})
-    productivity: dict = field(default_factory=lambda: {g: 4.0 if _DEFAULT_LAYERS[g] == 1 else 2.0 for g in GOODS})
+    productivity: dict = field(default_factory=lambda: {g: default_productivity(g, _DEFAULT_LAYERS[g]) for g in GOODS})
     productivity_growth: dict = field(default_factory=lambda: {g: 0.05 for g in GOODS})
     productivity_growth_steps: int = 50
     labor_saving: dict = field(default_factory=lambda: {g: 0.03 for g in GOODS})
@@ -247,17 +266,24 @@ class Rules:
         if cache is None:
             layers = _catalog_layers(self.inputs)
             active = tuple(g for g in GOODS if layers[g] <= self.industry_layers)
-            relief, need_of, goods_for = {}, {}, {}
+            effect, need_of, goods_for = {}, {}, {}
             for g in active:
-                spec = self.satisfies.get(g)
-                if spec and spec.get("need") and spec.get("fit", 0) > 0:
-                    need_of[g] = spec["need"]
-                    relief[g] = self.relief_per_unit * spec["fit"] * (1 + self.layer_bonus * (layers[g] - 1))
-                    goods_for.setdefault(spec["need"], []).append(g)
+                signed = {}
+                for need, fit in self.effects.get(g, {}).items():
+                    if fit > 0:
+                        signed[need] = self.relief_per_unit * fit * (1 + self.layer_bonus * (layers[g] - 1))
+                        goods_for.setdefault(need, []).append(g)
+                    elif fit < 0:
+                        signed[need] = self.relief_per_unit * fit
+                if signed:
+                    effect[g] = signed
+                main = main_need(self.effects.get(g, {}))
+                if main:
+                    need_of[g] = main
             for need, goods in goods_for.items():
-                goods.sort(key=lambda g: relief[g], reverse=True)   # most effective first
+                goods.sort(key=lambda g: effect[g][need], reverse=True)   # most effective first
             cache = {"layers": layers, "active": active, "active_set": frozenset(active),
-                     "relief": relief, "need_of": need_of, "goods_for": goods_for}
+                     "effect": effect, "need_of": need_of, "goods_for": goods_for}
             object.__setattr__(self, "_cache", cache)
         return cache
 
@@ -272,15 +298,23 @@ class Rules:
     def is_active(self, good):
         return good in (self._cache or self._derived())["active_set"]
 
-    def relief(self, good):
-        """How much one unit of ``good`` lowers its need (0 if it relieves none)."""
-        return (self._cache or self._derived())["relief"].get(good, 0.0)
+    def relief(self, good, need=None):
+        """How much one unit of ``good`` lowers ``need`` (default: its main need); negative when it
+        makes the need worse, 0 when it doesn't touch it."""
+        cache = self._cache or self._derived()
+        need = need or cache["need_of"].get(good)
+        return cache["effect"].get(good, {}).get(need, 0.0)
+
+    def effects_of(self, good):
+        """{need: change per unit}: positive relieves, negative worsens (active goods only)."""
+        return (self._cache or self._derived())["effect"].get(good, {})
 
     def need_of(self, good):
+        """The need ``good`` relieves most (its main need), or None."""
         return (self._cache or self._derived())["need_of"].get(good)
 
     def goods_for(self, need):
-        """Active goods that relieve ``need``, most effective first."""
+        """Active goods that relieve ``need`` (as a main need or a side benefit), most effective first."""
         return (self._cache or self._derived())["goods_for"].get(need, [])
 
     @property
@@ -321,8 +355,8 @@ class Rules:
             low, high, kind = LIMITS[key]
             if kind == "recipes":
                 setattr(rules, key, _recipes(value))
-            elif kind == "satisfies":
-                setattr(rules, key, _satisfies(value))
+            elif kind == "effects":
+                setattr(rules, key, _effects(value))
             elif kind == "map":
                 names, low, high, whole = low
                 setattr(rules, key, {**getattr(rules, key), **_number_map(value, key, names, low, high, whole)})
@@ -341,13 +375,14 @@ class Rules:
             # relief in the most effective good that does exist for that need.
             stock = dict(rules.inventory)
             for g, spec in rules.inventory.items():
-                need = BY_ID[g]["need"]
+                need = main_need(BY_ID[g]["effects"])
                 if rules.is_active(g) or not need or not isinstance(spec, (int, float)) or not spec:
                     continue
                 best = next(iter(rules.goods_for(need)), None)
                 if best and isinstance(stock.get(best), (int, float)):
-                    default_relief = rules.relief_per_unit * BY_ID[g]["fit"] * (1 + rules.layer_bonus * (_DEFAULT_LAYERS[g] - 1))
-                    stock[best] += round(spec * default_relief / rules.relief(best))
+                    fit = BY_ID[g]["effects"][need]
+                    default_relief = rules.relief_per_unit * fit * (1 + rules.layer_bonus * (_DEFAULT_LAYERS[g] - 1))
+                    stock[best] += round(spec * default_relief / rules.relief(best, need))
                 stock[g] = 0
             rules.inventory = stock
         if "assets" not in data:
@@ -423,7 +458,7 @@ LIMITS = {
     "input_buffer_steps": (1, 10000, "int"),
     "industry_layers": (1, MAX_LAYERS, "int"),
     "layer_bonus": (0, 10, "float"),
-    "satisfies": (None, None, "satisfies"),
+    "effects": (None, None, "effects"),
     "expiry_enabled": (None, None, "bool"),
     "shelf_life": ((GOODS, 0, 1e6, True), None, "map"),
     "input_reorder": (0, 1, "float"),
@@ -493,13 +528,13 @@ def demand_sized_shares(rules):
     units = {g: 0.0 for g in active}
     for need in rules.consumer_needs:
         goods = rules.goods_for(need)
-        plan = {g: BY_ID[g]["plan"] for g in goods if BY_ID[g]["plan"] > 0}
+        plan = {g: BY_ID[g]["plan"] for g in goods if BY_ID[g]["plan"] > 0 and rules.need_of(g) == need}
         if not plan:
             plan = {g: 1.0 for g in goods}
         total = sum(plan.values())
         rate = distributions.mean(rules.rates[need])
         for g, p in plan.items():
-            units[g] += rate * p / total / rules.relief(g)
+            units[g] += rate * p / total / rules.relief(g, need)
     for g in sorted(active, key=rules.layer, reverse=True):   # deepest first: inputs flow down
         for item, per_unit in rules.inputs.get(g, {}).items():
             if item in units:
@@ -514,25 +549,28 @@ def demand_sized_shares(rules):
     return shares
 
 
-def _satisfies(value):
-    """Validate {good: {"need": need, "fit": 0..1}}; replaces the whole table. Fit 0 or no need
-    means the good relieves nothing. Sleep can't be relieved by goods (it is recovered by resting)."""
+def _effects(value):
+    """Validate {good: {need: fit}} with fit in [-1, 1]; replaces the whole table. Zero fits are
+    dropped. Sleep can only be harmed (fit <= 0): it is recovered by resting."""
     if not isinstance(value, dict) or set(value) - set(GOODS):
-        raise ValueError(f"satisfies must map goods ({', '.join(GOODS)}) to a need and a fit")
+        raise ValueError(f"effects must map goods to {{need: fit}}")
     out = {}
     for good, spec in value.items():
         if spec in (None, {}):
             continue
-        if not isinstance(spec, dict) or set(spec) - {"need", "fit"}:
-            raise ValueError(f"satisfies.{good} must be {{\"need\": ..., \"fit\": ...}}")
-        need = spec.get("need")
-        if not need:   # None or "" (the setup screen's "nothing"): relieves no need
-            continue
-        if need not in NEEDS or need == "sleep":
-            raise ValueError(f"satisfies.{good}.need must be one of {', '.join(n for n in NEEDS if n != 'sleep')}")
-        fit = _number(spec.get("fit", 1.0), f"satisfies.{good}.fit", 0, 1)
-        if fit > 0:
-            out[good] = {"need": need, "fit": fit}
+        if not isinstance(spec, dict) or set(spec) - set(NEEDS):
+            raise ValueError(f"effects.{good} must map needs ({', '.join(NEEDS)}) to a fit between -1 and 1")
+        parsed = {}
+        for need, fit in spec.items():
+            if fit is None or fit == "":
+                continue
+            fit = _number(fit, f"effects.{good}.{need}", -1, 1)
+            if need == "sleep" and fit > 0:
+                raise ValueError(f"effects.{good}.sleep can only be negative: sleep is recovered by resting")
+            if fit:
+                parsed[need] = fit
+        if parsed:
+            out[good] = parsed
     return out
 
 

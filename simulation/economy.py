@@ -87,31 +87,49 @@ def pay(payer, payee, amount):
 
 def held_relief(agent, need, rules=DEFAULT_RULES):
     """How much of ``need`` the agent's stock could relieve: units x relief over every good for it."""
-    return sum(agent.inventory.count(g) * rules.relief(g) for g in rules.goods_for(need))
+    return sum(agent.inventory.count(g) * rules.relief(g, need) for g in rules.goods_for(need))
+
+
+def benefit(agent, good, rules=DEFAULT_RULES, target=None):
+    """How good one unit of ``good`` is for this agent right now: its relief for ``target`` (the
+    need being served) plus every side effect weighted by how pressing that need is (its level).
+    Fast food is great for a hungry agent with good health and poor for one who is already ill."""
+    return sum(change * (1.0 if need == target else getattr(agent, need))
+               for need, change in rules.effects_of(good).items())
+
+
+def apply_effects(agent, good, units, rules=DEFAULT_RULES):
+    """Consuming ``units`` of ``good`` changes every need it affects (relieves or worsens)."""
+    for need, change in rules.effects_of(good).items():
+        setattr(agent, need, getattr(agent, need) - units * change)
 
 
 def consume(agent, rules=DEFAULT_RULES):
-    """Consume from own stock for every need above the seek threshold, most effective good first
-    (deeper industry layers relieve more per unit), until the need is below the target.
+    """Consume from own stock for every need above the seek threshold (most pressing first), the
+    goods that do the agent most good first (relief for that need, deeper layers relieve more,
+    plus side effects on its other needs; goods that would do more harm than good are skipped),
+    until the need is below the target. Each unit also has its side effects.
 
     Returns {resource: units consumed}.
     """
     eaten = {}
-    for need in rules.consumer_needs:
-        level = getattr(agent, need)
-        if level <= rules.seek_threshold:
+    for need in sorted(rules.consumer_needs, key=lambda n: getattr(agent, n), reverse=True):
+        if getattr(agent, need) <= rules.seek_threshold:
             continue
-        for good in rules.goods_for(need):
+        held = [g for g in rules.goods_for(need) if agent.inventory.count(g)]
+        held.sort(key=lambda g: benefit(agent, g, rules, need), reverse=True)
+        for good in held:
+            level = getattr(agent, need)
             if level < rules.target_level:
                 break
-            per_unit = rules.relief(good)
-            units = min(units_to_satisfy(level, rules, per_unit), agent.inventory.count(good))
+            if benefit(agent, good, rules, need) <= 0:
+                break
+            units = min(units_to_satisfy(level, rules, rules.relief(good, need)), agent.inventory.count(good))
             if units:
                 agent.inventory.remove(good, units)
-                level -= units * per_unit
+                apply_effects(agent, good, units, rules)
                 agent.flow["consumed"][good] = agent.flow["consumed"].get(good, 0) + units
-                eaten[good] = units
-        setattr(agent, need, level)
+                eaten[good] = eaten.get(good, 0) + units
     return eaten
 
 
@@ -127,33 +145,35 @@ def need_level(agent, resource, rules=DEFAULT_RULES):
 
 
 def demand(agent, resource, rules=DEFAULT_RULES):
-    """Units of ``resource`` the agent would need to buy to bring its need below the target,
-    after what its stock of every good for that need can relieve. 0 when the need is below the
-    seek threshold, and for goods that relieve no need (pure industry inputs)."""
-    need = rules.need_of(resource)
-    if not need:
-        return 0
-    level = getattr(agent, need)
-    if level <= rules.seek_threshold:
-        return 0
-    return units_to_satisfy(level - held_relief(agent, need, rules), rules, rules.relief(resource))
+    """Units of ``resource`` the agent would need to buy to bring a need it relieves below the
+    target (the neediest such need), after what its stock of every good for that need can relieve.
+    0 when none of those needs is above the seek threshold, and for goods that relieve no need."""
+    units = 0
+    for need, change in rules.effects_of(resource).items():
+        if change <= 0:
+            continue
+        level = getattr(agent, need)
+        if level > rules.seek_threshold:
+            units = max(units, units_to_satisfy(level - held_relief(agent, need, rules), rules, change))
+    return units
 
 
-def net_use(agent, resource, rules=DEFAULT_RULES):
-    """Units of a good the agent would use per step if it relied on this good alone for its
-    need, beyond what its assets make (0 for goods relieving no need, and labour)."""
-    need = rules.need_of(resource)
-    if not need:
+def net_use(agent, resource, rules=DEFAULT_RULES, need=None):
+    """Units of a good the agent would use per step if it relied on this good alone for ``need``
+    (default: its main need), beyond what its assets make (0 for goods relieving no need)."""
+    need = need or rules.need_of(resource)
+    per_unit = rules.relief(resource, need) if need else 0
+    if per_unit <= 0:
         return 0.0
     rates = next((m.rates for m in agent.modules if hasattr(m, "rates")), {})
-    used = rates.get(need, 0) / rules.relief(resource)
+    used = rates.get(need, 0) / per_unit
     return max(0.0, used - agent.output_capacity.get(resource, 0))
 
 
 def need_cost(agent, need, prices, rules=DEFAULT_RULES):
     """Cheapest money per step to keep ``need`` from growing, choosing the good with the lowest
     price per unit of relief (net of what the agent's own assets make)."""
-    costs = [net_use(agent, g, rules) * prices[g] for g in rules.goods_for(need) if g in prices]
+    costs = [net_use(agent, g, rules, need) * prices[g] for g in rules.goods_for(need) if g in prices]
     return min(costs, default=0.0)
 
 
@@ -178,7 +198,7 @@ def liquidity_cost(prices, rules=DEFAULT_RULES):
         return _liquidity_memo[2]
     total = 0.0
     for need in rules.consumer_needs:
-        per_relief = [prices[g] / rules.relief(g) for g in rules.goods_for(need) if g in prices]
+        per_relief = [prices[g] / rules.relief(g, need) for g in rules.goods_for(need) if g in prices]
         total += min(per_relief, default=0.0) * rules.relief_per_unit
     _liquidity_memo[:] = [prices, rules, rules.liquidity_units * total]
     return _liquidity_memo[2]
@@ -221,7 +241,7 @@ def _kept_for_need(agent, resource, relief_wanted, rules):
     for g in rules.goods_for(need):
         if left <= 1e-9:
             return 0
-        per_unit = rules.relief(g)
+        per_unit = rules.relief(g, need)
         kept = min(agent.inventory.count(g), math.ceil(round(left / per_unit, 9)))
         if g == resource:
             return kept
@@ -383,12 +403,16 @@ def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, mar
     bought, paid, stocked, unit_prices = {}, {}, {}, {}
     budget = buyer.money * rules.stockpile_budget
     spent_on_reserve = 0.0
-    # Most pressing need first; for each need the good with the most relief per dollar first.
-    # Goods relieving no need (industry inputs) come last.
+    # Most pressing need first; for each need the good that does the buyer most good per dollar
+    # first (relief plus side effects, see benefit). Goods relieving no need (inputs) come last.
     def order(r):
-        per_unit = rules.relief(r)
-        value = prices[r] / per_unit if per_unit and prices.get(r, 0) > 0 else (0.0 if per_unit else math.inf)
-        return (-need_level(buyer, r, rules), value)
+        helped = [n for n, change in rules.effects_of(r).items() if change > 0]
+        if not helped:
+            return (0.0, math.inf)
+        target = max(helped, key=lambda n: getattr(buyer, n))
+        good = benefit(buyer, r, rules, target)
+        value = -good / prices[r] if prices.get(r, 0) > 0 else -good * 1e9
+        return (-getattr(buyer, target), value)
     wants = sorted((r for r in rules.active_goods if r in prices), key=order)
     for resource in wants:
         need_goal = purchase_goal(buyer, resource, rules, rng)

@@ -589,7 +589,8 @@ class World:
             # This game's industries: layer (from the recipes), whether it exists (layer <= the
             # game's industry_layers), the need it relieves and how much one unit relieves.
             "industries": {g: {"layer": self.rules.layer(g), "active": self.rules.is_active(g),
-                               "need": self.rules.need_of(g), "relief": self.rules.relief(g)}
+                               "need": self.rules.need_of(g), "relief": self.rules.relief(g),
+                               "effects": self.rules.effects_of(g)}
                            for g in economy.GOODS},
             "consumer_needs": list(self.rules.consumer_needs),
             "government": self.government.to_dict(),

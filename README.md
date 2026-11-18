@@ -9,7 +9,7 @@ Agents are dots living in a 1024×1024 box. Each one has:
 |---|---|---|
 | `hunger`, `sleep`, `thirst`, `boredom`, `health`, `energy`, `shelter` | float 0.00–1.00 | How strong the need is: 0.00 = satisfied, 1.00 = desperate. Always clamped. |
 | `money` | float | Balance (default 100). Tradable 1:1 like any resource. |
-| `inventory` | `Inventory` | units of any of the 33 goods (see *Industry catalog*); goods with a shelf life are kept as dated batches that expire. |
+| `inventory` | `Inventory` | units of any of the 35 goods (see *Industry catalog*); goods with a shelf life are kept as dated batches that expire. |
 | `movement` | int | Max pixels the agent can travel in one step. |
 | `x`, `y` | float | Position inside the box (0–1024). |
 
@@ -55,8 +55,8 @@ Every step each agent runs its modules in this order:
    configurable per agent).
 2. **Production** – labour from the agent; goods only from its assets, worked by labour (see below).
 3. **Consume** – a need above **0.5** is fed from own stock until it is **below 0.3**,
-   using the most effective goods for that need first (e.g. hunger: packaged meals
-   0.20 per unit, then food or meat 0.15, then raw grain or livestock 0.06).
+   using the goods that do the agent most good first (relief for that need plus side
+   effects on its other needs, see *Effects*); every unit consumed has all its effects.
 4. **Navigate** – in priority order:
    - *leaving*: just traded, walk away.
    - *seeking*: a need is still above 0.5 because stock ran out. Every step,
@@ -175,7 +175,7 @@ labour.
 ### Industry catalog, layers and expiry
 
 Every good is made by its own **industry**, whose capital is that good's assets.
-`simulation/catalog.py` defines 33 industries named after the TRBC sectors and
+`simulation/catalog.py` defines 35 industries named after the TRBC sectors and
 industries that investing.com's screener uses (Energy, Basic Materials,
 Industrials, Consumer Cyclicals, Consumer Non-Cyclicals, Healthcare, Technology,
 Telecommunications, Utilities, Real Estate):
@@ -183,8 +183,8 @@ Telecommunications, Utilities, Real Estate):
 | Layer | Industries |
 |---|---|
 | 1 extraction | grain, livestock, water, timber, crude oil, natural gas, coal, metal ore, stone & sand, medicinal herbs |
-| 2 | food, meat, beverages, electricity, fuel, steel, chemicals, lumber, cement, textiles, toys & games |
-| 3 | packaged meals, plastics, pharmaceuticals, machinery, housing, apparel |
+| 2 | food, meat, beverages, beer/wine/spirits, electricity, fuel, steel, chemicals, lumber, cement, textiles, toys & games |
+| 3 | packaged meals, fast food, plastics, pharmaceuticals, machinery, housing, apparel |
 | 4 | electronics, medical devices |
 | 5 | telecom services, media, healthcare services |
 | 6 | software & IT |
@@ -194,22 +194,39 @@ an industry that uses layer-n goods is layer n + 1. Up to 10 layers are allowed.
 **`industry_layers`** (1–10, chosen on the setup screen before a game starts)
 removes every industry deeper than that: nobody owns, holds or makes its goods.
 
-**Needs and effectiveness.** Each good can relieve one need (`satisfies`: need +
-fit 0–1); almost all can be consumed, a few are pure inputs (ore, steel, cement,
-plastics, machinery). One unit relieves
+**Effects: one good, several needs.** Every good has an effect profile
+(`effects`: {need: fit}, fit from −1 to +1): what consuming one unit does to each
+need. Almost all goods can be consumed; a few are pure inputs (ore, steel, cement,
+plastics, machinery). A positive fit relieves the need by
 
     relief_per_unit × fit × (1 + layer_bonus × (layer − 1))     (layer_bonus 0.5)
 
-so deeper industries address needs better: water (layer 1) 0.10 thirst,
-beverages (layer 2) 0.15; herbs 0.06 health, pharmaceuticals (layer 3) 0.20,
-healthcare services (layer 5) 0.30. The needs map to sectors: hunger → food,
-thirst → water/beverages, boredom → leisure products, media, telecom, software,
-health → healthcare, energy → utilities and fuels, shelter → housing and apparel.
+so deeper industries address needs better (water 0.10 thirst, beverages 0.15;
+herbs 0.06 health, pharmaceuticals 0.20, healthcare services 0.30). A negative fit
+worsens the need by relief_per_unit × |fit| (harm isn't scaled by layer). Examples:
 
-Agents buy for a **need**, not a good: they go to the nearest agent with any good
-for their most pressing need, and buy the good with the most relief per dollar.
-Demand and the stock band count the relief from every good the agent already holds
-for that need, so buying meals doesn't also trigger buying bread.
+| Good | Effects per unit |
+|---|---|
+| fast food (layer 3) | hunger +0.20, boredom +0.08, health −0.04 |
+| beer, wine & spirits (layer 2) | boredom +0.105, thirst +0.03, health −0.05, sleep −0.01 |
+| beverages (layer 2) | thirst +0.15, boredom +0.03, health −0.01 |
+| coal (layer 1) | energy +0.04, health −0.03 |
+| electronics (layer 4) | boredom +0.15, energy −0.02 (they use power), sleep −0.01 |
+| housing (layer 3) | shelter +0.20, health +0.02, energy +0.02 |
+
+Sleep can only be harmed by goods (it is recovered by resting). A good's biggest
+benefit is its *main need* (used for the stock band and to size industries).
+
+**Choosing what to consume or buy.** For the need being served, an agent scores a good:
+
+    benefit = relief for that need + Σ other effects × that need's current level
+
+so side effects count as much as the agent currently cares about them: fast food
+beats packaged meals for a hungry, healthy agent (the fun outweighs a small health
+cost) but not for one whose health is already poor. Goods with a negative benefit
+are never consumed. Agents buy for a **need**: they go to the nearest agent with any
+good for their most pressing need and buy the most benefit per dollar. Demand and the
+stock band count the relief from every good already held for that need.
 
 **Expiry.** Every good has a shelf life in steps (0 = never): services barely keep
 (electricity 20, telecom and healthcare 25, media 40), fresh food a little longer
@@ -235,13 +252,19 @@ out first: labour, capital (asset shares × jobs per asset) or inputs.
   `labor_priority` = `value` (labour goes to the most valuable industries first).
   Both are off by default: while prices adjust they starved agents of cheap essentials.
 
-**Default calibration.** Seven needs served by 33 industries take more output per
-worker than the old 3-good economy: layer-1 assets employ 0.1 labour extracting 4
-units each, other assets 0.2 labour making 2 units each. Default industry sizes are
+**Labour by layer.** Deeper industries need less labour per unit on average: units
+per unit of labour are 4 at layer 1, +1 per layer (5, 6, 7, 8, software 9), so labour
+per unit falls from 0.25 to 0.11. Labour-intensive industries are exceptions with
+their own productivity in the catalog: housing 4 (layer default 6), fast food 5 (6),
+healthcare services 6 (8). The average still falls with every layer.
+
+**Default calibration.** Default industry sizes are
 sized to demand: each need is split over its goods (e.g. thirst 70% water, 30%
 beverages), the inputs are added down the layers, and each industry gets twice the
-capacity that takes. With these defaults, games of 3, 10 and 30 agents run 1,500
-steps without anyone starving.
+capacity that takes. For a game with fewer layers both the sizes and the starting
+stock are worked out for the industries that exist (stock of missing goods becomes
+the same relief in the best remaining good). With these defaults, games of 3, 10 and
+30 agents and 1 to 6 layers run 1,500 steps without anyone starving.
 
 ### Investment
 
@@ -424,7 +447,7 @@ python3 -m unittest discover -s tests
 server.py                 local HTTP server + JSON API (see the docstring at the top)
 simulation/agent.py       Agent class (properties, movement helper)
 simulation/inventory.py   Inventory class
-simulation/catalog.py     the 33 industries: sector, recipe, need relieved, shelf life, defaults
+simulation/catalog.py     the 35 industries: sector, recipe, effects on needs, shelf life, defaults
 simulation/economy.py     needs, consumption and trading rules
 simulation/rules.py       Rules: every game-wide setting chosen on the setup screen
 simulation/distributions.py  fixed / uniform / normal / skewed per-agent values

@@ -132,17 +132,17 @@ const SETUP_SECTIONS = [
       options: [["even", "Evenly over an owner's industries"], ["value", "To the most valuable industries first"]] },
   ]},
   { title: "Industry catalog", wide: true, hint: "One block per industry. Recipe: what one unit uses (e.g. “1 grain”; " +
-      "empty = extraction). Relieves: the need consuming it lowers and how well (fit 0–1). Shelf life in steps (0 = never " +
+      "empty = extraction). Effects: what consuming one unit does to each need, from −1 (harms) to +1 (fully relieves); " +
+      "a good can help several needs and hurt others (fast food: hunger +, boredom +, health −). Benefits grow with the " +
+      "layer, harm doesn't; sleep can only be harmed. Shelf life in steps (0 = never " +
       "expires). Jobs per asset × units per labour = what one asset makes per step when fully staffed.", fields:
     GOODS.flatMap(g => {
       const e = CATALOG_INFO[g];
       const group = `${e.label} · layer ${catalogLayer(g)} · ${e.sector} · ${e.industry}`;
       return [
         { path: `inputs.${g}`, label: "Uses per unit", kind: "recipe", full: true, group },
-        { path: `satisfies.${g}.need`, label: "Relieves", kind: "choice", group,
-          options: [["", "nothing (input only)"], ...NEEDS.filter(n => n !== "sleep").map(n => [n, n])] },
-        { path: `satisfies.${g}.fit`, label: "Fit (0–1)", kind: "float", min: 0, max: 1, step: 0.1, group, optional: true,
-          enabledWhen: v => !!v.satisfies?.[g]?.need },
+        ...NEEDS.map(n => ({ path: `effects.${g}.${n}`, label: `Effect on ${n}`, kind: "float", group, optional: true,
+          min: -1, max: n === "sleep" ? 0 : 1, step: 0.05, placeholder: "0" })),
         { path: `shelf_life.${g}`, label: "Shelf life (steps)", kind: "int", min: 0, group },
         { path: `asset_labor.${g}`, label: "Jobs per asset", kind: "float", min: 0, step: 0.05, group },
         { path: `productivity.${g}`, label: "Units per labour", kind: "float", min: 0, step: 0.1, group },
@@ -685,16 +685,18 @@ function renderPreview(r, error) {
   const layerOf = (g) => catalogLayer(g, r.inputs || {});
   const active = GOODS.filter(g => layerOf(g) <= r.industry_layers);
   const deepest = Math.max(...GOODS.map(layerOf));
-  const relief = (g) => {
-    const spec = r.satisfies?.[g];
-    return spec?.need && spec.fit > 0 ? r.relief_per_unit * spec.fit * (1 + r.layer_bonus * (layerOf(g) - 1)) : 0;
+  // Relief one unit of good g gives need n (positive effects only), as in rules.py.
+  const reliefFor = (g, n) => {
+    const fit = r.effects?.[g]?.[n] || 0;
+    return fit > 0 ? r.relief_per_unit * fit * (1 + r.layer_bonus * (layerOf(g) - 1)) : 0;
   };
   line(`Industries: ${active.length} of ${GOODS.length} exist (layers 1–${Math.min(r.industry_layers, deepest)} of the ` +
        `${deepest} the recipes use). A layer-${Math.min(r.industry_layers, deepest)} good relieves ` +
        `${(1 + r.layer_bonus * (Math.min(r.industry_layers, deepest) - 1)).toFixed(1)}× what a layer-1 good of the same fit does.`);
   // Can the economy meet every need? Relief its industries can make at full staffing vs how fast needs grow.
   for (const need of NEEDS.filter(x => x !== "sleep")) {
-    const goods = active.filter(g => r.satisfies?.[g]?.need === need && relief(g) > 0).sort((a, b) => relief(b) - relief(a));
+    const relief = (g) => reliefFor(g, need);
+    const goods = active.filter(g => relief(g) > 0).sort((a, b) => relief(b) - relief(a));
     const grows = avg(r.rates[need]) * n;
     if (!goods.length) {
       line(`${cap(need)}: nothing in this game relieves it (it grows ${grows.toFixed(3)}/step in total).`, grows ? "short" : "");
@@ -723,7 +725,7 @@ function renderPreview(r, error) {
        `industries need ${range(active.map(g => +(r.labor_saving[g] * 100).toFixed(0)))}% less labour per asset ` +
        `while each unit of labour makes ${range(active.map(g => +(r.productivity_growth[g] * 100).toFixed(0)))}% more.`);
   const stock = RESOURCES.map(x => avg(r.inventory[x]));
-  const needPerStep = Math.max(...["food", "water"].map(x => avg(r.rates[CATALOG_INFO[x].need]) / r.relief_per_unit));
+  const needPerStep = Math.max(avg(r.rates.hunger), avg(r.rates.thirst)) / r.relief_per_unit;
   const goodsStock = Math.min(...["food", "water"].map(x => avg(r.inventory[x])));
   if (goodsStock / needPerStep > 300) {
     line(`Agents start with enough of everything for ${Math.round(goodsStock / needPerStep)}+ steps, ` +

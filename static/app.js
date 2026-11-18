@@ -50,7 +50,7 @@ const NEEDS = window.CATALOG.needs;                 // hunger, sleep, thirst, bo
 const GOODS = window.CATALOG.goods.map(e => e.id);  // every good is made by its own industry (assets)
 const RESOURCES = GOODS;                            // what agents hold and trade face to face
 const PRICED = [...GOODS, "labor"];                 // everything with a price (labour's is the wage)
-const CONSUMABLES = GOODS.filter(g => CATALOG_INFO[g].need);   // relieve a need by default
+const CONSUMABLES = GOODS.filter(g => Object.values(CATALOG_INFO[g].effects).some(f => f > 0));   // relieve a need by default
 const label = (g) => CATALOG_INFO[g]?.label ?? cap(g);
 // This game's industries (from the state): layer, whether it exists, need relieved, relief per unit.
 const industry = (g) => state.industries[g];
@@ -345,6 +345,13 @@ function recipeText(good) {
     : "extracted with labour";
 }
 
+// "hunger +0.200 · boredom +0.080 · health −0.040 per unit", main need first.
+function effectsText(effects) {
+  const parts = Object.entries(effects || {}).sort((a, b) => b[1] - a[1])
+    .map(([need, v]) => `${need} ${v > 0 ? "+" : "−"}${Math.abs(v).toFixed(3)}`);
+  return parts.length ? `${parts.join(", ")} per unit` : "not consumed (input only)";
+}
+
 function industryRow(g) {
   const m = state.market;
   const info = industry(g);
@@ -360,7 +367,7 @@ function industryRow(g) {
   head.title = `Price = base ${usd(m.base_prices[g])} × ${mult.toFixed(2)} (demand ${m.pressure[g].toFixed(2)}: ` +
     `${m.buyers[g]} want / ${m.sellers[g]} sell · concentration ${m.concentration_factor[g].toFixed(2)})`;
   const life = state.rules.expiry_enabled ? state.rules.shelf_life[g] : 0;
-  const relieves = info.need ? `relieves ${info.need} ${info.relief.toFixed(3)}/unit` : "not consumed (input only)";
+  const relieves = effectsText(info.effects);
   const flows = ["produced_recent", "consumed_recent", "used_recent", "expired_recent"].map(k => m[k]?.[g] || 0);
   const detail = Object.assign(document.createElement("div"), { className: "industry-stats", textContent:
     `${recipeText(g)} · ${relieves} · ${life ? `keeps ${life} steps` : "never expires"}` });
@@ -815,8 +822,8 @@ function updateBalance() {
   // Per need: how fast it grows vs how much relief its own industries make (at full staffing).
   for (const need of state.consumer_needs) {
     const grows = fieldValue(`rates.${need}`);
-    const made = activeGoods().filter(g => needOf(g) === need)
-      .reduce((sum, g) => sum + fieldValue(`assets.${g}`) * state.market.asset_output_each[g] * industry(g).relief, 0);
+    const made = activeGoods().filter(g => (industry(g).effects[need] || 0) > 0)
+      .reduce((sum, g) => sum + fieldValue(`assets.${g}`) * state.market.asset_output_each[g] * (industry(g).effects[need] || 0), 0);
     const net = made - grows;
     const line = document.createElement("span");
     const even = Math.abs(net) < 1e-9;

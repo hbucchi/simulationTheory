@@ -82,17 +82,74 @@ class EffectivenessTests(unittest.TestCase):
         self.assertAlmostEqual(rules.relief("grain"), 0.1 * 0.6)              # layer 1, fit 0.6
         self.assertAlmostEqual(rules.relief("food"), 0.1 * 1.5)               # layer 2
         self.assertAlmostEqual(rules.relief("meals"), 0.1 * 2.0)              # layer 3
-        self.assertEqual(rules.goods_for("hunger")[0], "meals")               # most effective first
+        self.assertAlmostEqual(rules.relief(rules.goods_for("hunger")[0], "hunger"), 0.2)   # most effective first
         self.assertEqual(rules.relief("ore"), 0)                              # relieves no need
         self.assertNotIn("sleep", rules.consumer_needs)                       # sleep comes from rest
 
-    def test_satisfies_is_validated_and_replaces_the_table(self):
-        rules = Rules.from_dict({"satisfies": {"steel": {"need": "shelter", "fit": 0.5}}})
+    def test_effects_are_validated_and_replace_the_table(self):
+        rules = Rules.from_dict({"effects": {"steel": {"shelter": 0.5}}})
         self.assertEqual(rules.need_of("steel"), "shelter")
         self.assertIsNone(rules.need_of("food"))
-        for bad in ({"food": {"need": "sleep", "fit": 1}}, {"food": {"need": "joy"}}, {"food": {"need": "hunger", "fit": 2}}):
+        bad = ({"food": {"sleep": 0.5}},     # sleep can only be harmed
+               {"food": {"joy": 1}}, {"food": {"hunger": 2}}, {"food": {"hunger": -1.5}})
+        for effects in bad:
             with self.assertRaises(ValueError):
-                Rules.from_dict({"satisfies": bad})
+                Rules.from_dict({"effects": effects})
+
+
+class MultiNeedTests(unittest.TestCase):
+    def test_a_good_can_relieve_several_needs_and_harm_others(self):
+        rules = Rules()
+        e = rules.effects_of("fast_food")                     # layer 3: benefits x2, harm unscaled
+        self.assertAlmostEqual(e["hunger"], 0.2)
+        self.assertAlmostEqual(e["boredom"], 0.08)
+        self.assertAlmostEqual(e["health"], -0.04)
+        self.assertEqual(rules.need_of("fast_food"), "hunger")   # its biggest benefit
+        self.assertIn("fast_food", rules.goods_for("boredom"))   # a side benefit counts too
+        self.assertNotIn("fast_food", rules.goods_for("health"))
+
+    def test_eating_applies_every_effect(self):
+        world = quiet_world()
+        agent = world.create_agent(needs={**CALM, "hunger": 0.6, "boredom": 0.4}, rates=CALM,
+                                   inventory={**NO_STOCK, "fast_food": 5})
+        economy.consume(agent, world.rules)
+        # 2 units: hunger 0.6 -> 0.2, boredom 0.4 -> 0.24, health 0 -> 0.08
+        self.assertAlmostEqual(agent.hunger, 0.2)
+        self.assertAlmostEqual(agent.boredom, 0.24)
+        self.assertAlmostEqual(agent.health, 0.08)
+
+    def test_side_effects_matter_more_when_that_need_is_pressing(self):
+        world = quiet_world()
+        stock = {**NO_STOCK, "fast_food": 5, "meals": 5}
+        healthy = world.create_agent(needs={**CALM, "hunger": 0.6, "boredom": 0.5}, rates=CALM, inventory=stock)
+        ill = world.create_agent(needs={**CALM, "hunger": 0.6, "boredom": 0.5, "health": 0.9}, rates=CALM, inventory=stock)
+        # Both relieve hunger 0.2; fast food adds fun (+0.08 x 0.5) but costs health (-0.04 x level).
+        self.assertGreater(economy.benefit(healthy, "fast_food", world.rules, "hunger"),
+                           economy.benefit(healthy, "meals", world.rules, "hunger"))
+        self.assertLess(economy.benefit(ill, "fast_food", world.rules, "hunger"),
+                        economy.benefit(ill, "meals", world.rules, "hunger"))
+        economy.consume(ill, world.rules)
+        self.assertEqual(ill.inventory.count("fast_food"), 5)   # ate the meals instead
+
+    def test_harmful_goods_are_not_consumed(self):
+        world = quiet_world(effects={"spirits": {"boredom": 0.1, "health": -1}})
+        agent = world.create_agent(needs={**CALM, "boredom": 0.6, "health": 0.8}, rates=CALM,
+                                   inventory={**NO_STOCK, "spirits": 5})
+        economy.consume(agent, world.rules)
+        self.assertEqual(agent.inventory.count("spirits"), 5)
+
+
+class LabourByLayerTests(unittest.TestCase):
+    def test_deeper_layers_need_less_labour_per_unit_with_exceptions(self):
+        rules = Rules()
+        per_unit = {}
+        for g in rules.active_goods:
+            per_unit.setdefault(rules.layer(g), []).append(1 / rules.productivity[g])
+        averages = [sum(v) / len(v) for _, v in sorted(per_unit.items())]
+        self.assertEqual(averages, sorted(averages, reverse=True))           # falls layer by layer
+        self.assertGreater(1 / rules.productivity["healthcare"], 1 / rules.productivity["software"])
+        self.assertEqual(rules.productivity["water"], 4.0)
+        self.assertEqual(rules.productivity["software"], 9.0)
 
 
 class NeedLevelTests(unittest.TestCase):
