@@ -82,7 +82,9 @@ class Agent:
         self.labor_bought = 0.0     # labour it hired this step
         self.employers = {}         # who it worked for this step -> units
         # This step's flows (income, produced, consumed, labour), reset by the World each step.
-        self.flow = {"income": 0.0, "sources": {}, "produced": {}, "consumed": {}, "labor_made": 0.0, "labor_used": 0.0}
+        self.flow = {"income": 0.0, "sources": {}, "produced": {}, "consumed": {}, "used": {},
+                     "labor_made": 0.0, "labor_used": 0.0}
+        self.input_credit = {}  # input good -> fraction of a unit already taken from stock (Production)
         # Smoothed per-step income and consumption (for income / consumption inequality).
         self.income_avg = 0.0
         self.consumption_avg = 0.0
@@ -144,6 +146,9 @@ class Agent:
                       "bought": round(self.labor_bought, 4), "employers": {k: round(v, 3) for k, v in self.employers.items()}},
             "depressed": self.depressed,
             "inventory": self.inventory.to_dict(),
+            "output_capacity": {g: round(v, 4) for g, v in self.output_capacity.items()},
+            "input_target": {r: economy.input_target(self, r, rules) for r in economy.RESOURCES
+                             if economy.input_target(self, r, rules)},
             "color": self.color,
             "activity": self.activity,
             "target_id": self.target_id,

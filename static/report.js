@@ -16,7 +16,7 @@ let reportBusy = false;
 let reportLast = 0;
 
 // Series colours: fixed categorical order (validated palette), never reassigned by rank.
-const SERIES = ["var(--s1)", "var(--s2)", "var(--s3)", "var(--s4)"];
+const SERIES = ["var(--s1)", "var(--s2)", "var(--s3)", "var(--s4)", "var(--s5)", "var(--s6)"];
 
 const fmt = {
   money: (v) => usd(v),
@@ -322,19 +322,22 @@ function renderReport(r) {
   }));
 
   // Production vs consumption, one small chart per good (same scale for fair comparison).
-  const flows = Object.fromEntries(GOODS.map(g => [g, { produced: flow(p => p.produced[g]), consumed: flow(p => p.consumed[g]) }]));
+  // "Used" = consumed for needs + used up as industry inputs.
+  const usedOf = (p, g) => p.consumed[g] + (p.used?.[g] || 0);
+  const flows = Object.fromEntries(GOODS.map(g => [g, { produced: flow(p => p.produced[g]), consumed: flow(p => usedOf(p, g)) }]));
   const flowMax = Math.max(1e-9, ...GOODS.flatMap(g => [...flows[g].produced, ...flows[g].consumed]));
   const flowTicks = niceTicks(flowMax);
   for (const g of GOODS) {
     lineChart($(`chart-flow-${g}`), { x, xLabel: "Step", height: 150, yMax: flowTicks[flowTicks.length - 1], title: `${g} flow`,
       series: [{ label: "Produced", color: SERIES[0], values: flows[g].produced },
-               { label: "Consumed", color: SERIES[1], values: flows[g].consumed }] });
+               { label: NEED_FOR[g] ? "Consumed" : "Used", color: SERIES[1], values: flows[g].consumed }] });
   }
-  table($("table-flows"), ["Good", "Produced", "Consumed", "Net"], GOODS.map(g => {
-    const net = t.produced[g] - t.consumed[g];
+  table($("table-flows"), ["Good", "Produced", "Consumed", "As input", "Net"], GOODS.map(g => {
+    const asInput = t.used?.[g] || 0;
+    const net = t.produced[g] - t.consumed[g] - asInput;
     const netCell = Object.assign(document.createElement("span"), { className: net >= 0 ? "up-good" : "down-bad",
       textContent: `${net >= 0 ? "+" : ""}${fmt.num(net, 0)}` });
-    return [cap(g), fmt.num(t.produced[g], 0), fmt.num(t.consumed[g], 0), netCell];
+    return [cap(g), fmt.num(t.produced[g], 0), fmt.num(t.consumed[g], 0), fmt.num(asInput, 0), netCell];
   }));
 
   // Employment.

@@ -20,15 +20,17 @@ API
 Agent fields: name, x, y, movement, money,
               needs      {hunger, sleep, thirst, boredom: 0..1}   current levels
               rates      {hunger, sleep, thirst, boredom: 0..1}   growth per step
-              inventory  {food, water, games: int >= 0}
+              inventory  {food, water, games, grain, wood: int >= 0}
               labor_capacity >= 0                                 most labour it can give per step
-              assets     {food, water, games: >= 0}              shares of productive assets owned
+              assets     {food, water, games, grain, wood: >= 0} shares of each industry's assets owned
+Industry recipes are game rules ("inputs" in POST /api/reset), e.g. {"food": {"grain": 1}}.
               sleep_recovery  0..1                              sleep recovered per step at rest
 """
 
 import argparse
 import json
 import re
+import socket
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -161,6 +163,8 @@ def parse_agent_config(body):
 
 class Handler(SimpleHTTPRequestHandler):
     sim = None  # set in main()
+    extensions_map = {**SimpleHTTPRequestHandler.extensions_map,
+                      ".webmanifest": "application/manifest+json", ".svg": "image/svg+xml"}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
@@ -244,17 +248,33 @@ class Handler(SimpleHTTPRequestHandler):
             super().log_message(fmt, *args)
 
 
+def lan_address():
+    """This computer's address on the local network (no traffic is sent: UDP connect only picks a route)."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        try:
+            s.connect(("10.255.255.255", 1))
+            return s.getsockname()[0]
+        except OSError:
+            return "127.0.0.1"
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run the agent simulation server.")
     parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--lan", action="store_true",
+                        help="listen on every network interface so a phone on the same Wi-Fi can open it")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--agents", type=int, default=3)
     parser.add_argument("--seed", type=int, default=None)
     args = parser.parse_args()
 
+    host = "0.0.0.0" if args.lan else args.host
     Handler.sim = Simulation(args.agents, args.seed)
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"Simulation running at http://{args.host}:{args.port}  (Ctrl+C to stop)")
+    server = ThreadingHTTPServer((host, args.port), Handler)
+    print(f"Simulation running at http://localhost:{args.port}  (Ctrl+C to stop)")
+    if host == "0.0.0.0":
+        print(f"On your phone (same Wi-Fi): http://{lan_address()}:{args.port}")
+        print("Anyone on this network can open and control the game while it runs.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

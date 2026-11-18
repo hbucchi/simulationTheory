@@ -3,6 +3,7 @@
 import math
 import random
 from collections import deque
+from itertools import islice
 
 from . import distributions, economy
 from .agent import Agent
@@ -193,7 +194,8 @@ class World:
         if stockpile:
             wanted = [r for r in economy.RESOURCES
                       if economy.stockpile_shortfall(agent, r, self.rules, self.scarcity) > 0
-                      or economy.restock_shortfall(agent, r, self.rules) > 0]
+                      or economy.restock_shortfall(agent, r, self.rules) > 0
+                      or economy.input_shortfall(agent, r, self.rules) > 0]
             wanted.sort(key=lambda r: self.scarcity[r], reverse=True)
         else:
             wanted = [r for r in economy.RESOURCES if economy.demand(agent, r, self.rules) > 0]
@@ -251,6 +253,40 @@ class World:
         """Labour per step ``shares`` of a ``good`` asset can employ right now."""
         return shares * self.asset_labor_now[good]
 
+    def usable_jobs(self, agent, good):
+        """Labour per step the agent's ``good`` industry can use right now: what its asset
+        shares employ, cut to what its inputs in stock (plus input credit) can keep busy.
+        0 while the owner already holds rules.max_output_stock units of the good (unsold
+        stock piling up), so the labour goes to industries that can sell."""
+        limit = self.rules.max_output_stock
+        if limit and agent.inventory.count(good) >= limit:
+            return 0.0
+        jobs = self.asset_jobs(good, agent.assets.get(good, 0))
+        productivity = self.productivity_now[good]
+        for item, per_unit in self.rules.inputs.get(good, {}).items():
+            stock = agent.inventory.count(item) + agent.input_credit.get(item, 0.0)
+            jobs = min(jobs, stock / per_unit / productivity if productivity > 0 else 0.0)
+        return jobs
+
+    def input_cost(self, good, prices):
+        """Cost of the inputs used to make one unit of ``good`` (0 for primary industries)."""
+        return sum(per_unit * prices[item] for item, per_unit in self.rules.inputs.get(good, {}).items())
+
+    def recent_flow(self, key, steps=20):
+        """Average per step of a recorded flow ("produced" or "used") per good over the last ``steps``."""
+        recent = list(islice(reversed(self.recorder.history), steps))
+        return {g: sum(s[key].get(g, 0) for s in recent) / len(recent) if recent else 0.0 for g in economy.GOODS}
+
+    def unit_cost(self, good, prices):
+        """Cost of making one unit of ``good``: its inputs plus the labour it takes at the wage."""
+        productivity = self.productivity_now[good]
+        labour = self.labor.wage / productivity if productivity > 0 else 0.0
+        return self.input_cost(good, prices) + labour
+
+    def value_added(self, good, prices):
+        """Price of one unit of ``good`` minus the inputs it used, never below 0."""
+        return max(0.0, prices[good] - self.input_cost(good, prices))
+
     def asset_output(self, good, shares, labor=None):
         """Units per step made by ``shares`` of a ``good`` asset: productivity x labour used,
         where labour used is at most what the asset can employ (all of it if ``labor`` is None)."""
@@ -261,13 +297,13 @@ class World:
     def asset_prices(self, prices=None):
         """Price of one whole asset: profit per step at full capacity / effective return.
 
-        Profit = output x price of the good - labour it employs x the wage. The effective
+        Profit = output x (price of the good - its inputs) - labour it employs x the wage. The effective
         return is the asset's return, or the government's minimum rate if higher. Never below 0.
         """
         prices = prices or self.current_prices()
         out = {}
         for g in economy.GOODS:
-            profit = self.asset_output(g, 1) * prices[g] - self.asset_jobs(g, 1) * prices[economy.LABOR]
+            profit = self.asset_output(g, 1) * self.value_added(g, prices) - self.asset_jobs(g, 1) * prices[economy.LABOR]
             out[g] = max(0.0, profit) / self.government.effective_return(self.rules, g)
         return out
 
@@ -284,9 +320,18 @@ class World:
 
     def current_prices(self, include_labor=True):
         """Goods: base price (scarcity formula or fixed) x demand-pressure multiplier.
-        Labour: the labour market's wage."""
+        With rules.cost_floor, a secondary good never costs less than its unit cost (see
+        unit_cost). Labour: the labour market's wage."""
         base = economy.market_prices(self.agents, self.rules)
         prices = {r: base[r] * self.price_multiplier[r] for r in economy.RESOURCES}
+        if self.rules.cost_floor and self.rules.price_mode != "fixed":
+            # Inputs can themselves be made from inputs, so repeat until every floor holds.
+            for _ in range(len(economy.GOODS)):
+                floors = {g: self.unit_cost(g, prices) for g in self.rules.inputs if g in prices}
+                if all(prices[g] >= floor - 1e-9 for g, floor in floors.items()):
+                    break
+                for g, floor in floors.items():
+                    prices[g] = max(prices[g], floor)
         if include_labor:
             prices[economy.LABOR] = self.labor.wage
         return prices
@@ -418,7 +463,11 @@ class World:
         deals = economy.trade(a, b, prices, rules, self.rng, scarcity, self.unit_markups())
         for buyer, seller, bought, paid, stocked, unit_prices in deals:
             self.recorder.count("goods_deals")
-            note = f" ({economy.describe(stocked)} to stockpile)" if stocked else ""
+            # Units bought beyond its needs: industry inputs or a stockpile.
+            inputs = {r: n for r, n in stocked.items() if economy.input_target(buyer, r, rules)}
+            hoard = {r: n for r, n in stocked.items() if r not in inputs}
+            note = f" ({economy.describe(inputs)} as industry inputs)" if inputs else ""
+            note += f" ({economy.describe(hoard)} to stockpile)" if hoard else ""
             rising = [f"{r} {lo:.2f}→{hi:.2f}" for r, (lo, hi) in unit_prices.items() if hi > lo + 1e-9]
             if rising:
                 note += f" [price rose per unit: {', '.join(rising)}]"
@@ -477,6 +526,9 @@ class World:
                 "asset_output": {g: self.asset_output(g, sum(a.assets.get(g, 0) for a in self.agents))
                                  for g in economy.GOODS},
                 "asset_labor": self.asset_labor_now,
+                # Average units made / used as inputs per step over the last 20 steps.
+                "produced_recent": self.recent_flow("produced"),
+                "used_recent": self.recent_flow("used"),
                 "labor": self.labor.to_dict(),
                 "asset_trades": self.asset_trades,
                 "asset_trade_money": self.asset_trade_money,

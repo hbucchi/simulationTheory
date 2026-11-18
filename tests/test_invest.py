@@ -3,16 +3,16 @@ import unittest
 from simulation import World, economy
 from simulation.modules import Invest
 from simulation.modules.invest import purchase_limit
-from simulation.rules import Rules
+from simulation.rules import GOODS, Rules
 
 CALM = {"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0}
-NO_ASSETS = {"food": 0, "water": 0, "games": 0}
+NO_ASSETS = {g: 0 for g in GOODS}
 FIXED = {"price_mode": "fixed", "demand_pricing_enabled": False, "fixed_prices": {"food": 1, "water": 1, "games": 1, "labor": 1}}
 
 
 def world_with(**rules):
     # No labour-saving unless a test asks for it: these tests are about output and prices.
-    return World(seed=1, rules=Rules.from_dict({"assets": NO_ASSETS, "labor_saving": {"food": 0, "water": 0, "games": 0},
+    return World(seed=1, rules=Rules.from_dict({"inputs": {}, "assets": NO_ASSETS, "labor_saving": {"food": 0, "water": 0, "games": 0},
                                                 **rules}))
 
 

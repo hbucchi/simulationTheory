@@ -45,8 +45,10 @@ const ui = {
 
 const DOT_RADIUS = 6;
 const NEEDS = ["hunger", "sleep", "thirst", "boredom"];
-const GOODS = ["food", "water", "games"];   // consumed for needs; made only by assets
-const RESOURCES = GOODS;                    // what agents hold and trade face to face
+const CONSUMABLES = ["food", "water", "games"];   // consumed for needs
+const RAW = ["grain", "wood"];                     // raw materials: only used as industry inputs
+const GOODS = [...CONSUMABLES, ...RAW];            // every good is made by its own industry (assets)
+const RESOURCES = GOODS;                           // what agents hold and trade face to face
 const PRICED = [...GOODS, "labor"];         // everything with a price (labour's is the wage)
 const NEED_FOR = { food: "hunger", water: "thirst", games: "boredom" };
 const cap = (w) => w[0].toUpperCase() + w.slice(1);
@@ -204,6 +206,11 @@ function cssVar(name) {
 
 function draw() {
   const { width, height } = state;
+  // The 1024px world is shrunk to fit the screen (to ~330px on a phone): grow dots and
+  // labels so they stay about 4px / 11px on screen.
+  const scale = Math.max(1, width / (canvas.clientWidth || width));
+  const R = Math.max(DOT_RADIUS, 4 * scale);
+  const labelPx = Math.round(Math.max(14, 11 * scale));
   canvas.width = width;
   canvas.height = height;
   ctx.clearRect(0, 0, width, height);
@@ -250,35 +257,35 @@ function draw() {
     }
     ctx.fillStyle = agent.color;
     ctx.beginPath();
-    ctx.arc(agent.x, agent.y, DOT_RADIUS, 0, Math.PI * 2);
+    ctx.arc(agent.x, agent.y, R, 0, Math.PI * 2);
     ctx.fill();
     if (agent.depressed) {
       ctx.strokeStyle = cssVar("--muted");
       ctx.lineWidth = 2;
       ctx.setLineDash([2, 2]);
       ctx.beginPath();
-      ctx.arc(agent.x, agent.y, DOT_RADIUS + 2, 0, Math.PI * 2);
+      ctx.arc(agent.x, agent.y, R + 2, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
     }
     if (agent.activity === "sleeping") {
       ctx.fillStyle = cssVar("--muted");
-      ctx.font = "italic 12px Inter, system-ui, sans-serif";
-      ctx.fillText("z z", agent.x - 8, agent.y + DOT_RADIUS + 14);
+      ctx.font = `italic ${Math.round(labelPx * 0.85)}px Inter, system-ui, sans-serif`;
+      ctx.fillText("z z", agent.x - 8, agent.y + R + 14);
     }
     if (agent.id === selectedId || inContact.has(agent.id)) {
       ctx.strokeStyle = cssVar("--text");
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(agent.x, agent.y, DOT_RADIUS + 4, 0, Math.PI * 2);
+      ctx.arc(agent.x, agent.y, R + 4, 0, Math.PI * 2);
       ctx.stroke();
     }
     ctx.fillStyle = cssVar("--muted");
-    ctx.font = "500 14px Inter, system-ui, sans-serif";
+    ctx.font = `500 ${labelPx}px Inter, system-ui, sans-serif`;
     // Keep labels inside the box near the right/top edges.
     const labelWidth = ctx.measureText(agent.name).width;
-    const lx = agent.x + DOT_RADIUS + 4 + labelWidth > width ? agent.x - DOT_RADIUS - 4 - labelWidth : agent.x + DOT_RADIUS + 4;
-    const ly = agent.y - DOT_RADIUS - 2 < 14 ? agent.y + DOT_RADIUS + 14 : agent.y - DOT_RADIUS - 2;
+    const lx = agent.x + R + 4 + labelWidth > width ? agent.x - R - 4 - labelWidth : agent.x + R + 4;
+    const ly = agent.y - R - 2 < labelPx ? agent.y + R + labelPx : agent.y - R - 2;
     ctx.fillText(agent.name, lx, ly);
   }
   ctx.globalAlpha = 1;
@@ -350,17 +357,49 @@ function renderMarket() {
     row.append(cell);
   }
   ui.market.append(row);
+  renderIndustries();
   if (state.rules.investing_enabled) {
     const inv = document.createElement("div");
     inv.className = "market-title invest";
-    inv.textContent = `Assets (price · shares · output/step) · ${GOODS.map(r =>
-      `${r} ${usd(m.asset_prices[r])} · ${m.assets[r].toFixed(2)} · ${m.asset_output[r].toFixed(2)} ` +
-      `(productivity ${m.productivity[r].toFixed(2)})`).join(" | ")} · ` +
-      `${m.asset_trades} trades between agents (${usd(m.asset_trade_money)})`;
-    inv.title = "Asset price = output per step × resource price ÷ return. Assets only change hands between agents.";
+    inv.textContent = `Asset trades between agents: ${m.asset_trades} (${usd(m.asset_trade_money)})`;
     ui.market.append(inv);
   }
   renderLaborCard();
+}
+
+// One row per industry: primary (capital + labour) or secondary (also inputs), its recipe,
+// how much capital exists, what it makes per step at full capacity, and what one asset costs.
+function recipeText(good) {
+  const inputs = Object.entries(state.rules.inputs[good] || {});
+  return inputs.length ? `${inputs.map(([i, q]) => `${+q.toFixed(3)} ${i}`).join(" + ")} + labour → 1 ${good}`
+    : `labour → 1 ${good}`;
+}
+
+function renderIndustries() {
+  const m = state.market;
+  const box = Object.assign(document.createElement("div"), { className: "industries" });
+  box.append(Object.assign(document.createElement("div"), { className: "market-title",
+    textContent: "Industries · capital (asset shares) + labour, secondary ones also use inputs" }));
+  for (const g of GOODS) {
+    const primary = !Object.keys(state.rules.inputs[g] || {}).length;
+    const row = Object.assign(document.createElement("div"), { className: "industry-row" });
+    const tag = Object.assign(document.createElement("span"), {
+      className: `industry-tag ${primary ? "primary" : "secondary"}`, textContent: primary ? "primary" : "secondary" });
+    const name = Object.assign(document.createElement("b"), { textContent: g });
+    const recipe = Object.assign(document.createElement("span"), { className: "recipe", textContent: recipeText(g) });
+    const made = m.produced_recent?.[g] ?? 0;
+    const used = m.used_recent?.[g] ?? 0;
+    const stats = Object.assign(document.createElement("span"), { className: "industry-stats",
+      textContent: `${m.assets[g].toFixed(2)} shares · up to ${m.asset_output[g].toFixed(2)}/step · ` +
+        `making ${made.toFixed(2)}/step` + (used ? ` · ${used.toFixed(2)}/step used as inputs` : "") +
+        ` · asset ${usd(m.asset_prices[g])}` });
+    stats.title = "Averages over the last 20 steps. ";
+    stats.title += `Productivity ${m.productivity[g].toFixed(2)} units per labour. Asset price = profit per step ` +
+      "(output × (price − inputs) − labour × wage) ÷ return.";
+    row.append(name, tag, recipe, stats);
+    box.append(row);
+  }
+  ui.market.append(box);
 }
 
 // Labour market: wage, capacity offered vs labour wanted, who got hired, workers' condition.
@@ -537,6 +576,9 @@ function renderAgents() {
           `${(a.assets[r] * state.market.asset_output_each[r]).toFixed(2)}/step)`,
           `One whole ${r} asset costs ${usd(price)} now`];
       }),
+      // Inputs its secondary industries keep in stock.
+      ...Object.entries(a.input_target || {}).map(([r, n]) => [`${r} input buffer`, n,
+        `Keeps ${n} ${r} for its industries; buys more when below ${Math.round(n * state.rules.input_reorder)}`]),
       // Reserve it wants to hold because the resource is becoming scarce.
       ...RESOURCES.filter(r => a.reserve?.[r]).map(r => [`${r} reserve`, a.reserve[r],
         "Wants to hold this much because it is becoming scarce"]),
@@ -559,6 +601,7 @@ function renderAgents() {
       : a.activity === "meeting" && target ? `meeting ${target.name}`
       : a.activity === "stockpiling" && target ? `stockpiling ${a.seeking_for} from ${target.name}`
       : a.activity === "restocking" && target ? `restocking ${a.seeking_for} from ${target.name}`
+      : a.activity === "sourcing" && target ? `buying ${a.seeking_for} for its industries from ${target.name}`
       : a.activity === "hiring" && target ? `hiring labour from ${target.name}`
       : a.activity === "selling" && target ? `selling ${a.seeking_for} to ${target.name}`
       : a.activity === "searching" ? `searching: nobody has ${a.wants.join(" or ")} to sell`
@@ -788,14 +831,20 @@ function updateBalance() {
   ui.balance.innerHTML = "";
   // Goods come only from its assets (when staffed); labour from the agent itself.
   for (const r of GOODS) {
-    const used = fieldValue(`rates.${NEED_FOR[r]}`) / state.rules.relief_per_unit;
+    const eaten = NEED_FOR[r] ? fieldValue(`rates.${NEED_FOR[r]}`) / state.rules.relief_per_unit : 0;
+    // Inputs its own secondary industries use at full capacity.
+    const asInput = GOODS.reduce((sum, g) => sum + fieldValue(`assets.${g}`) * state.market.asset_output_each[g] *
+      (state.rules.inputs[g]?.[r] || 0), 0);
+    const used = eaten + asInput;
     const made = fieldValue(`assets.${r}`) * state.market.asset_output_each[r];
     const net = made - used;
     const line = document.createElement("span");
     const even = Math.abs(net) < 1e-9;
     line.className = even ? "" : net < 0 ? "short" : "surplus";
     const verdict = even ? "balanced" : net < 0 ? `buys ${(-net).toFixed(3)}/step` : `sells ${net.toFixed(3)}/step`;
-    line.textContent = `${r}: uses ${used.toFixed(3)} · its assets make ${made.toFixed(3)} per step when staffed → ${verdict}`;
+    const inputNote = asInput ? ` (${asInput.toFixed(3)} as inputs)` : "";
+    if (!used && !made) continue;
+    line.textContent = `${r}: uses ${used.toFixed(3)}${inputNote} · its assets make ${made.toFixed(3)} per step when staffed → ${verdict}`;
     ui.balance.append(line);
   }
   const jobs = GOODS.reduce((sum, g) => sum + fieldValue(`assets.${g}`) * state.market.asset_labor[g], 0);
@@ -859,7 +908,7 @@ canvas.addEventListener("click", (e) => {
   const rect = canvas.getBoundingClientRect();
   const x = (e.clientX - rect.left) * (state.width / rect.width);
   const y = (e.clientY - rect.top) * (state.height / rect.height);
-  let best = null, bestDist = 20;
+  let best = null, bestDist = Math.max(20, 22 * state.width / rect.width);  // ~22px finger on screen
   for (const a of state.agents) {
     const d = Math.hypot(a.x - x, a.y - y);
     if (d < bestDist) { best = a; bestDist = d; }

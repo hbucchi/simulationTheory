@@ -107,6 +107,16 @@ const SETUP_SECTIONS = [
     { path: "unit_markup", label: "Extra unit costs more (0.05 = +5%)", kind: "float", min: 0, max: 1, step: 0.01,
       full: true, enabledWhen: v => v.demand_pricing_enabled },
   ]},
+  { title: "Industries", hint: "Every good has its own industry, whose capital is its assets. Primary (extraction) " +
+      "industries need only capital and labour. Secondary industries also use inputs made by other industries, e.g. " +
+      "“1 grain” means each unit of food uses 1 grain. Leave a recipe empty to make the industry primary. Output is " +
+      "limited by whatever runs out first: labour, capital or inputs.", fields: [
+    ...per(GOODS, g => ({ path: `inputs.${g}`, label: `${cap(g)} uses (per unit)`, kind: "recipe", full: true })),
+    { path: "input_buffer_steps", label: "Owners keep inputs for (steps)", kind: "int", min: 1, max: 10000 },
+    { path: "input_reorder", label: "… and reorder below (share)", kind: "float", min: 0, max: 1, step: 0.05 },
+    { path: "max_output_stock", label: "Stop producing above (units held, 0 = never)", kind: "int", min: 0 },
+    { path: "cost_floor", label: "Secondary goods never sell below unit cost", kind: "bool", full: true },
+  ]},
   { title: "Assets, productivity and investment", hint: "Each good has its own asset. One asset share employs up to " +
       "“jobs per asset” labour per step; each unit of labour makes “productivity” units of the good, and productivity grows " +
       "over time. Output = productivity × min(labour, shares × jobs per asset). The only assets are the starting ones; they " +
@@ -192,6 +202,29 @@ function mergeRules(base, changes) {
     out[k] = v && typeof v === "object" && !("dist" in v) ? { ...out[k], ...v } : v;
   }
   return out;
+}
+
+// Recipes are typed as "1 grain + 0.5 wood" (amount, then good; "grain" alone means 1).
+function formatRecipe(recipe) {
+  return Object.entries(recipe || {}).map(([g, q]) => `${+Number(q).toFixed(4)} ${g}`).join(" + ");
+}
+
+function parseRecipe(text, good) {
+  const recipe = {};
+  for (const part of text.split("+").map(p => p.trim()).filter(Boolean)) {
+    let amount, name, m;
+    if ((m = part.match(/^(\d*\.?\d+)?\s*([a-z]+)$/i))) [, amount, name] = m;        // "0.5 wood", "wood"
+    else if ((m = part.match(/^([a-z]+)\s+(\d*\.?\d+)$/i))) [, name, amount] = m;    // "wood 0.5"
+    const input = name?.toLowerCase();
+    if (!input || !GOODS.includes(input)) {
+      throw new Error(`${cap(good)} recipe: “${part}” — use amounts of ${GOODS.join(", ")}, e.g. “1 grain + 0.5 wood”`);
+    }
+    if (input === good) throw new Error(`${cap(good)} can't be an input of itself`);
+    const qty = amount === undefined ? 1 : Number(amount);
+    if (!(qty >= 0)) throw new Error(`${cap(good)} recipe: amount of ${input} must be ≥ 0`);
+    if (qty > 0) recipe[input] = (recipe[input] || 0) + qty;
+  }
+  return recipe;
 }
 
 function numberInput(name, attrs) {
@@ -281,6 +314,11 @@ function buildSetupForm() {
       } else if (f.kind === "bool") {
         el = document.createElement("input");
         el.type = "checkbox";
+      } else if (f.kind === "recipe") {
+        el = document.createElement("input");
+        el.type = "text";
+        el.placeholder = "nothing (primary)";
+        el.className = "recipe-input";
       } else {
         el = numberInput(f.path, { min: f.min, max: f.max, step: f.kind === "int" ? 1 : f.step, placeholder: f.placeholder });
       }
@@ -484,6 +522,7 @@ function fillSetup(rules, seed = "") {
     const el = setupInput(f.path);
     const value = f.path === "seed" ? seed : getPath(rules, f.path);
     if (f.kind === "bool") el.checked = value;
+    else if (f.kind === "recipe") el.value = formatRecipe(value);
     else el.value = value ?? "";
   }
   updateSetup();
@@ -500,6 +539,7 @@ function readSetup() {
       const el = setupInput(f.path);
       if (f.kind === "bool") value = el.checked;
       else if (f.kind === "choice") value = el.value;
+      else if (f.kind === "recipe") value = parseRecipe(el.value, f.path.split(".")[1]);
       else {
         if (el.value === "") {
           if (f.optional) continue;
@@ -561,6 +601,12 @@ function updateSetup() {
     const off = values && f.enabledWhen && !f.enabledWhen(values);
     el.disabled = !!off;
     el.closest("label").classList.toggle("disabled", !!off);
+    if (f.kind === "recipe") {
+      let now = null;
+      try { now = parseRecipe(el.value, f.path.split(".")[1]); } catch { /* reported in the preview */ }
+      el.classList.toggle("changed", formatRecipe(now) !== formatRecipe(factory));
+      continue;
+    }
     const now = f.kind === "bool" ? el.checked : f.kind === "choice" ? el.value : Number(el.value);
     el.classList.toggle("changed", factory !== undefined && el.value !== "" && now !== factory);
   }
@@ -589,18 +635,32 @@ function renderPreview(r, error) {
   const n = r.agents;
   const sharesPerAgent = (g) => avg(r.assets[g]);
   const perShare = (g) => r.asset_labor[g] * r.productivity[g];
+  // What everyone needs per step: consumables for needs, then (repeatedly, for chains) the
+  // inputs that making those takes.
+  const required = Object.fromEntries(GOODS.map(g => [g, NEED_FOR[g] ? avg(r.rates[NEED_FOR[g]]) / r.relief_per_unit * n : 0]));
+  const asInput = Object.fromEntries(GOODS.map(g => [g, 0]));
+  for (let pass = 0; pass < GOODS.length; pass++) {
+    for (const g of GOODS) asInput[g] = 0;
+    for (const [out, recipe] of Object.entries(r.inputs || {})) {
+      const made = (NEED_FOR[out] ? avg(r.rates[NEED_FOR[out]]) / r.relief_per_unit * n : 0) + asInput[out];
+      for (const [i, q] of Object.entries(recipe)) asInput[i] += made * q;
+    }
+  }
   for (const g of GOODS) {
     const need = NEED_FOR[g];
-    const rate = avg(r.rates[need]);
-    const use = rate / r.relief_per_unit * n;
+    const rate = need ? avg(r.rates[need]) : 0;
+    const use = required[g] + asInput[g];
     const capacity = sharesPerAgent(g) * n * perShare(g);
-    const head = `${cap(g)}: agents use ${use.toFixed(2)}/step; its assets can make ${capacity.toFixed(2)}/step when fully staffed`;
+    const kind = Object.keys(r.inputs?.[g] || {}).length ? `secondary, uses ${formatRecipe(r.inputs[g])} per unit` : "primary";
+    const why = asInput[g] ? ` (${asInput[g].toFixed(2)} as inputs)` : "";
+    const head = `${cap(g)} (${kind}): agents use ${use.toFixed(2)}/step${why}; its assets can make ` +
+                 `${capacity.toFixed(2)}/step when fully staffed`;
     if (capacity >= use) line(`${head}.`, "surplus");
     else {
       const lasts = Math.round(avg(r.inventory[g]) / ((use - capacity) / n));
       let text = `${head} → short ${(use - capacity).toFixed(2)}/step; stocks last ~${lasts} steps.`;
       const toCritical = rate ? Math.round((1 - r.seek_threshold) / rate) : Infinity;
-      if (need !== "boredom" && r.death_enabled) text += ` Then ${need} kills in ~${toCritical} steps.`;
+      if (need && need !== "boredom" && r.death_enabled) text += ` Then ${need} kills in ~${toCritical} steps.`;
       line(text, "short");
     }
   }
@@ -614,8 +674,8 @@ function renderPreview(r, error) {
        `each industry needs ${GOODS.map(g => `${g} ${(r.labor_saving[g] * 100).toFixed(0)}%`).join(", ")} less labour per asset ` +
        `while each unit of labour makes ${GOODS.map(g => `${g} +${(r.productivity_growth[g] * 100).toFixed(0)}%`).join(", ")} more.`);
   const stock = RESOURCES.map(x => avg(r.inventory[x]));
-  const needPerStep = Math.max(...GOODS.map(x => avg(r.rates[NEED_FOR[x]]) / r.relief_per_unit));
-  const goodsStock = Math.min(...GOODS.map(x => avg(r.inventory[x])));
+  const needPerStep = Math.max(...CONSUMABLES.map(x => avg(r.rates[NEED_FOR[x]]) / r.relief_per_unit));
+  const goodsStock = Math.min(...CONSUMABLES.map(x => avg(r.inventory[x])));
   if (goodsStock / needPerStep > 300) {
     line(`Agents start with enough of everything for ${Math.round(goodsStock / needPerStep)}+ steps, ` +
          "so they won't need to trade goods for a long time. Lower the starting inventory for more trading.");

@@ -27,7 +27,7 @@
   --sky: #3f8fd6;
 
   /* Chart series (validated categorical palette, fixed order) */
-  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #9b59d0; --s6: #7a8a2e;
 
   --radius-lg: 18px;
   --radius: 12px;
@@ -62,7 +62,7 @@
     --sky: #6fb0ec;
     --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 28px rgba(0, 0, 0, .25);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, .3);
-    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #b07de0; --s6: #a3b54a;
     color-scheme: dark;
   }
 }
@@ -490,3 +490,78 @@ body.setup-open { overflow: hidden; }
 .labor-card dl { display: grid; grid-template-columns: 70px 1fr; gap: 3px 10px; margin: 0; }
 .labor-card dt { color: var(--faint); }
 .labor-card dd { margin: 0; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* ---------- Industries ---------- */
+.industries { display: grid; gap: 6px; padding: 10px 12px; border-radius: var(--radius); background: var(--panel-2); }
+.industry-row { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; font-size: 12px; color: var(--muted); }
+.industry-row b { color: var(--text); font-weight: 600; text-transform: capitalize; min-width: 44px; }
+.industry-tag { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+  padding: 1px 7px; border-radius: 999px; }
+.industry-tag.primary { background: var(--good-soft); color: var(--good); }
+.industry-tag.secondary { background: var(--accent-soft); color: var(--accent); }
+.industry-row .recipe { color: var(--text); }
+.industry-row .industry-stats { flex-basis: 100%; padding-left: 52px; color: var(--faint); }
+.activity .sourcing { color: var(--sky); }
+input.recipe-input { width: 190px; }
+
+/* ---------- Phones (e.g. Galaxy S23: 360 x 780 CSS px) ---------- */
+.narrow-hide { display: inline; }
+@media (max-width: 760px) {
+  /* Top bar scrolls away instead of covering a third of the screen. */
+  .topbar { position: static; padding: 10px 12px; gap: 10px; backdrop-filter: none; }
+  .brand-sub, .narrow-hide { display: none; }
+  .brand-name { font-size: 15px; }
+  .logo { width: 28px; height: 28px; }
+  .topbar-right { flex-wrap: wrap; gap: 8px; width: 100%; }
+  .topbar-right .view-switch { flex: 1; }
+  .topbar-right .view-switch button { flex: 1; }
+
+  /* Playback lives in a bar at the bottom, in reach of the thumb. */
+  .playback {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 8;
+    flex-wrap: nowrap; gap: 10px; padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--panel) 94%, transparent); backdrop-filter: blur(10px);
+    border-top: 1px solid var(--border); box-shadow: 0 -4px 18px rgba(20, 24, 40, .08);
+  }
+  .playback .segmented button { padding: 9px 14px; }
+  .playback .speed { flex: 1; min-width: 0; gap: 6px; }
+  .playback .speed > span:first-child { display: none; }
+  .playback .speed input { flex: 1 1 auto; width: auto; min-width: 40px; }
+  .playback .speed #interval-label { flex: none; }
+  #interval-label { min-width: 0; font-size: 12px; white-space: nowrap; }
+  body { padding-bottom: calc(68px + env(safe-area-inset-bottom)); }
+  body.setup-open .playback { display: none; }
+
+  .layout { padding: 12px; gap: 12px; }
+  .card { padding: 14px; }
+  .map-tools { width: 100%; }
+  .restart { flex-wrap: wrap; }
+  .restart input { width: 72px; }
+  .industry-row .industry-stats { padding-left: 0; }
+
+  /* Bigger touch targets, and 16px inputs so focusing doesn't zoom the page. */
+  button { min-height: 36px; touch-action: manipulation; }
+  input, select { font-size: 16px; }
+  .tabs button { flex: 1; padding: 10px 6px; }
+
+  /* Setup screen */
+  .setup { padding: 16px 12px; }
+  .preset { width: 100%; }
+  .preset select { min-width: 0; width: 100%; }
+  .setup-grid { grid-template-columns: minmax(0, 1fr); }
+  .setup-fields label { flex-wrap: wrap; }
+  input.recipe-input { width: 100%; }
+  .form-actions.sticky { flex-wrap: wrap; padding: 10px; }
+  .form-actions.sticky .spacer { display: none; }
+  .form-actions.sticky { flex-wrap: nowrap; gap: 6px; }
+  .form-actions.sticky button { flex: 1 1 auto; padding: 8px 10px; white-space: nowrap; }
+
+  /* Report: smaller headline numbers; wide tables scroll inside their card, not the page. */
+  .report { padding: 12px 12px 24px; }
+  .kpi-grid { gap: 8px; }
+  .kpi { padding: 12px; min-width: 0; }
+  .kpi-value { font-size: 20px; overflow-wrap: anywhere; }
+  .report-card [id^="table-"] { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .small-multiples, .report-grid { grid-template-columns: minmax(0, 1fr); }
+  .report-grid > * { min-width: 0; }
+}

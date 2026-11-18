@@ -1,7 +1,7 @@
 import unittest
 
 from simulation import World, economy
-from simulation.rules import Rules
+from simulation.rules import GOODS, Rules
 
 CALM = {"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0}
 
@@ -9,7 +9,7 @@ CALM = {"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0}
 def world_with(**rules):
     # Investing is off unless a test turns it on: asset purchases would spend the money under test.
     return World(seed=1, rules=Rules.from_dict({"investing_enabled": False, "selling_enabled": False,
-                                                "assets": {"food": 0, "water": 0, "games": 0}, **rules}))
+                                                "assets": {g: 0 for g in GOODS}, **rules}))
 
 
 class ScarcityTests(unittest.TestCase):
@@ -170,7 +170,7 @@ class DemandPricingTests(unittest.TestCase):
     def test_markup_only_applies_where_buyers_outnumber_sellers(self):
         world = self.make_world(thirsty=3, sellers=1)
         world.update_demand()
-        self.assertEqual(world.unit_markups(), {"food": 0, "water": 0.05, "games": 0})
+        self.assertEqual(world.unit_markups(), {"food": 0, "water": 0.05, "games": 0, "grain": 0, "wood": 0})
 
 
 if __name__ == "__main__":

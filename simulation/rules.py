@@ -12,7 +12,9 @@ from dataclasses import asdict, dataclass, field, fields
 
 from . import distributions
 
-GOODS = ("food", "water", "games")   # consumed for needs; produced only by assets
+CONSUMABLES = ("food", "water", "games")  # consumed for needs
+RAW = ("grain", "wood")                    # raw materials: no need of their own, only industry inputs
+GOODS = CONSUMABLES + RAW                  # everything an industry (asset) makes
 LABOR = "labor"                       # a capacity sold each step in the labour market; never held
 RESOURCES = GOODS                     # what agents hold and trade face to face
 PRICED = GOODS + (LABOR,)             # everything with a price (labour's price is the wage)
@@ -24,12 +26,13 @@ PRICE_MODES = ("scarcity", "fixed")
 class Rules:
     # Starting agents (spreads)
     agents: int = 3
-    inventory: dict = field(default_factory=lambda: {"food": 100, "water": 100, "games": 100})
+    inventory: dict = field(default_factory=lambda: {"food": 100, "water": 100, "games": 100,
+                                                     "grain": 20, "wood": 20})
     # Starting asset shares: for each good, 10% of the agents own all its assets (10 shares each
     # on average), drawn separately per good, so about a quarter of the agents own something.
     # Most agents own none and live by selling labour.
     assets: dict = field(default_factory=lambda: {g: {"dist": "tiered", "average": 1.0, "tiers": [
-        {"agents": 10, "share": 100}, {"agents": 90, "share": 0}]} for g in ("food", "water", "games")})
+        {"agents": 10, "share": 100}, {"agents": 90, "share": 0}]} for g in GOODS})
     money: object = 22500.0           # 22,500 / 300 units x (1 - 1/3) = $50 starting price at the default stock
     movement: object = field(default_factory=lambda: {"dist": "uniform", "min": 5, "max": 25})
     start_needs: object = field(default_factory=lambda: {"dist": "uniform", "min": 0.0, "max": 0.5})
@@ -93,12 +96,31 @@ class Rules:
     # every resource at current prices, and once at least min_investment is spare they buy
     # shares from owners that are short of cash.
     investing_enabled: bool = True
-    asset_labor: dict = field(default_factory=lambda: {"food": 0.2, "water": 0.2, "games": 0.2})
-    productivity: dict = field(default_factory=lambda: {"food": 1.0, "water": 1.0, "games": 1.0})
-    productivity_growth: dict = field(default_factory=lambda: {"food": 0.05, "water": 0.05, "games": 0.05})
+    # Extraction of raw materials takes half the labour per unit: a raw asset employs 0.1 labour
+    # and each unit of that labour extracts 2 units, so an asset still makes 0.2 units per step.
+    asset_labor: dict = field(default_factory=lambda: {g: 0.1 if g in RAW else 0.2 for g in GOODS})
+    productivity: dict = field(default_factory=lambda: {g: 2.0 if g in RAW else 1.0 for g in GOODS})
+    productivity_growth: dict = field(default_factory=lambda: {g: 0.05 for g in GOODS})
     productivity_growth_steps: int = 50
-    labor_saving: dict = field(default_factory=lambda: {"food": 0.03, "water": 0.03, "games": 0.03})
-    asset_return: dict = field(default_factory=lambda: {"food": 0.01, "water": 0.01, "games": 0.01})
+    labor_saving: dict = field(default_factory=lambda: {g: 0.03 for g in GOODS})
+    asset_return: dict = field(default_factory=lambda: {g: 0.01 for g in GOODS})
+
+    # Industries. Every good is made by its own industry (its assets are the capital).
+    #   primary (extraction):  capital + labour            -> output (no inputs)
+    #   secondary:             capital + labour + inputs   -> output
+    # inputs[g] = {input good: units used per unit of g made}; a good with no entry is primary.
+    # Output is limited by whichever runs out first (fixed proportions, "Leontief"):
+    #     output = min(productivity x labour used, input stock / units per output, ...)
+    # Owners of secondary industries want input_buffer_steps steps of inputs at full capacity;
+    # when their stock falls below input_reorder of that they go out and buy back up to it.
+    inputs: dict = field(default_factory=lambda: {"food": {"grain": 1.0}, "games": {"wood": 1.0}})
+    input_buffer_steps: int = 20
+    input_reorder: float = 0.5
+    # Cost floor (scarcity prices only): a secondary good never sells below its unit cost,
+    # i.e. its inputs at current prices plus the labour per unit at the current wage.
+    cost_floor: bool = True
+    # An industry stops hiring while its owner holds this many units of what it makes (0 = never).
+    max_output_stock: int = 200
     liquidity_units: float = 3
     min_investment: float = 1000
     # Capitalists keep cash to pay for the labour their assets need: a purchase must leave them
@@ -120,7 +142,7 @@ class Rules:
 
     # Prices
     price_mode: str = "scarcity"       # "scarcity": money/units*(1-share); "fixed": fixed_prices
-    fixed_prices: dict = field(default_factory=lambda: {"food": 50.0, "water": 50.0, "games": 50.0, "labor": 50.0})
+    fixed_prices: dict = field(default_factory=lambda: {r: 50.0 for r in PRICED})
 
     # Market adjustment on top of the base price, per resource:
     #   demand pressure = ((buyers + 1) / (sellers + 1)) ** price_elasticity[r]
@@ -132,9 +154,8 @@ class Rules:
     # multiplier moves price_adjust_speed of the way to the target each step. When buyers
     # outnumber sellers, each extra unit in the same deal costs unit_markup more (compounding).
     demand_pricing_enabled: bool = True
-    price_elasticity: dict = field(default_factory=lambda: {"food": 0.5, "water": 0.5, "games": 0.5, "labor": 0.5})
-    concentration_weight: dict = field(default_factory=lambda: {"food": 1.0, "water": 1.0, "games": 1.0,
-                                                                "labor": 1.0})
+    price_elasticity: dict = field(default_factory=lambda: {r: 0.5 for r in PRICED})
+    concentration_weight: dict = field(default_factory=lambda: {r: 1.0 for r in PRICED})
     price_adjust_speed: float = 0.2
     price_floor: float = 0.25
     price_cap: float = 4.0
@@ -179,7 +200,9 @@ class Rules:
                     n: distributions.normalize(v, f"{key}.{n}", low, high, whole, tiered) for n, v in value.items()}})
                 continue
             low, high, kind = LIMITS[key]
-            if kind == "map":
+            if kind == "recipes":
+                setattr(rules, key, _recipes(value))
+            elif kind == "map":
                 names, low, high, whole = low
                 setattr(rules, key, {**getattr(rules, key), **_number_map(value, key, names, low, high, whole)})
             elif kind == "bool":
@@ -252,6 +275,11 @@ LIMITS = {
     "selling_enabled": (None, None, "bool"),
     "stock_cap": (1, 1e9, "int"),
     "restock_below": (0, 1, "float"),
+    "inputs": (None, None, "recipes"),
+    "input_buffer_steps": (1, 10000, "int"),
+    "input_reorder": (0, 1, "float"),
+    "cost_floor": (None, None, "bool"),
+    "max_output_stock": (0, 1e9, "int"),
     "gov_min_rate": (0, 10, "float"),
     "gov_labor_purchase": (0, 1e6, "float"),
     "purchase_min": (1, 10, "float"),
@@ -278,6 +306,26 @@ def _number(value, name, low, high, whole=False):
             raise ValueError(f"{name} must be a whole number")
         return int(value)
     return float(value)
+
+
+def _recipes(value):
+    """Validate {good: {input good: units per unit of output}}. Replaces the whole table, so
+    sending {} makes every industry primary. A good can't be its own input."""
+    if not isinstance(value, dict) or set(value) - set(GOODS):
+        raise ValueError(f"inputs must map goods ({', '.join(GOODS)}) to their inputs")
+    recipes = {}
+    for good, recipe in value.items():
+        if isinstance(recipe, dict) and good in recipe:
+            raise ValueError(f"inputs.{good}: {good} can't be an input of itself")
+        allowed = [g for g in GOODS if g != good]
+        parsed = {k: v for k, v in _number_map(recipe, f"inputs.{good}", allowed, 0, 1e6, False).items() if v > 0}
+        if parsed:
+            recipes[good] = parsed
+    return recipes
+
+
+def is_primary(good, rules):
+    return not rules.inputs.get(good)
 
 
 def _number_map(values, name, names, low, high, whole):

@@ -5,7 +5,7 @@ Need scale reminder: 0.00 = satisfied, 1.00 = desperate.
 
 import math
 
-from .rules import DEFAULT_RULES, GOODS, LABOR, PRICED, RESOURCES
+from .rules import CONSUMABLES, DEFAULT_RULES, GOODS, LABOR, PRICED, RESOURCES
 
 # Which need each good relieves. Sleep is recovered by resting (modules/rest.py). Labour
 # relieves no need: it is bought by asset owners to make goods.
@@ -106,7 +106,10 @@ def need_level(agent, resource):
 
 
 def demand(agent, resource, rules=DEFAULT_RULES):
-    """Units the agent wants to buy: enough to drop the need below the target, minus stock."""
+    """Units the agent wants to buy: enough to drop the need below the target, minus stock.
+    0 for goods that relieve no need (raw materials)."""
+    if resource not in NEED_FOR_RESOURCE:
+        return 0
     level = getattr(agent, NEED_FOR_RESOURCE[resource])
     if level <= rules.seek_threshold:
         return 0
@@ -142,9 +145,24 @@ def stock_floor(rules=DEFAULT_RULES):
     return rules.stock_cap * rules.restock_below if rules.selling_enabled else 0
 
 
+def input_target(agent, resource, rules=DEFAULT_RULES):
+    """Units of ``resource`` the agent keeps as industry input: input_buffer_steps steps of what its
+    secondary industries use at full capacity (agent.output_capacity). 0 if it uses none."""
+    use = sum(cap * rules.inputs.get(g, {}).get(resource, 0) for g, cap in agent.output_capacity.items())
+    return math.ceil(round(use * rules.input_buffer_steps, 9)) if use > 0 else 0
+
+
+def input_shortfall(agent, resource, rules=DEFAULT_RULES):
+    """Units to buy to refill the input buffer, once stock fell below input_reorder of it."""
+    target = input_target(agent, resource, rules)
+    stock = agent.inventory.count(resource)
+    return target - stock if target and stock < target * rules.input_reorder else 0
+
+
 def restock_shortfall(agent, resource, rules=DEFAULT_RULES):
-    """Units of a good to buy to get back up to the cap, once its stock has fallen below the floor."""
-    if resource == LABOR:
+    """Units of a good to buy to get back up to the cap, once its stock has fallen below the floor.
+    Only for consumables: raw materials are bought as industry inputs (input_shortfall)."""
+    if resource not in CONSUMABLES:
         return 0
     stock = agent.inventory.count(resource)
     return rules.stock_cap - stock if rules.selling_enabled and stock < stock_floor(rules) else 0
@@ -154,15 +172,16 @@ def surplus(agent, resource, rules=DEFAULT_RULES, scarcity=None):
     """Units above the stock cap (and above any reserve) that the agent goes out to sell."""
     if not rules.selling_enabled:
         return 0
-    keep = max(rules.stock_cap, stockpile_target(agent, resource, rules, scarcity),
-               units_to_satisfy(need_level(agent, resource), rules))
+    cap = rules.stock_cap if resource in CONSUMABLES else 0   # raw: sell everything it doesn't use
+    keep = max(cap, stockpile_target(agent, resource, rules, scarcity),
+               units_to_satisfy(need_level(agent, resource), rules)) + input_target(agent, resource, rules)
     return max(0, agent.inventory.count(resource) - keep)
 
 
 def wants_to_buy(agent, resource, rules=DEFAULT_RULES, scarcity=None):
     """Needs ``resource`` now, is short of its scarcity reserve, or is below its stock floor."""
     return (demand(agent, resource, rules) > 0 or stockpile_shortfall(agent, resource, rules, scarcity) > 0
-            or restock_shortfall(agent, resource, rules) > 0)
+            or restock_shortfall(agent, resource, rules) > 0 or input_shortfall(agent, resource, rules) > 0)
 
 
 def stockpile_shortfall(agent, resource, rules=DEFAULT_RULES, scarcity=None):
@@ -173,13 +192,15 @@ def wants_anything(agent, rules=DEFAULT_RULES, scarcity=None):
     """Needs something now, or is below a stockpile reserve or its stock floor."""
     return (is_needy(agent, rules)
             or any(stockpile_shortfall(agent, r, rules, scarcity) or restock_shortfall(agent, r, rules)
-                   for r in RESOURCES))
+                   or input_shortfall(agent, r, rules) for r in RESOURCES))
 
 
 def spare(agent, resource, rules=DEFAULT_RULES, scarcity=None):
-    """Units the agent can give away without hurting its needs, its reserve or its stock floor."""
+    """Units the agent can give away without hurting its needs, its reserve, its stock floor
+    (consumables only) or the input buffer of its own industries."""
+    floor = math.ceil(stock_floor(rules)) if resource in CONSUMABLES else 0
     reserve = max(units_to_satisfy(need_level(agent, resource), rules),
-                  stockpile_target(agent, resource, rules, scarcity), math.ceil(stock_floor(rules)))
+                  stockpile_target(agent, resource, rules, scarcity), floor) + input_target(agent, resource, rules)
     return max(0, agent.inventory.count(resource) - reserve)
 
 
@@ -194,14 +215,15 @@ def _settle_one(buyer, seller, buying, prices, rules, scarcity=None, money_only=
     price = prices[buying]
     if money_only:
         return (None, price) if buyer.money >= price else None
-    needed_by_seller = [r for r in RESOURCES if r != buying and demand(seller, r, rules) > 0]
+    needed_by_seller = [r for r in RESOURCES if r != buying
+                        and (demand(seller, r, rules) > 0 or input_shortfall(seller, r, rules) > 0)]
     others = [r for r in RESOURCES if r != buying and r not in needed_by_seller]
     for option in needed_by_seller + ["money"] + others:
         if option == "money":
             if buyer.money >= price:
                 return None, price
             continue
-        if spare(buyer, option, rules, scarcity) == 0:
+        if option not in prices or spare(buyer, option, rules, scarcity) == 0:
             continue
         diff = price - prices[option]   # > 0: buyer tops up; < 0: seller gives change
         payer = buyer if diff > 0 else seller
@@ -245,7 +267,8 @@ def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, mar
     for resource in wants:
         need_goal = purchase_goal(buyer, resource, rules, rng)
         restock = rules.stock_cap if restock_shortfall(buyer, resource, rules) else 0
-        goal = max(need_goal, stockpile_target(buyer, resource, rules, scarcity), restock)
+        inputs = input_target(buyer, resource, rules) if input_shortfall(buyer, resource, rules) else 0
+        goal = max(need_goal, stockpile_target(buyer, resource, rules, scarcity), restock, inputs)
         markup = (markups or {}).get(resource, 0)
         while buyer.inventory.count(resource) < goal and spare(seller, resource, rules, scarcity) > 0:
             unit_price = prices[resource] * (1 + markup) ** bought.get(resource, 0)

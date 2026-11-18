@@ -2,7 +2,7 @@ import unittest
 
 from simulation import World, economy
 from simulation.report import bottom_share, build_report, gini, lorenz, top_share
-from simulation.rules import Rules
+from simulation.rules import GOODS, Rules
 
 CALM = {"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0}
 
@@ -25,7 +25,7 @@ class MeasureTests(unittest.TestCase):
 class RecorderTests(unittest.TestCase):
     def test_snapshot_counts_production_consumption_and_income(self):
         world = World(seed=1, rules=Rules.from_dict({"investing_enabled": False, "selling_enabled": False,
-                                                     "assets": {"food": 0, "water": 0, "games": 0},
+                                                     "assets": {g: 0 for g in GOODS}, "inputs": {},
                                                      "asset_labor": {"food": 1},
                                                      "labor_saving": {"food": 0, "water": 0, "games": 0},
                                                      "efficiency_weights": {"hunger": 0, "thirst": 0, "sleep": 0,

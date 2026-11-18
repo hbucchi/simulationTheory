@@ -1,16 +1,16 @@
 import unittest
 
 from simulation import World
-from simulation.rules import Rules
+from simulation.rules import GOODS, Rules
 
 CALM = {"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0}
-NO_ASSETS = {"food": 0, "water": 0, "games": 0}
+NO_ASSETS = {g: 0 for g in GOODS}
 FIXED = {"price_mode": "fixed", "demand_pricing_enabled": False,
          "fixed_prices": {"food": 1, "water": 1, "games": 1, "labor": 2}}
 
 
 def world_with(**rules):
-    return World(seed=1, rules=Rules.from_dict({"assets": NO_ASSETS, "investing_enabled": False, **rules}))
+    return World(seed=1, rules=Rules.from_dict({"inputs": {}, "assets": NO_ASSETS, "investing_enabled": False, **rules}))
 
 
 class MinimumRateTests(unittest.TestCase):
@@ -44,7 +44,7 @@ class LabourPurchaseTests(unittest.TestCase):
     def test_injection_grows_the_money_supply(self):
         # No assets: no employers, so the government hires spare capacity every step.
         world = World(seed=2, rules=Rules.from_dict({"agents": 10, "gov_labor_purchase": 1,
-                                                     "assets": {"food": 0, "water": 0, "games": 0}}))
+                                                     "assets": NO_ASSETS}))
         world.spawn_random_agents()
         start = sum(a.money for a in world.agents)
         for _ in range(100):

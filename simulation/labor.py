@@ -54,7 +54,7 @@ def wellbeing(agent, rules):
 
 def cost_of_living(agent, prices, rules):
     """Money per step the agent would spend buying all the goods it uses."""
-    return sum(economy.net_use(agent, g, rules) * prices[g] for g in economy.GOODS)
+    return sum(economy.net_use(agent, g, rules) * prices[g] for g in economy.CONSUMABLES)
 
 
 def general_need(agent, prices, rules):
@@ -78,12 +78,14 @@ class LaborMarket:
                 "gov_hired": 0.0, "unused": 0.0, "withheld": 0.0, "idle": 0.0, "hires": 0, "workers_hired": 0, "base_wage": 0.0, "pressure": 1.0}
 
     def base_wage(self, world, prices, jobs):
-        """labor_share x value of what one unit of labour makes, weighted by the jobs on offer."""
+        """labor_share x value added by one unit of labour (output minus the inputs it used),
+        weighted by the jobs on offer."""
         rules = world.rules
         weights = {g: jobs.get(g, 0) for g in economy.GOODS}
         if sum(weights.values()) <= 0:
             weights = {g: 1 for g in economy.GOODS}
-        value = sum(w * world.productivity_now[g] * prices[g] for g, w in weights.items()) / sum(weights.values())
+        value = sum(w * world.productivity_now[g] * world.value_added(g, prices)
+                    for g, w in weights.items()) / sum(weights.values())
         return rules.labor_share * value
 
     def clear(self, world):
@@ -99,8 +101,10 @@ class LaborMarket:
             a.wellbeing = wellbeing(a, rules)
             a.job_need = general_need(a, prices, rules)
             a.capacity_now = a.labor_capacity * a.efficiency
-            jobs = {g: world.asset_jobs(g, s) for g, s in a.assets.items() if g in economy.GOODS}
+            # Jobs its industries can actually use: secondary ones only as far as their inputs go.
+            jobs = {g: world.usable_jobs(a, g) for g in a.assets if g in economy.GOODS}
             a.labor_need = sum(jobs.values())
+            a.output_capacity = {g: world.asset_output(g, s) for g, s in a.assets.items() if g in economy.GOODS}
             for g, j in jobs.items():
                 jobs_by_good[g] = jobs_by_good.get(g, 0) + j
             own = min(a.capacity_now, a.labor_need)
@@ -158,7 +162,8 @@ class LaborMarket:
                     break
                 if worker is employer or remaining[worker] <= 1e-9:
                     continue
-                units = min(remaining[worker], want, budget / worker.asking_wage)
+                affordable = budget / worker.asking_wage if worker.asking_wage > 0 else remaining[worker]
+                units = min(remaining[worker], want, affordable)
                 self._hire(employer, worker, units, worker.asking_wage, stats)
                 remaining[worker] -= units
                 want -= units

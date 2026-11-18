@@ -1,10 +1,10 @@
 import unittest
 
 from simulation import World, labor
-from simulation.rules import Rules
+from simulation.rules import GOODS, Rules
 
 CALM = {"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0}
-NO_ASSETS = {"food": 0, "water": 0, "games": 0}
+NO_ASSETS = {g: 0 for g in GOODS}
 STATIC = {"labor_saving": {"food": 0, "water": 0, "games": 0},
           "productivity_growth": {"food": 0, "water": 0, "games": 0}}
 FIXED = {"price_mode": "fixed", "demand_pricing_enabled": False,
@@ -12,7 +12,7 @@ FIXED = {"price_mode": "fixed", "demand_pricing_enabled": False,
 
 
 def world_with(**rules):
-    return World(seed=1, rules=Rules.from_dict({"assets": NO_ASSETS, "investing_enabled": False,
+    return World(seed=1, rules=Rules.from_dict({"inputs": {}, "assets": NO_ASSETS, "investing_enabled": False,
                                                 "selling_enabled": False, **STATIC, **rules}))
 
 

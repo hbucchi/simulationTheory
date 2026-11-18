@@ -9,7 +9,7 @@ Agents are dots living in a 1024×1024 box. Each one has:
 |---|---|---|
 | `hunger`, `sleep`, `thirst`, `boredom` | float 0.00–1.00 | How strong the need is: 0.00 = satisfied, 1.00 = desperate. Always clamped. |
 | `money` | float | Balance (default 100). Tradable 1:1 like any resource. |
-| `inventory` | `Inventory` | food / water / games (default 100 each). |
+| `inventory` | `Inventory` | food / water / games (default 100 each) and the raw materials grain / wood (default 20 each). |
 | `movement` | int | Max pixels the agent can travel in one step. |
 | `x`, `y` | float | Position inside the box (0–1024). |
 
@@ -170,6 +170,53 @@ By default, for each good 10% of the agents own all its assets (drawn
 separately per good), so most agents are **workers** who live by selling
 labour.
 
+### Industries: primary and secondary
+
+Every good is made by its own **industry**; the industry's capital is that good's
+assets. There are two kinds:
+
+| Industry | Needs | Default |
+|---|---|---|
+| **Primary** (extraction) | capital (asset shares) + labour | water, grain, wood |
+| **Secondary** | capital + labour + **inputs** made by other industries | food (1 grain each), games (1 wood each) |
+
+Grain and wood are **raw materials**: no need is relieved by them, they only
+exist to be used up by secondary industries. Recipes are set on the setup screen
+(*Industries*), typed like `1 grain + 0.5 wood`; an empty recipe makes an
+industry primary. Any good can be an input of another (not of itself), so
+longer chains are possible.
+
+**Fixed proportions (Leontief).** Output is limited by whatever runs out first:
+
+    output = productivity x min(labour, shares x jobs per asset, labour the inputs allow)
+    labour the inputs allow = min over inputs (stock / units per output) / productivity
+
+Inputs are used up in matching fractions (0.5 grain per food works).
+
+- **Labour follows inputs.** The labour market only hires labour an industry can
+  actually use with the inputs in stock, so starved bakeries don't pay idle workers.
+- **Input buffers.** Owners of secondary industries keep `input_buffer_steps` (20)
+  steps of inputs at full capacity. Below `input_reorder` (half) of that they go
+  out to buy back up to it (activity *sourcing*, paid in money). Sellers never sell
+  into their own buffer.
+- **Raw materials have no stock band.** Agents that don't use them keep none:
+  producers go out and sell all of their grain and wood to agents that want it.
+- **Stop when unsold stock piles up.** An industry stops hiring while its owner
+  already holds `max_output_stock` (200) units of what it makes, so labour moves
+  to industries whose output is actually needed.
+- **Cost floor.** A secondary good never sells below its unit cost
+  (inputs at current prices + wage / productivity); without it, plentiful food could
+  end up cheaper than the grain it is made from. Switch it off with `cost_floor`.
+- **Asset prices count inputs.** Profit per step = output x (price - input cost)
+  - labour x wage, so a secondary industry selling at exactly its unit cost is worth $0.
+- **Extraction is less labour-intensive by default**: a grain or wood asset employs
+  0.1 labour (vs 0.2) and each unit of that labour extracts 2 units, so an asset
+  still makes 0.2 units per step with half the workers.
+
+The Overview tab lists every industry with its type, recipe, capacity, recent
+output, inputs used and asset price; cards show each owner's input buffers; the
+Report's production chart includes grain and wood ("Used" = used up as inputs).
+
 ### Investment
 
 - **No assets are created.** The only ones are the starting assets (*Starting
@@ -302,7 +349,22 @@ Needs Python 3.10+ and nothing else (standard library only).
 ```bash
 python3 server.py                    # http://localhost:8000, 3 agents
 python3 server.py --agents 10 --seed 42 --port 9000
+python3 server.py --lan              # also reachable from a phone on the same Wi-Fi
 ```
+
+### Playing on a phone (e.g. Samsung Galaxy S23)
+
+1. On your computer run `python3 server.py --lan`. It prints the address to open,
+   e.g. `On your phone (same Wi-Fi): http://192.168.1.23:8000`.
+2. On the phone (same Wi-Fi network) open that address in Chrome or Samsung Internet.
+3. Optional: browser menu -> *Add to Home screen* for a full-screen app icon.
+
+If the page doesn't load, allow Python through the computer's firewall for private
+networks. While `--lan` is on, anyone on that network can open and control the game.
+
+On narrow screens the play controls move to a bar at the bottom, the map's dots and
+labels grow so they stay readable and tappable, and the rules screen, tabs and
+report collapse to one column.
 
 In the page: **Step** (or →) for turn-based, **Play/Pause** (or Space) for
 timed steps at the chosen interval, **+100** to fast-forward, **Reset** to
@@ -340,7 +402,7 @@ simulation/distributions.py  fixed / uniform / normal / skewed per-agent values
 simulation/world.py       World: the box, agents, step loop, contacts, departures
 simulation/modules/       pluggable behaviours
     needs.py              NeedsDecay: needs grow every step
-    production.py         Production: +1 resource every N steps
+    production.py         Production: industries (assets) worked by labour, using inputs
     consume.py            Consume: eat/drink/play from own stock
     navigate.py           Navigate: leave / seek nearest / wander
 static/                   browser UI (canvas rendering); setup.js is the Game rules screen

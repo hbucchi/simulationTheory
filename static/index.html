@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#6c72f0">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
   <title>Agent Simulation</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -38,7 +42,7 @@
         <button data-view="report">Report</button>
       </nav>
       <div class="tick-pill">Step <span id="tick" class="mono">0</span></div>
-      <button id="open-setup" class="soft">Rules · New game</button>
+      <button id="open-setup" class="soft">Rules<span class="narrow-hide"> · New game</span></button>
     </div>
   </header>
 
@@ -228,11 +232,13 @@
 
       <section class="card report-card span-3">
         <h2 class="card-title">Production and consumption</h2>
-        <p class="card-sub">Units per step of each good, <span class="avg-note"></span> (same scale on all three).</p>
+        <p class="card-sub">Units per step of each good, <span class="avg-note"></span> (same scale on all of them). Raw materials are used up as industry inputs.</p>
         <div class="small-multiples">
           <div><h3 class="mini-title">Food</h3><div id="chart-flow-food"></div></div>
           <div><h3 class="mini-title">Water</h3><div id="chart-flow-water"></div></div>
           <div><h3 class="mini-title">Games</h3><div id="chart-flow-games"></div></div>
+          <div><h3 class="mini-title">Grain (raw)</h3><div id="chart-flow-grain"></div></div>
+          <div><h3 class="mini-title">Wood (raw)</h3><div id="chart-flow-wood"></div></div>
           <div><h3 class="mini-title">Totals in this window</h3><div id="table-flows"></div></div>
         </div>
       </section>
@@ -357,9 +363,9 @@
         </div>
         <p id="setup-status" class="status error" hidden></p>
         <div class="form-actions sticky">
-          <button type="button" id="setup-factory" class="ghost">Factory defaults</button>
+          <button type="button" id="setup-factory" class="ghost"><span class="narrow-hide">Factory </span>Defaults</button>
           <span class="spacer"></span>
-          <button type="button" id="setup-close" class="soft">Back to current game</button>
+          <button type="button" id="setup-close" class="soft">Back<span class="narrow-hide"> to current game</span></button>
           <button type="submit" class="primary">Start new game</button>
         </div>
       </form>

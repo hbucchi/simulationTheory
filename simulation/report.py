@@ -158,6 +158,7 @@ class Recorder:
             "deaths_thirst": sc["deaths_thirst"],
             "produced": produced,
             "consumed": {g: sum(f["consumed"].get(g, 0) for f in flows) for g in economy.GOODS},
+            "used": {g: sum(f["used"].get(g, 0) for f in flows) for g in economy.GOODS},   # as industry inputs
             # Labour: capacity (after efficiency), used on assets (own + hired), hired by the
             # government, unused (nobody bought it), and the wage.
             "labor_made": world.labor.stats["capacity"],
@@ -178,7 +179,8 @@ class Recorder:
 
 
 def new_flow():
-    return {"income": 0.0, "sources": {}, "produced": {}, "consumed": {}, "labor_made": 0.0, "labor_used": 0.0}
+    return {"income": 0.0, "sources": {}, "produced": {}, "consumed": {}, "used": {}, "labor_made": 0.0,
+            "labor_used": 0.0}
 
 
 def _average(snapshots):
@@ -218,6 +220,7 @@ def build_report(world, window=None):
         "deaths": sum(s["deaths"] for s in history),
         "produced": {g: sum(s["produced"][g] for s in history) for g in economy.GOODS},
         "consumed": {g: sum(s["consumed"][g] for s in history) for g in economy.GOODS},
+        "used": {g: sum(s.get("used", {}).get(g, 0) for s in history) for g in economy.GOODS},
         "labor_made": sum(s["labor_made"] for s in history),
         "labor_used": sum(s["labor_used"] for s in history),
         "labor_expired": sum(s["labor_expired"] for s in history),

@@ -2,7 +2,7 @@ import math
 import unittest
 
 from simulation import Agent, Inventory, World, economy
-from simulation.rules import Rules
+from simulation.rules import GOODS, Rules
 from simulation.modules import NeedsDecay
 
 
@@ -74,7 +74,7 @@ class EconomyTests(unittest.TestCase):
 
     def test_no_goods_means_zero_prices(self):
         self.assertEqual(economy.market_prices([Agent(0, 0, money=50)]),
-                         {"food": 0.0, "water": 0.0, "games": 0.0})
+                         {g: 0.0 for g in GOODS})
 
     def test_barter_settles_the_price_difference_in_money(self):
         a = Agent(0, 0, thirst=0.8, money=10, inventory=Inventory({"food": 20}))
@@ -117,10 +117,11 @@ class EconomyTests(unittest.TestCase):
 class ProductionTests(unittest.TestCase):
     def test_no_goods_without_assets(self):
         world = bare_world()
-        agent = world.create_agent(inventory={"food": 0, "water": 0, "games": 0}, labor_capacity=1)
+        agent = world.create_agent(inventory={g: 0 for g in GOODS}, labor_capacity=1,
+                                   assets={g: 0 for g in GOODS})
         for _ in range(9):
             world.step()
-        self.assertEqual(agent.inventory.to_dict(), {"food": 0, "water": 0, "games": 0})
+        self.assertEqual(agent.inventory.to_dict(), {g: 0 for g in GOODS})
 
 
 class ConfigurationTests(unittest.TestCase):
@@ -264,7 +265,8 @@ class WorldTests(unittest.TestCase):
     def test_default_agent_resources(self):
         world = bare_world()
         agent = world.create_agent()
-        self.assertEqual(agent.inventory.to_dict(), {"food": 100, "water": 100, "games": 100})
+        self.assertEqual(agent.inventory.to_dict(), {"food": 100, "water": 100, "games": 100,
+                                                     "grain": 20, "wood": 20})
         self.assertEqual(agent.money, 22500.0)
 
     def test_agents_stay_in_box_and_within_movement(self):
