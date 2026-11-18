@@ -331,7 +331,13 @@ function renderMarket() {
   if (state.rules.investing_enabled) {
     const inv = document.createElement("div");
     inv.className = "market-title invest";
-    inv.textContent = `Asset trades between agents: ${m.asset_trades} (${usd(m.asset_trade_money)})`;
+    const built = Object.entries(m.assets_built || {}).sort((a, b) => b[1] - a[1]);
+    const total = built.reduce((s, [, v]) => s + v, 0);
+    const projects = state.agents.filter(a => a.project).length;
+    inv.textContent = `Asset trades between agents: ${m.asset_trades} (${usd(m.asset_trade_money)}) · ` +
+      `new assets built from capital goods: ${total.toFixed(2)} shares` +
+      (built.length ? ` (${built.slice(0, 4).map(([g, v]) => `${label(g).toLowerCase()} ${v.toFixed(2)}`).join(", ")}` +
+        `${built.length > 4 ? ", …" : ""})` : "") + ` · ${projects} project${projects === 1 ? "" : "s"} under way`;
     ui.market.append(inv);
   }
   renderLaborCard();
@@ -362,12 +368,13 @@ function industryRow(g) {
   head.append(
     Object.assign(document.createElement("b"), { textContent: label(g) }),
     Object.assign(document.createElement("span"), { className: "sector", textContent: CATALOG_INFO[g].sector }),
+    ...(CATALOG_INFO[g].capital ? [Object.assign(document.createElement("span"), { className: "industry-tag secondary", textContent: "capital good" })] : []),
     Object.assign(document.createElement("span"), { className: "price", textContent: `${usd(m.prices[g])} ` }),
     Object.assign(document.createElement("span"), { className: `price-move ${arrow === "▲" ? "up" : arrow ? "down" : ""}`, textContent: arrow }));
   head.title = `Price = base ${usd(m.base_prices[g])} × ${mult.toFixed(2)} (demand ${m.pressure[g].toFixed(2)}: ` +
     `${m.buyers[g]} want / ${m.sellers[g]} sell · concentration ${m.concentration_factor[g].toFixed(2)})`;
   const life = state.rules.expiry_enabled ? state.rules.shelf_life[g] : 0;
-  const relieves = effectsText(info.effects);
+  const relieves = CATALOG_INFO[g].capital ? "capital good: new assets are built from it" : effectsText(info.effects);
   const flows = ["produced_recent", "consumed_recent", "used_recent", "expired_recent"].map(k => m[k]?.[g] || 0);
   const detail = Object.assign(document.createElement("div"), { className: "industry-stats", textContent:
     `${recipeText(g)} · ${relieves} · ${life ? `keeps ${life} steps` : "never expires"}` });
@@ -378,6 +385,15 @@ function industryRow(g) {
   numbers.title = `Averages over the last 20 steps. Capacity ${m.asset_output[g].toFixed(2)}/step when fully staffed; ` +
     `productivity ${m.productivity[g].toFixed(2)} units per labour.`;
   row.append(head, detail, numbers);
+  const cost = Object.entries(state.rules.build_cost[g] || {});
+  if (state.rules.building_enabled && cost.length) {
+    const money = m.build_cost_money?.[g];
+    const q = money ? m.asset_prices[g] / money : 0;
+    row.append(Object.assign(document.createElement("div"), { className: "industry-stats", textContent:
+      `New asset: ${cost.map(([k, n]) => `${+n.toFixed(2)} ${label(k).toLowerCase()}`).join(" + ")}` +
+      (money ? ` (${usd(money)}; worth ${q.toFixed(1)}× that)` : " (can't be built in this game)") +
+      (m.assets_built?.[g] ? ` · ${m.assets_built[g].toFixed(2)} built` : "") }));
+  }
   if (m.stockpiling[g]) row.append(Object.assign(document.createElement("span"), { className: "badge", textContent: "agents stockpiling" }));
   return row;
 }
@@ -557,6 +573,10 @@ function renderAgents() {
           `${(a.assets[r] * state.market.asset_output_each[r]).toFixed(2)}/step)`,
           `One whole ${r} asset costs ${usd(price)} now`];
       }),
+      // Building project: capital goods held / needed.
+      ...(a.project ? [["building", `${a.project.shares.toFixed(2)} ${label(a.project.good).toLowerCase()} asset(s): ` +
+        Object.entries(a.project.need).map(([k, n]) => `${label(k).toLowerCase()} ${Math.min(a.inventory[k] ?? 0, n)}/${n}`).join(", "),
+        `Started at step ${a.project.started}; dropped after ${state.rules.project_steps} steps`]] : []),
       // Inputs its secondary industries keep in stock.
       ...Object.entries(a.input_target || {}).map(([r, n]) => [`${label(r).toLowerCase()} input buffer`, n,
         `Keeps ${n} ${r} for its industries; buys more when below ${Math.round(n * state.rules.input_reorder)}`]),
@@ -583,6 +603,7 @@ function renderAgents() {
       : a.activity === "stockpiling" && target ? `stockpiling ${a.seeking_for} from ${target.name}`
       : a.activity === "restocking" && target ? `restocking ${a.seeking_for} from ${target.name}`
       : a.activity === "sourcing" && target ? `buying ${a.seeking_for} for its industries from ${target.name}`
+      : a.activity === "building" && target ? `buying ${a.seeking_for} from ${target.name} to build ${a.project?.good} assets`
       : a.activity === "hiring" && target ? `hiring labour from ${target.name}`
       : a.activity === "selling" && target ? `selling ${a.seeking_for} to ${target.name}`
       : a.activity === "searching" ? `searching: nobody sells anything for ${a.wants.join(" or ")}`

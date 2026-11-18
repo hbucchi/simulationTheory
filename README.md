@@ -9,7 +9,7 @@ Agents are dots living in a 1024×1024 box. Each one has:
 |---|---|---|
 | `hunger`, `sleep`, `thirst`, `boredom`, `health`, `energy`, `shelter` | float 0.00–1.00 | How strong the need is: 0.00 = satisfied, 1.00 = desperate. Always clamped. |
 | `money` | float | Balance (default 100). Tradable 1:1 like any resource. |
-| `inventory` | `Inventory` | units of any of the 35 goods (see *Industry catalog*); goods with a shelf life are kept as dated batches that expire. |
+| `inventory` | `Inventory` | units of any of the 36 goods (see *Industry catalog*); goods with a shelf life are kept as dated batches that expire. |
 | `movement` | int | Max pixels the agent can travel in one step. |
 | `x`, `y` | float | Position inside the box (0–1024). |
 
@@ -175,7 +175,7 @@ labour.
 ### Industry catalog, layers and expiry
 
 Every good is made by its own **industry**, whose capital is that good's assets.
-`simulation/catalog.py` defines 35 industries named after the TRBC sectors and
+`simulation/catalog.py` defines 36 industries named after the TRBC sectors and
 industries that investing.com's screener uses (Energy, Basic Materials,
 Industrials, Consumer Cyclicals, Consumer Non-Cyclicals, Healthcare, Technology,
 Telecommunications, Utilities, Real Estate):
@@ -184,7 +184,7 @@ Telecommunications, Utilities, Real Estate):
 |---|---|
 | 1 extraction | grain, livestock, water, timber, crude oil, natural gas, coal, metal ore, stone & sand, medicinal herbs |
 | 2 | food, meat, beverages, beer/wine/spirits, electricity, fuel, steel, chemicals, lumber, cement, textiles, toys & games |
-| 3 | packaged meals, fast food, plastics, pharmaceuticals, machinery, housing, apparel |
+| 3 | packaged meals, fast food, plastics, pharmaceuticals, machinery, construction, housing, apparel |
 | 4 | electronics, medical devices |
 | 5 | telecom services, media, healthcare services |
 | 6 | software & IT |
@@ -239,6 +239,36 @@ units are logged). Starting stock is spread over ages so it doesn't all expire o
 same step. Agents only stock a perishable good up to what they would consume in 80%
 of its shelf life. Turn expiry off with `expiry_enabled`.
 
+**Capital goods and building new capacity.** Industries no longer only change hands:
+new asset shares can be **built** out of capital goods.
+
+- Capital-goods industries: **machinery** (Industrials, layer 3: steel + coal) and
+  **construction** (Construction & Engineering, layer 3: cement + steel + lumber);
+  **electronics** doubles as technology equipment. Their plants (and **housing**'s)
+  have about a tenth of the usual capacity per asset (`asset_labor` 0.02 / 0.05 jobs per
+  share), so capital and homes are made slowly, while labour per unit stays normal for
+  their layer.
+- `build_cost[g]`: capital goods per new share of industry g. Defaults: extraction
+  2 machinery + 1 construction; layers 2–3: 3 machinery + 2 construction; deeper:
+  2 machinery + 2 construction + 2 electronics; technology services (telecom, media,
+  healthcare, software): 2 construction + 3 electronics; housing: 2 construction + 1 machinery.
+- **Build module**: an investor with spare cash (same cash rules as investing) compares
+  each industry's asset value with what its capital goods cost now (Tobin's q). If the
+  best q ≥ `build_min_q` (1) and those capital goods are actually for sale (not already
+  claimed by other projects), it starts a project for up to 1 share, goes out to buy the
+  goods (activity *building*; it never sells them), and once it holds them all turns them
+  into new shares. Projects unfinished after `project_steps` (300) are dropped. While it has
+  a project it doesn't buy existing shares.
+- Capital-goods makers keep at least 5 units ready for builders before they pause
+  production. Building compounds: new machinery plants raise machinery output, which
+  speeds up further building. In a 30-agent game about 100 new shares (roughly as many
+  as existed at the start) get built over 1,600 steps; 3-agent games build ~20.
+- Sellers now walk toward a buyer coming for their goods before going on any shopping
+  trip of their own (otherwise sellers busy building could not be caught).
+
+The market panel tags capital goods, shows each industry's build cost and q, and totals
+the assets built; agent cards show a project's progress.
+
 **Production** is fixed proportions (Leontief): output is limited by whatever runs
 out first: labour, capital (asset shares × jobs per asset) or inputs.
 
@@ -268,8 +298,8 @@ the same relief in the best remaining good). With these defaults, games of 3, 10
 
 ### Investment
 
-- **No assets are created.** The only ones are the starting assets (*Starting
-  agents*, any distribution). They only change hands between agents, as
+- **Existing assets** are the starting ones (*Starting agents*, any distribution)
+  plus whatever gets built from capital goods (see *Capital goods*). They change hands between agents, as
   **shares** (0.5 of a food asset employs half as much labour).
 - **Asset price = profit per step at full capacity ÷ return** (1%), where
   profit = output × price of the good − labour × wage, never below 0. A dearer
@@ -447,12 +477,12 @@ python3 -m unittest discover -s tests
 server.py                 local HTTP server + JSON API (see the docstring at the top)
 simulation/agent.py       Agent class (properties, movement helper)
 simulation/inventory.py   Inventory class
-simulation/catalog.py     the 35 industries: sector, recipe, effects on needs, shelf life, defaults
+simulation/catalog.py     the 36 industries: sector, recipe, effects on needs, shelf life, defaults
 simulation/economy.py     needs, consumption and trading rules
 simulation/rules.py       Rules: every game-wide setting chosen on the setup screen
 simulation/distributions.py  fixed / uniform / normal / skewed per-agent values
 simulation/world.py       World: the box, agents, step loop, contacts, departures
-simulation/modules/       pluggable behaviours
+simulation/modules/       pluggable behaviours (build.py: new assets from capital goods)
     needs.py              NeedsDecay: needs grow every step
     production.py         Production: industries (assets) worked by labour, using inputs
     consume.py            Consume: eat/drink/play from own stock

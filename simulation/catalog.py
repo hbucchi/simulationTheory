@@ -19,6 +19,11 @@ Each entry:
   shelf_life steps a unit lasts before it is thrown away (0 = never expires)
   productivity  (optional) units per unit of labour, for industries more labour-intensive than
              their layer's default (deeper layers need less labour per unit, see rules.py)
+  capital    (optional) True for capital goods: what new assets (industry capacity) are built from
+             (machinery, construction). Electronics also serves as technology equipment.
+  asset_labor (optional) jobs per asset share, for industries whose plants make very little per
+             step: capital goods and housing get about a tenth of the usual capacity per asset,
+             so building new capital or homes takes time (labour per unit stays normal).
   stock      default starting units per agent
   plan       share of its main need an average agent is expected to cover with this good (used to size
              the default industries; the shares of a need's goods add up to 1)
@@ -91,10 +96,14 @@ CATALOG = [
     {"id": "pharmaceuticals", "label": "Pharmaceuticals", "sector": "Healthcare", "industry": "Pharmaceuticals",
      "inputs": {"chemicals": 0.5, "herbs": 0.5}, "effects": {"health": 1.0}, "shelf_life": 800, "stock": 5, "shares": 0.02, "plan": 0.5},
     {"id": "machinery", "label": "Machinery", "sector": "Industrials", "industry": "Machinery, Equipment & Components",
-     "inputs": {"steel": 1.0, "electricity": 0.3}, "effects": {}, "shelf_life": 0, "stock": 0, "shares": 0.02, "plan": 0},
+     "inputs": {"steel": 1.0, "coal": 0.3}, "effects": {}, "shelf_life": 0, "stock": 0, "shares": 0.1, "plan": 0,
+     "capital": True, "asset_labor": 0.02},
+    {"id": "construction", "label": "Construction", "sector": "Industrials", "industry": "Construction & Engineering",
+     "inputs": {"cement": 1.0, "steel": 0.5, "lumber": 0.5}, "effects": {}, "shelf_life": 0, "stock": 0,
+     "shares": 0.1, "plan": 0, "capital": True, "asset_labor": 0.02},
     {"id": "housing", "label": "Housing", "sector": "Real Estate", "industry": "Homebuilding & Construction Supplies",
      "inputs": {"lumber": 0.5, "cement": 1.0, "steel": 0.3}, "effects": {"shelter": 1.0, "health": 0.1, "energy": 0.1}, "shelf_life": 0,
-     "stock": 5, "shares": 0.02, "plan": 0.5, "productivity": 4.0},
+     "stock": 5, "shares": 0.05, "plan": 0.5, "productivity": 4.0, "asset_labor": 0.05},
     {"id": "apparel", "label": "Apparel", "sector": "Consumer Cyclicals", "industry": "Apparel & Accessories",
      "inputs": {"textiles": 1.0, "electricity": 0.1}, "effects": {"shelter": 0.5, "boredom": 0.1}, "shelf_life": 3000, "stock": 5,
      "shares": 0.02, "plan": 0.3},
@@ -125,6 +134,24 @@ CATALOG = [
 ]
 
 BY_ID = {entry["id"]: entry for entry in CATALOG}
+
+CAPITAL_GOODS = tuple(e["id"] for e in CATALOG if e.get("capital"))
+
+# Services that run on technology rather than machinery.
+TECH_SERVICES = ("telecom", "media", "healthcare", "software")
+
+
+def default_build_cost(good, layer):
+    """Capital goods needed to build one new asset share of ``good``'s industry."""
+    if good in TECH_SERVICES:
+        return {"construction": 2.0, "electronics": 3.0}
+    if good == "housing":
+        return {"construction": 2.0, "machinery": 1.0}
+    if layer == 1:
+        return {"machinery": 2.0, "construction": 1.0}
+    if layer <= 3:
+        return {"machinery": 3.0, "construction": 2.0}
+    return {"machinery": 2.0, "construction": 2.0, "electronics": 2.0}
 
 SECTORS = ("Energy", "Basic Materials", "Industrials", "Consumer Cyclicals", "Consumer Non-Cyclicals",
            "Healthcare", "Technology", "Telecommunications", "Utilities", "Real Estate")

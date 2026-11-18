@@ -94,6 +94,7 @@ class Agent:
         # Smoothed per-step income and consumption (for income / consumption inequality).
         self.income_avg = 0.0
         self.consumption_avg = 0.0
+        self.project = None      # building project (Build): {"good", "shares", "need", "started"}
         self.target_id = None
         self.seeking_for = None  # resource it is going to buy from target_id (Navigate)
         self.depart_heading = 0.0  # radians
@@ -158,6 +159,7 @@ class Agent:
             "color": self.color,
             "activity": self.activity,
             "target_id": self.target_id,
+            "project": self.project,
             "seeking_for": self.seeking_for,
             # Needs above the seek threshold that goods can relieve.
             "wants": [n for n in rules.consumer_needs if getattr(self, n) > rules.seek_threshold],

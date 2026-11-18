@@ -11,7 +11,7 @@ each new agent is drawn from; see distributions.py.
 from dataclasses import asdict, dataclass, field, fields
 
 from . import distributions
-from .catalog import BY_ID, CATALOG
+from .catalog import BY_ID, CAPITAL_GOODS, CATALOG, default_build_cost
 
 GOODS = tuple(e["id"] for e in CATALOG)   # every good; each is made by its own industry (assets)
 # Default split (a game's rules can change what each good does, see Rules.effects):
@@ -156,7 +156,8 @@ class Rules:
     # employs 0.1 labour and each unit of it extracts 4 units; other assets employ 0.2 labour
     # making 2 units each. Every asset makes 0.4 units per step when fully staffed. (Seven needs
     # served by 33 industries need about twice the output per worker of the old 3-good economy.)
-    asset_labor: dict = field(default_factory=lambda: {g: 0.1 if _DEFAULT_LAYERS[g] == 1 else 0.2 for g in GOODS})
+    asset_labor: dict = field(default_factory=lambda: {g: BY_ID[g].get("asset_labor", 0.1 if _DEFAULT_LAYERS[g] == 1 else 0.2)
+                                                       for g in GOODS})
     productivity: dict = field(default_factory=lambda: {g: default_productivity(g, _DEFAULT_LAYERS[g]) for g in GOODS})
     productivity_growth: dict = field(default_factory=lambda: {g: 0.05 for g in GOODS})
     productivity_growth_steps: int = 50
@@ -176,6 +177,16 @@ class Rules:
     # Industries deeper than industry_layers (1-10, chosen when the game starts) don't exist in
     # this game: nobody owns, holds or makes their goods.
     industry_layers: int = max(_DEFAULT_LAYERS.values())
+    # Building new capacity. New asset shares of industry g are built from capital goods:
+    # build_cost[g] = {capital good: units per share} (machinery, construction, electronics).
+    # An investor starts a project when an existing asset is worth at least build_min_q times
+    # what building one costs (Tobin's q), buys the capital goods (activity "building"), and
+    # turns them into new shares once it holds them all. Projects not finished within
+    # project_steps are dropped (the goods bought so far stay with the agent).
+    building_enabled: bool = True
+    build_cost: dict = field(default_factory=lambda: {g: default_build_cost(g, _DEFAULT_LAYERS[g]) for g in GOODS})
+    build_min_q: float = 1.0
+    project_steps: int = 300
     # Expiry: a unit of good g is thrown away shelf_life[g] steps after it was made (0 = never).
     expiry_enabled: bool = True
     shelf_life: dict = field(default_factory=lambda: {e["id"]: e["shelf_life"] for e in CATALOG})
@@ -355,6 +366,8 @@ class Rules:
             low, high, kind = LIMITS[key]
             if kind == "recipes":
                 setattr(rules, key, _recipes(value))
+            elif kind == "build_cost":
+                setattr(rules, key, {**rules.build_cost, **_build_costs(value)})
             elif kind == "effects":
                 setattr(rules, key, _effects(value))
             elif kind == "map":
@@ -457,6 +470,10 @@ LIMITS = {
     "inputs": (None, None, "recipes"),
     "input_buffer_steps": (1, 10000, "int"),
     "industry_layers": (1, MAX_LAYERS, "int"),
+    "building_enabled": (None, None, "bool"),
+    "build_cost": (None, None, "build_cost"),
+    "build_min_q": (0, 100, "float"),
+    "project_steps": (1, 100000, "int"),
     "layer_bonus": (0, 10, "float"),
     "effects": (None, None, "effects"),
     "expiry_enabled": (None, None, "bool"),
@@ -514,6 +531,7 @@ def _recipes(value):
 # Default industries get this many times the capacity an average agent's needs take.
 SIZING_HEADROOM = 2.0
 MIN_DEFAULT_SHARES = 0.02
+CAPITAL_DEFAULT_SHARES = 0.1   # capital industries: no consumers, but new capacity is built from them
 
 
 def demand_sized_shares(rules):
@@ -545,8 +563,17 @@ def demand_sized_shares(rules):
         if g not in units or per_share <= 0:
             shares[g] = 0.0
         else:
-            shares[g] = round(max(MIN_DEFAULT_SHARES, units[g] * SIZING_HEADROOM / per_share), 2)
+            least = CAPITAL_DEFAULT_SHARES if g in CAPITAL_GOODS else MIN_DEFAULT_SHARES
+            shares[g] = round(max(least, units[g] * SIZING_HEADROOM / per_share), 2)
     return shares
+
+
+def _build_costs(value):
+    """Validate {good: {capital good: units per share}}. Goods sent replace their own cost."""
+    if not isinstance(value, dict) or set(value) - set(GOODS):
+        raise ValueError("build_cost must map goods to {capital good: units per share}")
+    return {good: {k: v for k, v in _number_map(cost, f"build_cost.{good}", GOODS, 0, 1e6, False).items() if v > 0}
+            for good, cost in value.items()}
 
 
 def _effects(value):

@@ -118,8 +118,14 @@ const SETUP_SECTIONS = [
       "TRBC classification used by investing.com). Layer 1 industries extract (capital + labour); an industry that uses " +
       "layer-n goods is layer n + 1. Industries deeper than the number of layers chosen here don't exist in this game. " +
       "A unit relieves its need by base relief × fit × (1 + layer bonus × (layer − 1)), so deeper layers address needs " +
-      "better. Every unit is thrown away once it is older than its shelf life.", fields: [
+      "better. Every unit is thrown away once it is older than its shelf life. New industry capacity is built from capital " +
+      "goods (machinery, construction), which are made very slowly, so building takes time.", fields: [
     { path: "industry_layers", label: "Industry layers in this game (1–10)", kind: "int", min: 1, max: 10, full: true },
+    { path: "building_enabled", label: "Investors build new assets from capital goods", kind: "bool", full: true },
+    { path: "build_min_q", label: "Build when an asset is worth ≥ (× its cost)", kind: "float", min: 0, step: 0.1,
+      enabledWhen: v => v.building_enabled },
+    { path: "project_steps", label: "Drop unfinished projects after (steps)", kind: "int", min: 1,
+      enabledWhen: v => v.building_enabled },
     { path: "layer_bonus", label: "Extra relief per layer (0.5 = +50%)", kind: "float", min: 0, max: 10, step: 0.1 },
     { path: "expiry_enabled", label: "Goods expire after their shelf life", kind: "bool" },
     { path: "input_buffer_steps", label: "Owners keep inputs for (steps)", kind: "int", min: 1, max: 10000 },
@@ -134,13 +140,15 @@ const SETUP_SECTIONS = [
   { title: "Industry catalog", wide: true, hint: "One block per industry. Recipe: what one unit uses (e.g. “1 grain”; " +
       "empty = extraction). Effects: what consuming one unit does to each need, from −1 (harms) to +1 (fully relieves); " +
       "a good can help several needs and hurt others (fast food: hunger +, boredom +, health −). Benefits grow with the " +
-      "layer, harm doesn't; sleep can only be harmed. Shelf life in steps (0 = never " +
+      "layer, harm doesn't; sleep can only be harmed. New asset share costs: the capital goods (machinery, construction, " +
+      "electronics) one new share of this industry is built from. Shelf life in steps (0 = never " +
       "expires). Jobs per asset × units per labour = what one asset makes per step when fully staffed.", fields:
     GOODS.flatMap(g => {
       const e = CATALOG_INFO[g];
       const group = `${e.label} · layer ${catalogLayer(g)} · ${e.sector} · ${e.industry}`;
       return [
         { path: `inputs.${g}`, label: "Uses per unit", kind: "recipe", full: true, group },
+        { path: `build_cost.${g}`, label: "New asset share costs", kind: "recipe", full: true, group, allowSelf: true },
         ...NEEDS.map(n => ({ path: `effects.${g}.${n}`, label: `Effect on ${n}`, kind: "float", group, optional: true,
           min: -1, max: n === "sleep" ? 0 : 1, step: 0.05, placeholder: "0" })),
         { path: `shelf_life.${g}`, label: "Shelf life (steps)", kind: "int", min: 0, group },
@@ -240,7 +248,7 @@ function formatRecipe(recipe) {
   return Object.entries(recipe || {}).map(([g, q]) => `${+Number(q).toFixed(4)} ${g}`).join(" + ");
 }
 
-function parseRecipe(text, good) {
+function parseRecipe(text, good, allowSelf = false) {
   const recipe = {};
   for (const part of text.split("+").map(p => p.trim()).filter(Boolean)) {
     let amount, name, m;
@@ -250,7 +258,7 @@ function parseRecipe(text, good) {
     if (!input || !GOODS.includes(input)) {
       throw new Error(`${label(good)} recipe: “${part}” isn't a good — use amounts of goods by id, e.g. “1 grain + 0.5 natural_gas”`);
     }
-    if (input === good) throw new Error(`${label(good)} can't be an input of itself`);
+    if (input === good && !allowSelf) throw new Error(`${label(good)} can't be an input of itself`);
     const qty = amount === undefined ? 1 : Number(amount);
     if (!(qty >= 0)) throw new Error(`${label(good)} recipe: amount of ${input} must be ≥ 0`);
     if (qty > 0) recipe[input] = (recipe[input] || 0) + qty;
@@ -584,7 +592,7 @@ function readSetup() {
       const el = setupInput(f.path);
       if (f.kind === "bool") value = el.checked;
       else if (f.kind === "choice") value = el.value;
-      else if (f.kind === "recipe") value = parseRecipe(el.value, f.path.split(".")[1]);
+      else if (f.kind === "recipe") value = parseRecipe(el.value, f.path.split(".")[1], f.allowSelf);
       else {
         if (el.value === "") {
           if (f.optional) continue;
@@ -650,7 +658,7 @@ function updateSetup() {
     el.closest("label").classList.toggle("disabled", !!off);
     if (f.kind === "recipe") {
       let now = null;
-      try { now = parseRecipe(el.value, f.path.split(".")[1]); } catch { /* reported in the preview */ }
+      try { now = parseRecipe(el.value, f.path.split(".")[1], f.allowSelf); } catch { /* reported in the preview */ }
       el.classList.toggle("changed", formatRecipe(now) !== formatRecipe(factory));
       continue;
     }

@@ -8,11 +8,12 @@ from itertools import islice
 from . import distributions, economy
 from .agent import Agent
 from .inventory import Inventory
-from .modules import Consume, Invest, Mood, Navigate, NeedsDecay, Production, Rest
+from .modules import Build, Consume, Invest, Mood, Navigate, NeedsDecay, Production, Rest
 from .government import Government
 from .labor import LaborMarket
 from .modules.invest import cash_needed, transfer_shares
 from .report import Recorder
+from .catalog import CAPITAL_GOODS
 from .rules import NEEDS, SPREADS, Rules
 
 # Soft but distinguishable colours, matching the UI palette.
@@ -26,6 +27,7 @@ class World:
     # [-MAX_TURN, +MAX_TURN]: a 180-degree window that never points back at them.
     MAX_TURN = math.radians(90)
     PRICE_HISTORY = 200  # steps of price history kept for the charts
+    CAPITAL_STOCK = 5    # units of a capital good its makers keep ready for builders (usable_jobs)
 
     def __init__(self, width=1024, height=1024, seed=None, rules=None):
         self.width = width
@@ -45,6 +47,7 @@ class World:
         self.recorder = Recorder()  # per-step snapshots for the Report view
         self._dead_flows = []       # flows of agents that died this step (still counted)
         self.asset_trades = 0        # purchases of asset shares between agents
+        self.assets_built = {}       # good -> new asset shares built from capital goods (Build)
         self.asset_trade_money = 0.0
         # Units of each good one unit of labour makes right now (grows every step), and labour
         # one asset share employs right now (shrinks every step with labour-saving progress).
@@ -113,6 +116,7 @@ class World:
                    NeedsDecay({**{n: draw(v, field="rates") for n, v in r.rates.items()}, **(rates or {})}),
                    Production(),
                    Consume()]
+        modules.append(Build())
         modules.append(Invest())
         if r.depression_enabled:
             modules.append(Mood())
@@ -223,7 +227,8 @@ class World:
             wanted = [r for r in self.rules.active_goods
                       if economy.stockpile_shortfall(agent, r, self.rules, self.scarcity) > 0
                       or economy.restock_shortfall(agent, r, self.rules) > 0
-                      or economy.input_shortfall(agent, r, self.rules) > 0]
+                      or economy.input_shortfall(agent, r, self.rules) > 0
+                      or economy.project_shortfall(agent, r) > 0]
             wanted.sort(key=lambda r: self.scarcity[r], reverse=True)
         else:
             # Most pressing need first; any good that relieves it will do, so the nearest agent
@@ -314,7 +319,10 @@ class World:
         if rules.max_output_stock and held >= rules.max_output_stock:
             return 0.0
         if rules.output_buffer_steps:
-            buffer = max(1.0, self.asset_output(good, shares) * rules.output_buffer_steps)
+            # Capital goods are made so slowly that a few steps' output is less than one project
+            # needs; their makers keep at least CAPITAL_STOCK units on hand for builders.
+            least = self.CAPITAL_STOCK if good in CAPITAL_GOODS else 1.0
+            buffer = max(least, self.asset_output(good, shares) * rules.output_buffer_steps)
             if held >= buffer + economy.input_target(agent, good, rules):
                 return 0.0
         jobs = self.asset_jobs(good, shares)
@@ -329,6 +337,15 @@ class World:
         productivity x (price - inputs). 0 if none of its industries can use labour now."""
         return max((self.productivity_now[g] * self.value_added(g, prices)
                     for g in agent.assets if self.usable_jobs(agent, g) > 0), default=0.0)
+
+    def build_cost_money(self, good, prices=None):
+        """Money the capital goods for one new asset share of ``good`` cost at current prices
+        (None if one of them doesn't exist in this game, so it can't be built)."""
+        prices = prices or self.step_prices or self.current_prices()
+        cost = self.rules.build_cost.get(good, {})
+        if not cost or any(not self.rules.is_active(k) for k in cost):
+            return None
+        return sum(units * prices[k] for k, units in cost.items())
 
     def update_profitability(self):
         """Which industries pay at current prices: value added by one unit of labour
@@ -621,6 +638,8 @@ class World:
                 "consumed_recent": self.recent_flow("consumed"),
                 "labor": self.labor.to_dict(),
                 "asset_trades": self.asset_trades,
+                "assets_built": self.assets_built,
+                "build_cost_money": {g: self.build_cost_money(g) for g in self.rules.active_goods},
                 "asset_trade_money": self.asset_trade_money,
                 # Average units per agent over the scarcity window (oldest first) and how much it fell.
                 "per_agent_history": {r: list(h) for r, h in self.per_agent_history.items()},

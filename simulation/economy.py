@@ -262,6 +262,16 @@ def input_target(agent, resource, rules=DEFAULT_RULES):
     return math.ceil(round(use * rules.input_buffer_steps, 9)) if use > 0 else 0
 
 
+def project_need(agent, resource):
+    """Units of ``resource`` the agent's building project needs in total (0 without a project)."""
+    return agent.project["need"].get(resource, 0) if agent.project else 0
+
+
+def project_shortfall(agent, resource):
+    """Units of ``resource`` still to buy for the agent's building project."""
+    return max(0, project_need(agent, resource) - agent.inventory.count(resource))
+
+
 def input_shortfall(agent, resource, rules=DEFAULT_RULES):
     """Units to buy to refill the input buffer, once stock fell below input_reorder of it."""
     target = input_target(agent, resource, rules)
@@ -312,13 +322,15 @@ def surplus(agent, resource, rules=DEFAULT_RULES, scarcity=None):
     if need:
         keep = _kept_for_need(agent, resource, band_relief(agent, need, rules) + _need_gap(agent, resource, rules), rules)
     keep = max(keep, stockpile_target(agent, resource, rules, scarcity)) + input_target(agent, resource, rules)
+    keep += project_need(agent, resource)
     return max(0, agent.inventory.count(resource) - keep)
 
 
 def wants_to_buy(agent, resource, rules=DEFAULT_RULES, scarcity=None):
     """Needs ``resource`` now, is short of its scarcity reserve, below its stock floor, or short of inputs."""
     return (demand(agent, resource, rules) > 0 or stockpile_shortfall(agent, resource, rules, scarcity) > 0
-            or restock_shortfall(agent, resource, rules) > 0 or input_shortfall(agent, resource, rules) > 0)
+            or restock_shortfall(agent, resource, rules) > 0 or input_shortfall(agent, resource, rules) > 0
+            or project_shortfall(agent, resource) > 0)
 
 
 def stockpile_shortfall(agent, resource, rules=DEFAULT_RULES, scarcity=None):
@@ -329,7 +341,7 @@ def wants_anything(agent, rules=DEFAULT_RULES, scarcity=None):
     """Needs something now, or is below a stockpile reserve, its stock floor or an input buffer."""
     return (is_needy(agent, rules)
             or any(stockpile_shortfall(agent, r, rules, scarcity) or restock_shortfall(agent, r, rules)
-                   or input_shortfall(agent, r, rules) for r in rules.active_goods))
+                   or input_shortfall(agent, r, rules) or project_shortfall(agent, r) for r in rules.active_goods))
 
 
 def spare(agent, resource, rules=DEFAULT_RULES, scarcity=None):
@@ -341,6 +353,7 @@ def spare(agent, resource, rules=DEFAULT_RULES, scarcity=None):
         wanted = max(band_relief(agent, need, rules, rules.restock_below), _need_gap(agent, resource, rules))
         keep = _kept_for_need(agent, resource, wanted, rules)
     keep = max(keep, stockpile_target(agent, resource, rules, scarcity)) + input_target(agent, resource, rules)
+    keep += project_need(agent, resource)
     return max(0, agent.inventory.count(resource) - keep)
 
 
@@ -419,7 +432,8 @@ def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, mar
         shortfall = restock_shortfall(buyer, resource, rules)
         restock = buyer.inventory.count(resource) + shortfall if shortfall else 0
         inputs = input_target(buyer, resource, rules) if input_shortfall(buyer, resource, rules) else 0
-        goal = max(need_goal, stockpile_target(buyer, resource, rules, scarcity), restock, inputs)
+        goal = max(need_goal, stockpile_target(buyer, resource, rules, scarcity), restock, inputs,
+                   project_need(buyer, resource))
         markup = (markups or {}).get(resource, 0)
         while buyer.inventory.count(resource) < goal and spare(seller, resource, rules, scarcity) > 0:
             unit_price = prices[resource] * (1 + markup) ** bought.get(resource, 0)

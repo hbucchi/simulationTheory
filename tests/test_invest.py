@@ -138,7 +138,8 @@ class InvestTests(unittest.TestCase):
         self.assertNotIn("food", investor.assets)
 
     def test_money_and_assets_are_conserved(self):
-        world = World(seed=2, rules=Rules.from_dict({"agents": 15}))
+        # Building turns capital goods into new shares, so it is off here.
+        world = World(seed=2, rules=Rules.from_dict({"agents": 15, "building_enabled": False}))
         world.spawn_random_agents()
         money = sum(a.money for a in world.agents)
         assets = {r: sum(a.assets.get(r, 0) for a in world.agents) for r in economy.RESOURCES}

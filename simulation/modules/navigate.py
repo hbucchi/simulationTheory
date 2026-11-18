@@ -19,6 +19,7 @@ class Navigate(Module):
                    becoming scarce: go to the nearest agent with spare of it.
         restocking  - same, because its stock fell below the floor of its stock band.
         sourcing    - same, because its secondary industries are running low on inputs.
+        building    - same, buying capital goods for a project to build new assets (Build).
     3. meeting   - another agent is seeking this one: walk toward that seeker,
                    so both close the gap and are guaranteed to touch.
     3b. selling  - holds more than the stock cap of a good, or labour beyond what its own
@@ -60,6 +61,12 @@ class Navigate(Module):
                 self._go_to(agent, "seeking", seller, world)
                 return
         else:
+            # A buyer coming for its goods beats any shopping trip of its own: a seller that is
+            # always off restocking, sourcing or building can't be caught, and its buyers starve.
+            seekers = world.seekers_of(agent)
+            if seekers:
+                self._go_to(agent, "meeting", min(seekers, key=agent.distance_to), world)
+                return
             seller, resource = world.nearest_seller(agent, stockpile=True)
             if seller is not None:
                 agent.seeking_for = resource
@@ -67,7 +74,9 @@ class Navigate(Module):
                 # back up to the cap after falling below the floor.
                 hoarding = economy.stockpile_shortfall(agent, resource, world.rules, world.scarcity) > 0
                 sourcing = economy.input_shortfall(agent, resource, world.rules) > 0
-                activity = "stockpiling" if hoarding else "sourcing" if sourcing else "restocking"
+                building = economy.project_shortfall(agent, resource) > 0
+                activity = ("stockpiling" if hoarding else "building" if building
+                            else "sourcing" if sourcing else "restocking")
                 self._go_to(agent, activity, seller, world)
                 return
         seekers = world.seekers_of(agent)
