@@ -232,13 +232,9 @@
 
       <section class="card report-card span-3">
         <h2 class="card-title">Production and consumption</h2>
-        <p class="card-sub">Units per step of each good, <span class="avg-note"></span> (same scale on all of them). Raw materials are used up as industry inputs.</p>
+        <p class="card-sub">Units per step of the goods in each industry layer, <span class="avg-note"></span> (same scale on all of them). "Used" = consumed for needs + used up as industry inputs; "expired" = thrown away past its shelf life.</p>
+        <div class="small-multiples" id="flow-layers"></div>
         <div class="small-multiples">
-          <div><h3 class="mini-title">Food</h3><div id="chart-flow-food"></div></div>
-          <div><h3 class="mini-title">Water</h3><div id="chart-flow-water"></div></div>
-          <div><h3 class="mini-title">Games</h3><div id="chart-flow-games"></div></div>
-          <div><h3 class="mini-title">Grain (raw)</h3><div id="chart-flow-grain"></div></div>
-          <div><h3 class="mini-title">Wood (raw)</h3><div id="chart-flow-wood"></div></div>
           <div><h3 class="mini-title">Totals in this window</h3><div id="table-flows"></div></div>
         </div>
       </section>
@@ -372,6 +368,7 @@
     </div>
   </section>
 
+  <script src="catalog.js"></script>
   <script src="app.js"></script>
   <script src="setup.js"></script>
   <script src="report.js"></script>

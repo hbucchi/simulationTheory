@@ -7,9 +7,9 @@ Agents are dots living in a 1024×1024 box. Each one has:
 
 | Property | Type | Meaning |
 |---|---|---|
-| `hunger`, `sleep`, `thirst`, `boredom` | float 0.00–1.00 | How strong the need is: 0.00 = satisfied, 1.00 = desperate. Always clamped. |
+| `hunger`, `sleep`, `thirst`, `boredom`, `health`, `energy`, `shelter` | float 0.00–1.00 | How strong the need is: 0.00 = satisfied, 1.00 = desperate. Always clamped. |
 | `money` | float | Balance (default 100). Tradable 1:1 like any resource. |
-| `inventory` | `Inventory` | food / water / games (default 100 each) and the raw materials grain / wood (default 20 each). |
+| `inventory` | `Inventory` | units of any of the 33 goods (see *Industry catalog*); goods with a shelf life are kept as dated batches that expire. |
 | `movement` | int | Max pixels the agent can travel in one step. |
 | `x`, `y` | float | Position inside the box (0–1024). |
 
@@ -51,10 +51,12 @@ the toolbar starts over with the same rules.
 Every step each agent runs its modules in this order:
 
 1. **NeedsDecay** – needs rise each step (defaults: hunger +0.010, sleep +0.005,
-   thirst +0.015, boredom +0.008; configurable per agent).
+   thirst +0.015, boredom +0.008, health +0.003, energy +0.004, shelter +0.002;
+   configurable per agent).
 2. **Production** – labour from the agent; goods only from its assets, worked by labour (see below).
-3. **Consume** – a need above **0.5** is fed from own stock until it is **below 0.3**.
-   1 food = −0.1 hunger, 1 water = −0.1 thirst, 1 game = −0.1 boredom.
+3. **Consume** – a need above **0.5** is fed from own stock until it is **below 0.3**,
+   using the most effective goods for that need first (e.g. hunger: packaged meals
+   0.20 per unit, then food or meat 0.15, then raw grain or livestock 0.06).
 4. **Navigate** – in priority order:
    - *leaving*: just traded, walk away.
    - *seeking*: a need is still above 0.5 because stock ran out. Every step,
@@ -135,7 +137,7 @@ sellers, C, an arrow and a price chart.
 **Labour is a capacity, not a stock** (`simulation/labor.py`). Each step every
 agent can work up to `labor_capacity` (0.5 by default) × its efficiency. Labour
 is never stored: it is sold in the labour market that step, and anything nobody
-buys is lost. Food, water and games are made **only by assets**, worked by
+buys is lost. Goods are made **only by assets** (each industry's capital), worked by
 labour:
 
     output of a good = productivity × min(labour available, shares × labour per asset)
@@ -170,52 +172,76 @@ By default, for each good 10% of the agents own all its assets (drawn
 separately per good), so most agents are **workers** who live by selling
 labour.
 
-### Industries: primary and secondary
+### Industry catalog, layers and expiry
 
-Every good is made by its own **industry**; the industry's capital is that good's
-assets. There are two kinds:
+Every good is made by its own **industry**, whose capital is that good's assets.
+`simulation/catalog.py` defines 33 industries named after the TRBC sectors and
+industries that investing.com's screener uses (Energy, Basic Materials,
+Industrials, Consumer Cyclicals, Consumer Non-Cyclicals, Healthcare, Technology,
+Telecommunications, Utilities, Real Estate):
 
-| Industry | Needs | Default |
-|---|---|---|
-| **Primary** (extraction) | capital (asset shares) + labour | water, grain, wood |
-| **Secondary** | capital + labour + **inputs** made by other industries | food (1 grain each), games (1 wood each) |
+| Layer | Industries |
+|---|---|
+| 1 extraction | grain, livestock, water, timber, crude oil, natural gas, coal, metal ore, stone & sand, medicinal herbs |
+| 2 | food, meat, beverages, electricity, fuel, steel, chemicals, lumber, cement, textiles, toys & games |
+| 3 | packaged meals, plastics, pharmaceuticals, machinery, housing, apparel |
+| 4 | electronics, medical devices |
+| 5 | telecom services, media, healthcare services |
+| 6 | software & IT |
 
-Grain and wood are **raw materials**: no need is relieved by them, they only
-exist to be used up by secondary industries. Recipes are set on the setup screen
-(*Industries*), typed like `1 grain + 0.5 wood`; an empty recipe makes an
-industry primary. Any good can be an input of another (not of itself), so
-longer chains are possible.
+**Layers come from the recipes.** A primary industry (no inputs) is layer 1;
+an industry that uses layer-n goods is layer n + 1. Up to 10 layers are allowed.
+**`industry_layers`** (1–10, chosen on the setup screen before a game starts)
+removes every industry deeper than that: nobody owns, holds or makes its goods.
 
-**Fixed proportions (Leontief).** Output is limited by whatever runs out first:
+**Needs and effectiveness.** Each good can relieve one need (`satisfies`: need +
+fit 0–1); almost all can be consumed, a few are pure inputs (ore, steel, cement,
+plastics, machinery). One unit relieves
 
-    output = productivity x min(labour, shares x jobs per asset, labour the inputs allow)
-    labour the inputs allow = min over inputs (stock / units per output) / productivity
+    relief_per_unit × fit × (1 + layer_bonus × (layer − 1))     (layer_bonus 0.5)
 
-Inputs are used up in matching fractions (0.5 grain per food works).
+so deeper industries address needs better: water (layer 1) 0.10 thirst,
+beverages (layer 2) 0.15; herbs 0.06 health, pharmaceuticals (layer 3) 0.20,
+healthcare services (layer 5) 0.30. The needs map to sectors: hunger → food,
+thirst → water/beverages, boredom → leisure products, media, telecom, software,
+health → healthcare, energy → utilities and fuels, shelter → housing and apparel.
 
-- **Labour follows inputs.** The labour market only hires labour an industry can
-  actually use with the inputs in stock, so starved bakeries don't pay idle workers.
-- **Input buffers.** Owners of secondary industries keep `input_buffer_steps` (20)
-  steps of inputs at full capacity. Below `input_reorder` (half) of that they go
-  out to buy back up to it (activity *sourcing*, paid in money). Sellers never sell
-  into their own buffer.
-- **Raw materials have no stock band.** Agents that don't use them keep none:
-  producers go out and sell all of their grain and wood to agents that want it.
-- **Stop when unsold stock piles up.** An industry stops hiring while its owner
-  already holds `max_output_stock` (200) units of what it makes, so labour moves
-  to industries whose output is actually needed.
-- **Cost floor.** A secondary good never sells below its unit cost
-  (inputs at current prices + wage / productivity); without it, plentiful food could
-  end up cheaper than the grain it is made from. Switch it off with `cost_floor`.
-- **Asset prices count inputs.** Profit per step = output x (price - input cost)
-  - labour x wage, so a secondary industry selling at exactly its unit cost is worth $0.
-- **Extraction is less labour-intensive by default**: a grain or wood asset employs
-  0.1 labour (vs 0.2) and each unit of that labour extracts 2 units, so an asset
-  still makes 0.2 units per step with half the workers.
+Agents buy for a **need**, not a good: they go to the nearest agent with any good
+for their most pressing need, and buy the good with the most relief per dollar.
+Demand and the stock band count the relief from every good the agent already holds
+for that need, so buying meals doesn't also trigger buying bread.
 
-The Overview tab lists every industry with its type, recipe, capacity, recent
-output, inputs used and asset price; cards show each owner's input buffers; the
-Report's production chart includes grain and wood ("Used" = used up as inputs).
+**Expiry.** Every good has a shelf life in steps (0 = never): services barely keep
+(electricity 20, telecom and healthcare 25, media 40), fresh food a little longer
+(meat 50, herbs 100, meals 150, food 200), processed goods much longer (beverages
+600, grain 800, pharmaceuticals 800, fuel 1,500, apparel 3,000), and raw materials
+and durable goods never expire. Units are kept as dated batches: the oldest are used
+first, a trade passes on their dates, and anything past its date is thrown away at
+the start of each step (counted in the market panel and the report; losses of 5+
+units are logged). Starting stock is spread over ages so it doesn't all expire on the
+same step. Agents only stock a perishable good up to what they would consume in 80%
+of its shelf life. Turn expiry off with `expiry_enabled`.
+
+**Production** is fixed proportions (Leontief): output is limited by whatever runs
+out first: labour, capital (asset shares × jobs per asset) or inputs.
+
+- The labour market only hires labour an industry can use with the inputs in stock.
+- Owners of secondary industries keep `input_buffer_steps` (20) steps of inputs and go
+  out to buy more (activity *sourcing*) below `input_reorder` (half) of that.
+- **Produce to demand**: an industry stops working while its owner holds more than
+  `output_buffer_steps` (30) steps of its output (or `max_output_stock`, 200 units).
+- **Cost floor**: a secondary good never sells below the cost of its inputs.
+- Optional: `profit_check` (stop hiring when labour costs more than it adds) and
+  `labor_priority` = `value` (labour goes to the most valuable industries first).
+  Both are off by default: while prices adjust they starved agents of cheap essentials.
+
+**Default calibration.** Seven needs served by 33 industries take more output per
+worker than the old 3-good economy: layer-1 assets employ 0.1 labour extracting 4
+units each, other assets 0.2 labour making 2 units each. Default industry sizes are
+sized to demand: each need is split over its goods (e.g. thirst 70% water, 30%
+beverages), the inputs are added down the layers, and each industry gets twice the
+capacity that takes. With these defaults, games of 3, 10 and 30 agents run 1,500
+steps without anyone starving.
 
 ### Investment
 
@@ -312,11 +338,13 @@ labour bought and the effect on prices.
 
 ### Stock band
 
-Agents keep between the floor (50) and the cap (100) units of each resource.
-Above the cap they go out to **sell** the surplus to agents that want it, to
-make money; below the floor they go out to **restock** back up to the cap,
-paying in money. They never sell below the floor. Between floor and cap they
-keep what they have, which also stops assets going back and forth.
+For each need, agents keep enough goods to cover **`stock_steps` (100) steps** of
+that need's own growth (e.g. hunger at 0.01/step: 1.0 of relief, about 7 food or 17
+grain), and restock when they fall below half of that (`restock_below`). Goods
+above it are surplus they go out to **sell**. They never sell below the floor.
+Goods that relieve no need are never kept for the band: producers sell all of them.
+(The band used to be "100 units of each good"; with many goods per need and expiry
+that hoarded raw grain as food and let perishables rot.)
 
 ### Prices
 
@@ -396,7 +424,8 @@ python3 -m unittest discover -s tests
 server.py                 local HTTP server + JSON API (see the docstring at the top)
 simulation/agent.py       Agent class (properties, movement helper)
 simulation/inventory.py   Inventory class
-simulation/economy.py     resources, consumption and trading rules
+simulation/catalog.py     the 33 industries: sector, recipe, need relieved, shelf life, defaults
+simulation/economy.py     needs, consumption and trading rules
 simulation/rules.py       Rules: every game-wide setting chosen on the setup screen
 simulation/distributions.py  fixed / uniform / normal / skewed per-agent values
 simulation/world.py       World: the box, agents, step loop, contacts, departures

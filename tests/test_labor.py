@@ -1,9 +1,9 @@
 import unittest
 
 from simulation import World, labor
-from simulation.rules import GOODS, Rules
+from simulation.rules import GOODS, NEEDS, Rules
+from tests.classic import CALM, CLASSIC
 
-CALM = {"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0}
 NO_ASSETS = {g: 0 for g in GOODS}
 STATIC = {"labor_saving": {"food": 0, "water": 0, "games": 0},
           "productivity_growth": {"food": 0, "water": 0, "games": 0}}
@@ -12,7 +12,7 @@ FIXED = {"price_mode": "fixed", "demand_pricing_enabled": False,
 
 
 def world_with(**rules):
-    return World(seed=1, rules=Rules.from_dict({"inputs": {}, "assets": NO_ASSETS, "investing_enabled": False,
+    return World(seed=1, rules=Rules.from_dict({**CLASSIC, "assets": NO_ASSETS, "investing_enabled": False,
                                                 "selling_enabled": False, **STATIC, **rules}))
 
 
@@ -32,7 +32,8 @@ class CapacityModuleTests(unittest.TestCase):
         rules = Rules()
         agent = World(seed=1).create_agent(needs=CALM)
         self.assertEqual(labor.wellbeing(agent, rules), 1)
-        agent.hunger = agent.thirst = agent.sleep = agent.boredom = 0.5
+        for need in NEEDS:
+            setattr(agent, need, 0.5)
         self.assertAlmostEqual(labor.wellbeing(agent, rules), 0.5)
 
     def test_general_need_grows_when_short_of_money_or_in_need(self):
@@ -112,7 +113,8 @@ class LabourMarketTests(unittest.TestCase):
 
 class LabourSavingTests(unittest.TestCase):
     def test_industries_need_less_labour_per_asset_over_time(self):
-        world = World(seed=1, rules=Rules.from_dict({"asset_labor": {"food": 1}, "labor_saving": {"food": 0.03},
+        world = World(seed=1, rules=Rules.from_dict({"asset_labor": {"food": 1}, "productivity": {"food": 1},
+                                                     "labor_saving": {"food": 0.03},
                                                      "productivity_growth": {"food": 0.05}, "productivity_growth_steps": 50}))
         for _ in range(50):
             world.grow_assets()

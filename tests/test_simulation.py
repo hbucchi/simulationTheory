@@ -2,15 +2,17 @@ import math
 import unittest
 
 from simulation import Agent, Inventory, World, economy
+from simulation.catalog import CATALOG
 from simulation.rules import GOODS, Rules
 from simulation.modules import NeedsDecay
+from tests.classic import CALM, CLASSIC
 
 
 def no_invest():
     """These tests check other mechanics: no assets (their output would change needs), no
     asset purchases (log lines, spent money) and no surplus selling (changes where agents walk)."""
-    return Rules.from_dict({"investing_enabled": False, "selling_enabled": False,
-                            "assets": {"food": 0, "water": 0, "games": 0}})
+    return Rules.from_dict({**CLASSIC, "investing_enabled": False, "selling_enabled": False,
+                            "assets": {g: 0 for g in GOODS}})
 
 
 def bare_world():
@@ -263,19 +265,19 @@ class EditingTests(unittest.TestCase):
 
 class WorldTests(unittest.TestCase):
     def test_default_agent_resources(self):
-        world = bare_world()
+        world = World(seed=1)
         agent = world.create_agent()
-        self.assertEqual(agent.inventory.to_dict(), {"food": 100, "water": 100, "games": 100,
-                                                     "grain": 20, "wood": 20})
+        self.assertEqual({g: agent.inventory.count(g) for g in GOODS}, {e["id"]: e["stock"] for e in CATALOG})
         self.assertEqual(agent.money, 22500.0)
 
     def test_agents_stay_in_box_and_within_movement(self):
         world = World(rules=no_invest(), seed=7)
         world.spawn_random_agents(3)
         for _ in range(500):
-            before = [(a.x, a.y) for a in world.agents]
+            before = {a: (a.x, a.y) for a in world.agents}
             world.step()
-            for (bx, by), a in zip(before, world.agents):
+            for a in world.agents:   # (an agent that died this step is no longer listed)
+                bx, by = before[a]
                 self.assertTrue(0 <= a.x <= world.width and 0 <= a.y <= world.height)
                 self.assertLessEqual(math.hypot(a.x - bx, a.y - by), a.movement + 1e-9)
 
@@ -401,13 +403,18 @@ class WorldTests(unittest.TestCase):
 
 class EstateTests(unittest.TestCase):
     def test_dead_agents_goods_and_assets_go_to_the_nearest_buyer(self):
-        world = World(seed=1, rules=Rules.from_dict({"investing_enabled": False, "selling_enabled": False}))
-        calm = {"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0}
+        world = World(seed=1, rules=Rules.from_dict({**CLASSIC, "investing_enabled": False, "selling_enabled": False}))
+        calm = CALM
         dying = world.create_agent(x=500, y=500, needs={**calm, "thirst": 1.0}, rates=calm, money=0,
-                                   inventory={"food": 5, "water": 0, "games": 10}, assets={"food": 1, "water": 0, "games": 0})
-        near = world.create_agent(x=510, y=500, needs=calm, rates=calm, inventory={"food": 0, "water": 10, "games": 10})
-        far = world.create_agent(x=900, y=900, needs=calm, rates=calm, inventory={"food": 0, "water": 10, "games": 10})
-        poor = world.create_agent(x=505, y=500, needs=calm, rates=calm, money=0, inventory={"food": 0, "water": 10, "games": 10})
+                                   inventory={**{g: 0 for g in GOODS}, "food": 5, "games": 10},
+                                   assets={**{g: 0 for g in GOODS}, "food": 1})
+        none = {g: 0 for g in GOODS}
+        near = world.create_agent(x=510, y=500, needs=calm, rates=calm, assets=none,
+                                  inventory={"food": 0, "water": 10, "games": 10})
+        far = world.create_agent(x=900, y=900, needs=calm, rates=calm, assets=none,
+                                 inventory={"food": 0, "water": 10, "games": 10})
+        poor = world.create_agent(x=505, y=500, needs=calm, rates=calm, money=0, assets=none,
+                                  inventory={"food": 0, "water": 10, "games": 10})
         before = near.money
         world.step()
         self.assertNotIn(dying, world.agents)

@@ -1,9 +1,10 @@
 import unittest
 
 from simulation import World, economy
+from simulation.catalog import CATALOG
 from simulation.rules import GOODS, Rules, is_primary
+from tests.classic import CALM, CLASSIC
 
-CALM = {"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0}
 NO_ASSETS = {g: 0 for g in GOODS}
 NO_STOCK = {g: 0 for g in GOODS}
 
@@ -20,7 +21,8 @@ def world_with(**rules):
 class RecipeTests(unittest.TestCase):
     def test_default_recipes(self):
         rules = Rules()
-        self.assertEqual(rules.inputs, {"food": {"grain": 1.0}, "games": {"wood": 1.0}})
+        self.assertEqual(rules.inputs, {e["id"]: e["inputs"] for e in CATALOG if e["inputs"]})
+        self.assertEqual(rules.inputs["food"], {"grain": 1.0})
         self.assertTrue(is_primary("grain", rules) and is_primary("wood", rules) and is_primary("water", rules))
         self.assertFalse(is_primary("food", rules) or is_primary("games", rules))
 
@@ -97,10 +99,20 @@ class InputTradingTests(unittest.TestCase):
     def test_baker_keeps_its_inputs_and_farmer_sells_all_raw(self):
         world = world_with(selling_enabled=True)
         baker = self.make_baker(world, 30)
-        farmer = world.create_agent(needs=CALM, inventory={**NO_STOCK, "grain": 30})
+        farmer = world.create_agent(needs=CALM, rates=CALM, inventory={**NO_STOCK, "grain": 30})
         self.assertEqual(economy.spare(baker, "grain", world.rules), 10)    # keeps its 20-unit buffer
-        self.assertEqual(economy.spare(farmer, "grain", world.rules), 30)   # no stock floor for raw
+        self.assertEqual(economy.spare(farmer, "grain", world.rules), 30)   # no need for it: sells it all
         self.assertEqual(economy.surplus(farmer, "grain", world.rules), 30)
+        # Grain also feeds people (0.06 per unit): with hunger growing 0.01/step an agent keeps the
+        # floor of its 100-step band, 0.5 of relief = 9 grain.
+        eater = world.create_agent(needs=CALM, rates={**CALM, "hunger": 0.01}, inventory={**NO_STOCK, "grain": 30})
+        self.assertEqual(economy.spare(eater, "grain", world.rules), 21)
+
+    def test_pure_inputs_are_never_kept_for_needs(self):
+        world = world_with(selling_enabled=True)
+        miner = world.create_agent(needs=CALM, inventory={**NO_STOCK, "ore": 30})
+        self.assertIsNone(world.rules.need_of("ore"))
+        self.assertEqual(economy.spare(miner, "ore", world.rules), 30)
 
     def test_short_baker_buys_inputs_from_farmer(self):
         world = world_with(price_mode="fixed", demand_pricing_enabled=False)
@@ -113,13 +125,13 @@ class InputTradingTests(unittest.TestCase):
 
 
 class PricingTests(unittest.TestCase):
-    def test_secondary_good_never_sells_below_unit_cost(self):
+    def test_secondary_good_never_sells_below_its_inputs(self):
         world = world_with()
-        world.create_agent(needs=CALM, inventory={"food": 1000, "water": 10, "games": 10, "grain": 1, "wood": 10})
+        world.create_agent(needs=CALM, inventory={**NO_STOCK, "food": 1000, "water": 10, "games": 10, "grain": 1, "wood": 10})
         world.labor.wage = 5.0
         prices = world.current_prices()
         # food is plentiful, grain scarce: the scarcity price alone would put food below grain.
-        self.assertAlmostEqual(prices["food"], prices["grain"] * 1 + 5.0 / 1)
+        self.assertAlmostEqual(prices["food"], prices["grain"] * 1)
         world.rules.cost_floor = False
         self.assertLess(world.current_prices()["food"], prices["grain"])
 

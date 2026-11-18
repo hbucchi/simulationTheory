@@ -2,15 +2,15 @@ import unittest
 
 from simulation import World
 from simulation.rules import GOODS, Rules
+from tests.classic import CALM, CLASSIC
 
-CALM = {"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0}
 NO_ASSETS = {g: 0 for g in GOODS}
 FIXED = {"price_mode": "fixed", "demand_pricing_enabled": False,
          "fixed_prices": {"food": 1, "water": 1, "games": 1, "labor": 2}}
 
 
 def world_with(**rules):
-    return World(seed=1, rules=Rules.from_dict({"inputs": {}, "assets": NO_ASSETS, "investing_enabled": False, **rules}))
+    return World(seed=1, rules=Rules.from_dict({**CLASSIC, "assets": NO_ASSETS, "investing_enabled": False, **rules}))
 
 
 class MinimumRateTests(unittest.TestCase):

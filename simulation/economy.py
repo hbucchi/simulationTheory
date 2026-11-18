@@ -5,11 +5,12 @@ Need scale reminder: 0.00 = satisfied, 1.00 = desperate.
 
 import math
 
-from .rules import CONSUMABLES, DEFAULT_RULES, GOODS, LABOR, PRICED, RESOURCES
+from .rules import DEFAULT_RULES, GOODS, LABOR, PRICED, RESOURCES
 
-# Which need each good relieves. Sleep is recovered by resting (modules/rest.py). Labour
-# relieves no need: it is bought by asset owners to make goods.
-NEED_FOR_RESOURCE = {"food": "hunger", "water": "thirst", "games": "boredom"}
+# Which need a good relieves, and how much one unit relieves, come from the game's Rules
+# (rules.need_of / rules.relief / rules.goods_for): several goods can relieve the same need,
+# and goods from deeper industry layers relieve more per unit. Sleep is recovered by resting
+# (modules/rest.py). Labour relieves no need: it is bought by asset owners to make goods.
 
 # A need reaching this level has consequences: hunger/thirst -> death, boredom -> depression.
 CRITICAL_LEVEL = 1.0
@@ -37,23 +38,31 @@ def market_prices(agents, rules=DEFAULT_RULES):
     if rules.price_mode == "fixed":
         return dict(rules.fixed_prices)
     money = sum(a.money for a in agents)
-    units = {r: sum(a.inventory.count(r) for a in agents) for r in RESOURCES}
+    units = dict.fromkeys(RESOURCES, 0)
+    for a in agents:   # whole units, as Inventory.count would give, without a call per good
+        for r, n in a.inventory.items.items():
+            if r in units:
+                units[r] += n
+        for r, n in a.inventory.totals.items():
+            units[r] += int(n + 1e-9)
     total = sum(units.values())
     if total == 0:
         return {r: 0.0 for r in RESOURCES}
     return {r: money / total * (1 - units[r] / total) for r in RESOURCES}
 
 
-def units_to_satisfy(level, rules=DEFAULT_RULES):
-    """Units needed to bring a need strictly below the target level (0 if already below)."""
-    if level < rules.target_level:
+def units_to_satisfy(level, rules=DEFAULT_RULES, per_unit=None):
+    """Units (each relieving ``per_unit``, by default relief_per_unit) needed to bring a need
+    strictly below the target level (0 if already below)."""
+    per_unit = rules.relief_per_unit if per_unit is None else per_unit
+    if level < rules.target_level or per_unit <= 0:
         return 0
     # round() guards against float noise such as 0.6 - 0.3 = 0.29999999999999993
-    return math.floor(round((level - rules.target_level) / rules.relief_per_unit, 9)) + 1
+    return math.floor(round((level - rules.target_level) / per_unit, 9)) + 1
 
 
 def transfer(giver, receiver, resource, qty=1):
-    """Move ``qty`` units. Perishable units (labour) keep their expiry date, oldest given first."""
+    """Move ``qty`` units. Perishable units keep their expiry date, oldest given first."""
     if resource in giver.inventory.perishable:
         for expires, units in giver.inventory.take(resource, qty):
             receiver.inventory.add(resource, units, expires=expires)
@@ -76,53 +85,103 @@ def pay(payer, payee, amount):
     earn(payee if amount > 0 else payer, abs(amount), "goods")
 
 
+def held_relief(agent, need, rules=DEFAULT_RULES):
+    """How much of ``need`` the agent's stock could relieve: units x relief over every good for it."""
+    return sum(agent.inventory.count(g) * rules.relief(g) for g in rules.goods_for(need))
+
+
 def consume(agent, rules=DEFAULT_RULES):
-    """Eat/drink/play from own stock for every need above the seek threshold.
+    """Consume from own stock for every need above the seek threshold, most effective good first
+    (deeper industry layers relieve more per unit), until the need is below the target.
 
     Returns {resource: units consumed}.
     """
     eaten = {}
-    for resource, need in NEED_FOR_RESOURCE.items():
+    for need in rules.consumer_needs:
         level = getattr(agent, need)
         if level <= rules.seek_threshold:
             continue
-        units = min(units_to_satisfy(level, rules), agent.inventory.count(resource))
-        if units:
-            agent.inventory.remove(resource, units)
-            setattr(agent, need, level - units * rules.relief_per_unit)
-            agent.flow["consumed"][resource] = agent.flow["consumed"].get(resource, 0) + units
-            eaten[resource] = units
+        for good in rules.goods_for(need):
+            if level < rules.target_level:
+                break
+            per_unit = rules.relief(good)
+            units = min(units_to_satisfy(level, rules, per_unit), agent.inventory.count(good))
+            if units:
+                agent.inventory.remove(good, units)
+                level -= units * per_unit
+                agent.flow["consumed"][good] = agent.flow["consumed"].get(good, 0) + units
+                eaten[good] = units
+        setattr(agent, need, level)
     return eaten
 
 
 def is_needy(agent, rules=DEFAULT_RULES):
-    """True when some resource-backed need is above the threshold (stock already used up)."""
-    return any(getattr(agent, need) > rules.seek_threshold for need in NEED_FOR_RESOURCE.values())
+    """True when a need some good can relieve is above the threshold (stock already used up)."""
+    return any(getattr(agent, need) > rules.seek_threshold for need in rules.consumer_needs)
 
 
-def need_level(agent, resource):
-    """How strong the need behind ``resource`` is (0 for labour, which has none)."""
-    return getattr(agent, NEED_FOR_RESOURCE[resource]) if resource in NEED_FOR_RESOURCE else 0.0
+def need_level(agent, resource, rules=DEFAULT_RULES):
+    """How strong the need behind ``resource`` is (0 for goods that relieve none, and labour)."""
+    need = rules.need_of(resource)
+    return getattr(agent, need) if need else 0.0
 
 
 def demand(agent, resource, rules=DEFAULT_RULES):
-    """Units the agent wants to buy: enough to drop the need below the target, minus stock.
-    0 for goods that relieve no need (raw materials)."""
-    if resource not in NEED_FOR_RESOURCE:
+    """Units of ``resource`` the agent would need to buy to bring its need below the target,
+    after what its stock of every good for that need can relieve. 0 when the need is below the
+    seek threshold, and for goods that relieve no need (pure industry inputs)."""
+    need = rules.need_of(resource)
+    if not need:
         return 0
-    level = getattr(agent, NEED_FOR_RESOURCE[resource])
+    level = getattr(agent, need)
     if level <= rules.seek_threshold:
         return 0
-    return max(0, units_to_satisfy(level, rules) - agent.inventory.count(resource))
+    return units_to_satisfy(level - held_relief(agent, need, rules), rules, rules.relief(resource))
 
 
 def net_use(agent, resource, rules=DEFAULT_RULES):
-    """Units of a good the agent uses per step beyond what its assets make (0 for labour)."""
-    if resource not in NEED_FOR_RESOURCE:
+    """Units of a good the agent would use per step if it relied on this good alone for its
+    need, beyond what its assets make (0 for goods relieving no need, and labour)."""
+    need = rules.need_of(resource)
+    if not need:
         return 0.0
     rates = next((m.rates for m in agent.modules if hasattr(m, "rates")), {})
-    used = rates.get(NEED_FOR_RESOURCE[resource], 0) / rules.relief_per_unit
+    used = rates.get(need, 0) / rules.relief(resource)
     return max(0.0, used - agent.output_capacity.get(resource, 0))
+
+
+def need_cost(agent, need, prices, rules=DEFAULT_RULES):
+    """Cheapest money per step to keep ``need`` from growing, choosing the good with the lowest
+    price per unit of relief (net of what the agent's own assets make)."""
+    costs = [net_use(agent, g, rules) * prices[g] for g in rules.goods_for(need) if g in prices]
+    return min(costs, default=0.0)
+
+
+def shopping_cost(agent, prices, rules=DEFAULT_RULES):
+    """Money to buy what it needs right now, the cheapest way for each need."""
+    total = 0.0
+    for need in rules.consumer_needs:
+        if getattr(agent, need) <= rules.seek_threshold:
+            continue
+        costs = [n * prices[g] for g in rules.goods_for(need) if (n := demand(agent, g, rules))]
+        total += min(costs, default=0.0)
+    return total
+
+
+_liquidity_memo = [None, None, 0.0]   # (prices, rules, value): the same for every agent at given prices
+
+
+def liquidity_cost(prices, rules=DEFAULT_RULES):
+    """Price of rules.liquidity_units baseline units of relief (relief_per_unit each) for every
+    need, bought the cheapest way: the cash an agent keeps on hand."""
+    if _liquidity_memo[0] is prices and _liquidity_memo[1] is rules:
+        return _liquidity_memo[2]
+    total = 0.0
+    for need in rules.consumer_needs:
+        per_relief = [prices[g] / rules.relief(g) for g in rules.goods_for(need) if g in prices]
+        total += min(per_relief, default=0.0) * rules.relief_per_unit
+    _liquidity_memo[:] = [prices, rules, rules.liquidity_units * total]
+    return _liquidity_memo[2]
 
 
 def stockpile_target(agent, resource, rules=DEFAULT_RULES, scarcity=None):
@@ -140,9 +199,40 @@ def stockpile_target(agent, resource, rules=DEFAULT_RULES, scarcity=None):
     return math.ceil(round(net_use(agent, resource, rules) * rules.stockpile_steps * level, 9))
 
 
-def stock_floor(rules=DEFAULT_RULES):
-    """Below this many units of a resource an agent goes out to restock (0 if the band is off)."""
-    return rules.stock_cap * rules.restock_below if rules.selling_enabled else 0
+def need_rate(agent, need):
+    """How fast the agent's ``need`` grows per step."""
+    rates = next((m.rates for m in agent.modules if hasattr(m, "rates")), {})
+    return rates.get(need, 0.0)
+
+
+def band_relief(agent, need, rules=DEFAULT_RULES, fraction=1.0):
+    """The stock band for one need, in relief: enough to cover stock_steps steps of the agent's own
+    growth of that need; fraction=restock_below gives the floor. 0 if the band is off."""
+    if not rules.selling_enabled:
+        return 0.0
+    return need_rate(agent, need) * rules.stock_steps * fraction
+
+
+def _kept_for_need(agent, resource, relief_wanted, rules):
+    """Units of ``resource`` the agent keeps so its stock relieves ``relief_wanted`` of the good's
+    need, filling it with the most effective goods first."""
+    need = rules.need_of(resource)
+    left = relief_wanted
+    for g in rules.goods_for(need):
+        if left <= 1e-9:
+            return 0
+        per_unit = rules.relief(g)
+        kept = min(agent.inventory.count(g), math.ceil(round(left / per_unit, 9)))
+        if g == resource:
+            return kept
+        left -= kept * per_unit
+    return 0
+
+
+def _need_gap(agent, resource, rules):
+    """Relief the agent still wants for its need right now (to get strictly below the target)."""
+    level = need_level(agent, resource, rules)
+    return level - rules.target_level + 1e-6 if level >= rules.target_level else 0.0
 
 
 def input_target(agent, resource, rules=DEFAULT_RULES):
@@ -159,27 +249,54 @@ def input_shortfall(agent, resource, rules=DEFAULT_RULES):
     return target - stock if target and stock < target * rules.input_reorder else 0
 
 
+# A perishable good is only stocked up to what its owner would use in this share of its shelf life.
+USE_BEFORE_EXPIRY = 0.8
+
+
+def useful_stock(agent, resource, rules=DEFAULT_RULES):
+    """Most units of a perishable good worth holding for the agent's own needs: what it would
+    consume within USE_BEFORE_EXPIRY of the shelf life (relying on this good alone). None when
+    the good doesn't expire (no limit)."""
+    life = rules.shelf_life.get(resource, 0) if rules.expiry_enabled else 0
+    need = rules.need_of(resource)
+    if not life or not need:
+        return None
+    return math.ceil(need_rate(agent, need) / rules.relief(resource) * life * USE_BEFORE_EXPIRY)
+
+
 def restock_shortfall(agent, resource, rules=DEFAULT_RULES):
-    """Units of a good to buy to get back up to the cap, once its stock has fallen below the floor.
-    Only for consumables: raw materials are bought as industry inputs (input_shortfall)."""
-    if resource not in CONSUMABLES:
+    """Units of ``resource`` to buy to bring the agent's relief for its need back up to the cap,
+    once its stock for that need fell below the floor. A perishable good is bought only up to
+    useful_stock (no point hoarding what would expire). 0 for goods that relieve no need: those
+    are bought as industry inputs (input_shortfall)."""
+    need = rules.need_of(resource)
+    if not need or not rules.selling_enabled:
         return 0
-    stock = agent.inventory.count(resource)
-    return rules.stock_cap - stock if rules.selling_enabled and stock < stock_floor(rules) else 0
+    held = held_relief(agent, need, rules)
+    if held >= band_relief(agent, need, rules, rules.restock_below):
+        return 0
+    units = math.ceil(round((band_relief(agent, need, rules) - held) / rules.relief(resource), 9))
+    limit = useful_stock(agent, resource, rules)
+    if limit is not None:
+        units = min(units, limit - agent.inventory.count(resource))
+    return max(0, units)
 
 
 def surplus(agent, resource, rules=DEFAULT_RULES, scarcity=None):
-    """Units above the stock cap (and above any reserve) that the agent goes out to sell."""
+    """Units above what the agent keeps (its share of the stock cap for the good's need, any
+    reserve, its own input buffer) that it goes out to sell."""
     if not rules.selling_enabled:
         return 0
-    cap = rules.stock_cap if resource in CONSUMABLES else 0   # raw: sell everything it doesn't use
-    keep = max(cap, stockpile_target(agent, resource, rules, scarcity),
-               units_to_satisfy(need_level(agent, resource), rules)) + input_target(agent, resource, rules)
+    keep = 0
+    need = rules.need_of(resource)
+    if need:
+        keep = _kept_for_need(agent, resource, band_relief(agent, need, rules) + _need_gap(agent, resource, rules), rules)
+    keep = max(keep, stockpile_target(agent, resource, rules, scarcity)) + input_target(agent, resource, rules)
     return max(0, agent.inventory.count(resource) - keep)
 
 
 def wants_to_buy(agent, resource, rules=DEFAULT_RULES, scarcity=None):
-    """Needs ``resource`` now, is short of its scarcity reserve, or is below its stock floor."""
+    """Needs ``resource`` now, is short of its scarcity reserve, below its stock floor, or short of inputs."""
     return (demand(agent, resource, rules) > 0 or stockpile_shortfall(agent, resource, rules, scarcity) > 0
             or restock_shortfall(agent, resource, rules) > 0 or input_shortfall(agent, resource, rules) > 0)
 
@@ -189,19 +306,22 @@ def stockpile_shortfall(agent, resource, rules=DEFAULT_RULES, scarcity=None):
 
 
 def wants_anything(agent, rules=DEFAULT_RULES, scarcity=None):
-    """Needs something now, or is below a stockpile reserve or its stock floor."""
+    """Needs something now, or is below a stockpile reserve, its stock floor or an input buffer."""
     return (is_needy(agent, rules)
             or any(stockpile_shortfall(agent, r, rules, scarcity) or restock_shortfall(agent, r, rules)
-                   or input_shortfall(agent, r, rules) for r in RESOURCES))
+                   or input_shortfall(agent, r, rules) for r in rules.active_goods))
 
 
 def spare(agent, resource, rules=DEFAULT_RULES, scarcity=None):
     """Units the agent can give away without hurting its needs, its reserve, its stock floor
-    (consumables only) or the input buffer of its own industries."""
-    floor = math.ceil(stock_floor(rules)) if resource in CONSUMABLES else 0
-    reserve = max(units_to_satisfy(need_level(agent, resource), rules),
-                  stockpile_target(agent, resource, rules, scarcity), floor) + input_target(agent, resource, rules)
-    return max(0, agent.inventory.count(resource) - reserve)
+    (in relief for the good's need) or the input buffer of its own industries."""
+    keep = 0
+    need = rules.need_of(resource)
+    if need:
+        wanted = max(band_relief(agent, need, rules, rules.restock_below), _need_gap(agent, resource, rules))
+        keep = _kept_for_need(agent, resource, wanted, rules)
+    keep = max(keep, stockpile_target(agent, resource, rules, scarcity)) + input_target(agent, resource, rules)
+    return max(0, agent.inventory.count(resource) - keep)
 
 
 def _settle_one(buyer, seller, buying, prices, rules, scarcity=None, money_only=False):
@@ -215,9 +335,9 @@ def _settle_one(buyer, seller, buying, prices, rules, scarcity=None, money_only=
     price = prices[buying]
     if money_only:
         return (None, price) if buyer.money >= price else None
-    needed_by_seller = [r for r in RESOURCES if r != buying
+    needed_by_seller = [r for r in rules.active_goods if r != buying
                         and (demand(seller, r, rules) > 0 or input_shortfall(seller, r, rules) > 0)]
-    others = [r for r in RESOURCES if r != buying and r not in needed_by_seller]
+    others = [r for r in rules.active_goods if r != buying and r not in needed_by_seller]
     for option in needed_by_seller + ["money"] + others:
         if option == "money":
             if buyer.money >= price:
@@ -235,15 +355,15 @@ def _settle_one(buyer, seller, buying, prices, rules, scarcity=None, money_only=
 def purchase_goal(buyer, resource, rules, rng=None):
     """How many units the buyer wants to hold after buying ``resource``.
 
-    It needs units_to_satisfy(level); it buys that times a random multiplier in
+    It needs demand(...) more units of this good; it buys that times a random multiplier in
     [purchase_min, purchase_max] (rounded up), so it stocks up for later. With no
     rng the multiplier is purchase_min. Returns 0 if it doesn't need the resource.
     """
-    if not demand(buyer, resource, rules):
+    needed = demand(buyer, resource, rules)
+    if not needed:
         return 0
-    needed = units_to_satisfy(getattr(buyer, NEED_FOR_RESOURCE[resource]), rules)
     multiplier = rng.uniform(rules.purchase_min, rules.purchase_max) if rng else rules.purchase_min
-    return math.ceil(round(needed * multiplier, 9))
+    return buyer.inventory.count(resource) + math.ceil(round(needed * multiplier, 9))
 
 
 def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, markups=None):
@@ -263,10 +383,17 @@ def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, mar
     bought, paid, stocked, unit_prices = {}, {}, {}, {}
     budget = buyer.money * rules.stockpile_budget
     spent_on_reserve = 0.0
-    wants = sorted(RESOURCES, key=lambda r: need_level(buyer, r), reverse=True)
+    # Most pressing need first; for each need the good with the most relief per dollar first.
+    # Goods relieving no need (industry inputs) come last.
+    def order(r):
+        per_unit = rules.relief(r)
+        value = prices[r] / per_unit if per_unit and prices.get(r, 0) > 0 else (0.0 if per_unit else math.inf)
+        return (-need_level(buyer, r, rules), value)
+    wants = sorted((r for r in rules.active_goods if r in prices), key=order)
     for resource in wants:
         need_goal = purchase_goal(buyer, resource, rules, rng)
-        restock = rules.stock_cap if restock_shortfall(buyer, resource, rules) else 0
+        shortfall = restock_shortfall(buyer, resource, rules)
+        restock = buyer.inventory.count(resource) + shortfall if shortfall else 0
         inputs = input_target(buyer, resource, rules) if input_shortfall(buyer, resource, rules) else 0
         goal = max(need_goal, stockpile_target(buyer, resource, rules, scarcity), restock, inputs)
         markup = (markups or {}).get(resource, 0)
@@ -312,18 +439,20 @@ def trade(a, b, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, markups=No
 def unmet(buyer, seller, rules=DEFAULT_RULES, scarcity=None):
     """Why ``buyer`` still lacks something after dealing with ``seller`` (list of strings)."""
     reasons = []
-    for resource in RESOURCES:
-        missing = demand(buyer, resource, rules)
-        if not missing:
+    for need in rules.consumer_needs:
+        goods = [g for g in rules.goods_for(need) if demand(buyer, g, rules)]
+        if not goods:
             continue
-        stock = seller.inventory.count(resource)
-        if stock == 0:
+        best = goods[0]
+        what = f"{demand(buyer, best, rules)} {best}" + (f" (or other {need} goods)" if len(goods) > 1 else "")
+        held = [g for g in goods if seller.inventory.count(g)]
+        if not held:
             why = f"{seller.name} has none"
-        elif spare(seller, resource, rules, scarcity) == 0:
-            why = f"{seller.name} keeps its {stock} for itself"
+        elif all(spare(seller, g, rules, scarcity) == 0 for g in held):
+            why = f"{seller.name} keeps its {', '.join(f'{seller.inventory.count(g)} {g}' for g in held[:3])} for itself"
         else:
             why = "nothing left to pay with"
-        reasons.append(f"{buyer.name} still needs {missing} {resource}: {why}")
+        reasons.append(f"{buyer.name} still needs {what}: {why}")
     return reasons
 
 

@@ -6,7 +6,7 @@ from . import economy
 from .inventory import Inventory
 from .rules import DEFAULT_RULES
 
-NEED_NAMES = ("hunger", "sleep", "thirst", "boredom")
+from .rules import NEEDS as NEED_NAMES
 
 
 def clamp(value, low, high):
@@ -30,7 +30,7 @@ class Need:
 class Agent:
     """A single simulated agent.
 
-    Needs (hunger, sleep, thirst, boredom) are scores in [0.00, 1.00] where
+    Needs (hunger, sleep, thirst, boredom, health, energy, shelter) are scores in [0.00, 1.00] where
     0.00 means fully satisfied and 1.00 means desperate.
     ``money`` is an unbounded float. ``movement`` is an integer: the maximum
     number of pixels the agent can travel in one step.
@@ -44,9 +44,12 @@ class Agent:
     sleep = Need()
     thirst = Need()
     boredom = Need()
+    health = Need()
+    energy = Need()
+    shelter = Need()
 
     def __init__(self, x, y, *, name=None, hunger=0.0, sleep=0.0, thirst=0.0,
-                 boredom=0.0, money=0.0, movement=10, inventory=None,
+                 boredom=0.0, health=0.0, energy=0.0, shelter=0.0, money=0.0, movement=10, inventory=None,
                  color=None, modules=None):
         self.id = None  # assigned by the World when the agent is added
         self.name = name
@@ -56,6 +59,9 @@ class Agent:
         self.sleep = sleep
         self.thirst = thirst
         self.boredom = boredom
+        self.health = health
+        self.energy = energy
+        self.shelter = shelter
         self.money = float(money)
         self.movement = int(movement)
         self.inventory = inventory if inventory is not None else Inventory()
@@ -82,7 +88,7 @@ class Agent:
         self.labor_bought = 0.0     # labour it hired this step
         self.employers = {}         # who it worked for this step -> units
         # This step's flows (income, produced, consumed, labour), reset by the World each step.
-        self.flow = {"income": 0.0, "sources": {}, "produced": {}, "consumed": {}, "used": {},
+        self.flow = {"income": 0.0, "sources": {}, "produced": {}, "consumed": {}, "used": {}, "expired": {},
                      "labor_made": 0.0, "labor_used": 0.0}
         self.input_credit = {}  # input good -> fraction of a unit already taken from stock (Production)
         # Smoothed per-step income and consumption (for income / consumption inequality).
@@ -147,12 +153,13 @@ class Agent:
             "depressed": self.depressed,
             "inventory": self.inventory.to_dict(),
             "output_capacity": {g: round(v, 4) for g, v in self.output_capacity.items()},
-            "input_target": {r: economy.input_target(self, r, rules) for r in economy.RESOURCES
+            "input_target": {r: economy.input_target(self, r, rules) for r in rules.active_goods
                              if economy.input_target(self, r, rules)},
             "color": self.color,
             "activity": self.activity,
             "target_id": self.target_id,
             "seeking_for": self.seeking_for,
-            "wants": [r for r, n in economy.NEED_FOR_RESOURCE.items() if getattr(self, n) > rules.seek_threshold],
+            # Needs above the seek threshold that goods can relieve.
+            "wants": [n for n in rules.consumer_needs if getattr(self, n) > rules.seek_threshold],
             "modules": {type(m).__name__: m.to_dict() for m in self.modules},
         }

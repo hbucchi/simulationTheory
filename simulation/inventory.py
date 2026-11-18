@@ -21,6 +21,7 @@ class Inventory:
         self.now = now
         self.items = {}
         self.batches = {item: deque() for item in self.perishable}  # item -> deque of [expires, qty], oldest first
+        self.totals = {item: 0.0 for item in self.perishable}       # item -> sum of its batches (kept in step)
         for item, quantity in (items or {}).items():
             if item in self.perishable:
                 if quantity:
@@ -37,6 +38,7 @@ class Inventory:
         if expires is None:
             lifetime = self.perishable[item]
             expires = self.now + lifetime if lifetime else math.inf
+        self.totals[item] += quantity
         batches = self.batches[item]
         if batches and batches[-1][0] == expires:
             batches[-1][1] += quantity
@@ -55,6 +57,7 @@ class Inventory:
             used = min(qty, quantity)
             taken.append((expires, used))
             quantity -= used
+            self.totals[item] -= used
             if qty - used <= 1e-9:
                 batches.popleft()
             else:
@@ -78,6 +81,7 @@ class Inventory:
             raise ValueError("quantity must be >= 0")
         if item in self.perishable:
             self.batches[item].clear()
+            self.totals[item] = 0.0
             if quantity:
                 self.add(item, quantity)
             return
@@ -88,13 +92,15 @@ class Inventory:
         expired = {}
         for item, batches in self.batches.items():
             while batches and batches[0][0] <= self.now:
-                expired[item] = expired.get(item, 0) + batches.popleft()[1]
+                qty = batches.popleft()[1]
+                self.totals[item] -= qty
+                expired[item] = expired.get(item, 0) + qty
         return expired
 
     def amount(self, item):
         """Exact quantity, including fractions of perishable items."""
         if item in self.perishable:
-            return sum(qty for _, qty in self.batches[item])
+            return max(0.0, self.totals[item])
         return self.items.get(item, 0)
 
     def count(self, item):

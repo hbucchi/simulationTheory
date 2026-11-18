@@ -33,11 +33,11 @@ Market wage
 
 from . import economy
 
-NEEDS_FOR_WELLBEING = ("hunger", "thirst", "sleep", "boredom")
+from .rules import NEEDS as NEEDS_FOR_WELLBEING
 
 
 def efficiency(agent, rules):
-    drag = sum(rules.efficiency_weights[n] * getattr(agent, n) for n in NEEDS_FOR_WELLBEING)
+    drag = sum(rules.efficiency_weights.get(n, 0) * getattr(agent, n) for n in NEEDS_FOR_WELLBEING)
     if agent.depressed:
         drag += rules.depression_penalty
     return min(1.0, max(rules.min_efficiency, 1 - drag))
@@ -46,7 +46,7 @@ def efficiency(agent, rules):
 def wellbeing(agent, rules):
     weights = rules.efficiency_weights
     total = sum(weights.values()) or 1
-    level = sum(weights[n] * getattr(agent, n) for n in NEEDS_FOR_WELLBEING) / total
+    level = sum(weights.get(n, 0) * getattr(agent, n) for n in NEEDS_FOR_WELLBEING) / total
     if agent.depressed:
         level += rules.depression_penalty
     return min(1.0, max(0.0, 1 - level))
@@ -54,14 +54,14 @@ def wellbeing(agent, rules):
 
 def cost_of_living(agent, prices, rules):
     """Money per step the agent would spend buying all the goods it uses."""
-    return sum(economy.net_use(agent, g, rules) * prices[g] for g in economy.CONSUMABLES)
+    return sum(economy.need_cost(agent, need, prices, rules) for need in rules.consumer_needs)
 
 
 def general_need(agent, prices, rules):
     """How much the agent needs a job, 0..1: short of money and/or pressing needs."""
     cushion = rules.comfort_steps * cost_of_living(agent, prices, rules)
     money_short = min(1.0, max(0.0, 1 - agent.money / cushion)) if cushion > 0 else 0.0
-    pressing = max((getattr(agent, n) for n in economy.NEED_FOR_RESOURCE.values()), default=0.0)
+    pressing = max((getattr(agent, n) for n in rules.consumer_needs), default=0.0)
     return rules.money_weight * money_short + (1 - rules.money_weight) * pressing
 
 
@@ -81,9 +81,9 @@ class LaborMarket:
         """labor_share x value added by one unit of labour (output minus the inputs it used),
         weighted by the jobs on offer."""
         rules = world.rules
-        weights = {g: jobs.get(g, 0) for g in economy.GOODS}
+        weights = {g: jobs.get(g, 0) for g in world.rules.active_goods}
         if sum(weights.values()) <= 0:
-            weights = {g: 1 for g in economy.GOODS}
+            weights = {g: 1 for g in world.rules.active_goods}
         value = sum(w * world.productivity_now[g] * world.value_added(g, prices)
                     for g, w in weights.items()) / sum(weights.values())
         return rules.labor_share * value
@@ -153,7 +153,12 @@ class LaborMarket:
             a.asking_wage = self.wage * min(3.0, max(0.1, 1 + rules.bargaining_spread * (a.wellbeing - a.job_need)))
         offers.sort(key=lambda a: a.asking_wage)
         remaining = {a: a.offered for a in offers}
+        # Employers whose labour creates the most value hire first (as if they outbid the
+        # others): a good that becomes scarce gets dearer, and its producers get workers first.
+        # Ties (and equal values) are broken at random.
         world.rng.shuffle(employers)
+        if rules.labor_priority == "value":
+            employers.sort(key=lambda e: world.labor_value(e, prices), reverse=True)
         for employer in employers:
             want = employer.labor_need - employer.labor_available
             budget = max(0.0, employer.money - cash_needed(employer, prices, rules))

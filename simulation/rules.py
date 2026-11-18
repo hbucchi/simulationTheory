@@ -11,28 +11,55 @@ each new agent is drawn from; see distributions.py.
 from dataclasses import asdict, dataclass, field, fields
 
 from . import distributions
+from .catalog import BY_ID, CATALOG
 
-CONSUMABLES = ("food", "water", "games")  # consumed for needs
-RAW = ("grain", "wood")                    # raw materials: no need of their own, only industry inputs
-GOODS = CONSUMABLES + RAW                  # everything an industry (asset) makes
+GOODS = tuple(e["id"] for e in CATALOG)   # every good; each is made by its own industry (assets)
+# Default split (a game's rules can change which need a good relieves, see Rules.satisfies):
+CONSUMABLES = tuple(e["id"] for e in CATALOG if e["need"])   # relieve a need when consumed
+RAW = tuple(e["id"] for e in CATALOG if not e["need"])       # only used as industry inputs
 LABOR = "labor"                       # a capacity sold each step in the labour market; never held
 RESOURCES = GOODS                     # what agents hold and trade face to face
 PRICED = GOODS + (LABOR,)             # everything with a price (labour's price is the wage)
-NEEDS = ("hunger", "sleep", "thirst", "boredom")
+# Sleep is recovered by resting; every other need is relieved by consuming goods.
+NEEDS = ("hunger", "sleep", "thirst", "boredom", "health", "energy", "shelter")
 PRICE_MODES = ("scarcity", "fixed")
+MAX_LAYERS = 10
+
+
+def _catalog_layers(inputs):
+    """{good: layer}: 1 for primary industries, else 1 + the deepest layer among its inputs.
+    Raises ValueError on a cycle (a good that ends up being its own input)."""
+    layers, visiting = {}, set()
+
+    def layer(g):
+        if g in layers:
+            return layers[g]
+        if g in visiting:
+            raise ValueError(f"inputs form a loop through {g}")
+        visiting.add(g)
+        recipe = inputs.get(g, {})
+        layers[g] = 1 + max((layer(i) for i in recipe), default=0)
+        visiting.discard(g)
+        return layers[g]
+
+    for g in GOODS:
+        layer(g)
+    return layers
+
+
+_DEFAULT_LAYERS = _catalog_layers({e["id"]: e["inputs"] for e in CATALOG if e["inputs"]})
 
 
 @dataclass
 class Rules:
     # Starting agents (spreads)
     agents: int = 3
-    inventory: dict = field(default_factory=lambda: {"food": 100, "water": 100, "games": 100,
-                                                     "grain": 20, "wood": 20})
-    # Starting asset shares: for each good, 10% of the agents own all its assets (10 shares each
-    # on average), drawn separately per good, so about a quarter of the agents own something.
-    # Most agents own none and live by selling labour.
-    assets: dict = field(default_factory=lambda: {g: {"dist": "tiered", "average": 1.0, "tiers": [
-        {"agents": 10, "share": 100}, {"agents": 90, "share": 0}]} for g in GOODS})
+    inventory: dict = field(default_factory=lambda: {e["id"]: e["stock"] for e in CATALOG})
+    # Starting asset shares: for each good, 10% of the agents own all its assets, drawn separately
+    # per good, so most agents own none and live by selling labour. The average per agent comes
+    # from the catalog (bigger industries for goods many people need).
+    assets: dict = field(default_factory=lambda: {e["id"]: {"dist": "tiered", "average": e["shares"], "tiers": [
+        {"agents": 10, "share": 100}, {"agents": 90, "share": 0}]} for e in CATALOG})
     money: object = 22500.0           # 22,500 / 300 units x (1 - 1/3) = $50 starting price at the default stock
     movement: object = field(default_factory=lambda: {"dist": "uniform", "min": 5, "max": 25})
     start_needs: object = field(default_factory=lambda: {"dist": "uniform", "min": 0.0, "max": 0.5})
@@ -54,14 +81,24 @@ class Rules:
     # Labour capacity module: efficiency = 1 - sum(weight x need) - depression penalty, at least
     # min_efficiency. Wellbeing uses the same weights.
     efficiency_weights: dict = field(default_factory=lambda: {"hunger": 0.3, "thirst": 0.3, "sleep": 0.2,
-                                                              "boredom": 0.1})
+                                                              "boredom": 0.1, "health": 0.2, "energy": 0.1,
+                                                              "shelter": 0.1})
     depression_penalty: float = 0.3
     min_efficiency: float = 0.2
 
     # Consumption: how fast needs grow (spreads), and what consuming does
     rates: dict = field(default_factory=lambda: {"hunger": 0.010, "sleep": 0.005, "thirst": 0.015,
-                                                 "boredom": 0.008})
-    relief_per_unit: float = 0.1       # consuming 1 unit lowers its need by this
+                                                 "boredom": 0.008, "health": 0.003, "energy": 0.004,
+                                                 "shelter": 0.002})
+    # Consuming 1 unit of a good lowers the need it relieves by
+    #     relief_per_unit x fit x (1 + layer_bonus x (layer - 1))
+    # so goods from deeper industry layers relieve more per unit (layer 1: x1, layer 3: x2 at 0.5).
+    relief_per_unit: float = 0.1
+    layer_bonus: float = 0.5
+    # Which need each good relieves and how well: {good: {"need": n, "fit": 0..1}}. Goods missing
+    # here relieve nothing (pure industry inputs). Sending this replaces the whole table.
+    satisfies: dict = field(default_factory=lambda: {e["id"]: {"need": e["need"], "fit": e["fit"]}
+                                                     for e in CATALOG if e["need"]})
     seek_threshold: float = 0.5        # above this: consume / seek a trade / rest
     target_level: float = 0.3          # ... until the need is below this
     sleep_recovery: object = 0.05      # sleep recovered per step while resting (spread)
@@ -96,10 +133,12 @@ class Rules:
     # every resource at current prices, and once at least min_investment is spare they buy
     # shares from owners that are short of cash.
     investing_enabled: bool = True
-    # Extraction of raw materials takes half the labour per unit: a raw asset employs 0.1 labour
-    # and each unit of that labour extracts 2 units, so an asset still makes 0.2 units per step.
-    asset_labor: dict = field(default_factory=lambda: {g: 0.1 if g in RAW else 0.2 for g in GOODS})
-    productivity: dict = field(default_factory=lambda: {g: 2.0 if g in RAW else 1.0 for g in GOODS})
+    # Extraction (layer 1) takes half the labour per unit of the other layers: a layer-1 asset
+    # employs 0.1 labour and each unit of it extracts 4 units; other assets employ 0.2 labour
+    # making 2 units each. Every asset makes 0.4 units per step when fully staffed. (Seven needs
+    # served by 33 industries need about twice the output per worker of the old 3-good economy.)
+    asset_labor: dict = field(default_factory=lambda: {g: 0.1 if _DEFAULT_LAYERS[g] == 1 else 0.2 for g in GOODS})
+    productivity: dict = field(default_factory=lambda: {g: 4.0 if _DEFAULT_LAYERS[g] == 1 else 2.0 for g in GOODS})
     productivity_growth: dict = field(default_factory=lambda: {g: 0.05 for g in GOODS})
     productivity_growth_steps: int = 50
     labor_saving: dict = field(default_factory=lambda: {g: 0.03 for g in GOODS})
@@ -113,26 +152,46 @@ class Rules:
     #     output = min(productivity x labour used, input stock / units per output, ...)
     # Owners of secondary industries want input_buffer_steps steps of inputs at full capacity;
     # when their stock falls below input_reorder of that they go out and buy back up to it.
-    inputs: dict = field(default_factory=lambda: {"food": {"grain": 1.0}, "games": {"wood": 1.0}})
+    inputs: dict = field(default_factory=lambda: {e["id"]: dict(e["inputs"]) for e in CATALOG if e["inputs"]})
+    # Layers: primary industries are layer 1; an industry using layer-n goods is layer n + 1.
+    # Industries deeper than industry_layers (1-10, chosen when the game starts) don't exist in
+    # this game: nobody owns, holds or makes their goods.
+    industry_layers: int = max(_DEFAULT_LAYERS.values())
+    # Expiry: a unit of good g is thrown away shelf_life[g] steps after it was made (0 = never).
+    expiry_enabled: bool = True
+    shelf_life: dict = field(default_factory=lambda: {e["id"]: e["shelf_life"] for e in CATALOG})
     input_buffer_steps: int = 20
     input_reorder: float = 0.5
-    # Cost floor (scarcity prices only): a secondary good never sells below its unit cost,
-    # i.e. its inputs at current prices plus the labour per unit at the current wage.
+    # Cost floor (scarcity prices only): a secondary good never sells below the cost of the inputs
+    # it is made from, at current prices. (Labour isn't included: the wage itself is set from the
+    # value labour adds, so including it would let wages and prices push each other up.)
     cost_floor: bool = True
-    # An industry stops hiring while its owner holds this many units of what it makes (0 = never).
+    # An industry stops working while its owner holds this many units of what it makes, or more
+    # than output_buffer_steps steps of its output (beyond its own input buffer): produce to demand
+    # (0 = no limit).
     max_output_stock: int = 200
+    output_buffer_steps: int = 30
+    # Industries whose value added per unit of labour is below the wage stop hiring. Off by
+    # default: while prices adjust, a high wage can stop cheap essentials (water) and starve agents.
+    profit_check: bool = False
+    # How labour is shared: "value" = employers and industries where labour creates the most value
+    # (productivity x (price - inputs)) first; "even" = random employer order, and each owner
+    # spreads its labour evenly over its industries.
+    labor_priority: str = "even"
     liquidity_units: float = 3
     min_investment: float = 1000
     # Capitalists keep cash to pay for the labour their assets need: a purchase must leave them
     # holding at least capital_cash_ratio x (value of all their assets, the new one included) in cash.
     capital_cash_ratio: float = 0.2
 
-    # Stock band: agents keep between stock_cap x restock_below and stock_cap units of each
-    # resource. Above the cap they go out to sell the surplus to agents that want it; below
-    # the floor they go out to buy back up to the cap (paid in money, within stockpile_budget).
-    # They never sell below the floor.
+    # Stock band, per need: an agent keeps enough goods to cover stock_steps steps of that need's
+    # own growth (e.g. 100 steps of hunger at 0.01/step = 1.0 of relief: about 7 food or 17 grain).
+    # Below stock_steps x restock_below it goes out to buy back up to the cap (paid in money,
+    # within stockpile_budget); goods above the cap are surplus it goes out to sell. It never
+    # sells below the floor. Perishable goods are only stocked up to what it would use before
+    # they expire.
     selling_enabled: bool = True
-    stock_cap: int = 100
+    stock_steps: int = 100
     restock_below: float = 0.5
 
     # Central government (see government.py): a minimum interest rate that no asset's return
@@ -172,6 +231,66 @@ class Rules:
     cooldown_steps: int = 60           # steps a pair ignores each other after a deal
     retry_steps: int = 10              # ... and after a meeting where nothing could be traded
 
+    # ---- derived tables (layers, relief per unit, which goods relieve which need) ----
+    # Cached; assigning any field clears the cache. Change dicts by assigning a new dict.
+
+    def __post_init__(self):
+        object.__setattr__(self, "_cache", None)
+
+    def __setattr__(self, name, value):
+        object.__setattr__(self, name, value)
+        if name != "_cache":
+            object.__setattr__(self, "_cache", None)
+
+    def _derived(self):
+        cache = getattr(self, "_cache", None)
+        if cache is None:
+            layers = _catalog_layers(self.inputs)
+            active = tuple(g for g in GOODS if layers[g] <= self.industry_layers)
+            relief, need_of, goods_for = {}, {}, {}
+            for g in active:
+                spec = self.satisfies.get(g)
+                if spec and spec.get("need") and spec.get("fit", 0) > 0:
+                    need_of[g] = spec["need"]
+                    relief[g] = self.relief_per_unit * spec["fit"] * (1 + self.layer_bonus * (layers[g] - 1))
+                    goods_for.setdefault(spec["need"], []).append(g)
+            for need, goods in goods_for.items():
+                goods.sort(key=lambda g: relief[g], reverse=True)   # most effective first
+            cache = {"layers": layers, "active": active, "active_set": frozenset(active),
+                     "relief": relief, "need_of": need_of, "goods_for": goods_for}
+            object.__setattr__(self, "_cache", cache)
+        return cache
+
+    def layer(self, good):
+        return self._derived()["layers"][good]
+
+    @property
+    def active_goods(self):
+        """Goods whose industry exists in this game (layer <= industry_layers)."""
+        return (self._cache or self._derived())["active"]
+
+    def is_active(self, good):
+        return good in (self._cache or self._derived())["active_set"]
+
+    def relief(self, good):
+        """How much one unit of ``good`` lowers its need (0 if it relieves none)."""
+        return (self._cache or self._derived())["relief"].get(good, 0.0)
+
+    def need_of(self, good):
+        return (self._cache or self._derived())["need_of"].get(good)
+
+    def goods_for(self, need):
+        """Active goods that relieve ``need``, most effective first."""
+        return (self._cache or self._derived())["goods_for"].get(need, [])
+
+    @property
+    def consumer_needs(self):
+        """Needs some good in this game can relieve."""
+        cache = self._cache or self._derived()
+        if "consumer_needs" not in cache:
+            cache["consumer_needs"] = tuple(n for n in NEEDS if cache["goods_for"].get(n))
+        return cache["consumer_needs"]
+
     def to_dict(self):
         return asdict(self)
 
@@ -202,6 +321,8 @@ class Rules:
             low, high, kind = LIMITS[key]
             if kind == "recipes":
                 setattr(rules, key, _recipes(value))
+            elif kind == "satisfies":
+                setattr(rules, key, _satisfies(value))
             elif kind == "map":
                 names, low, high, whole = low
                 setattr(rules, key, {**getattr(rules, key), **_number_map(value, key, names, low, high, whole)})
@@ -215,6 +336,29 @@ class Rules:
                 setattr(rules, key, value)
             else:
                 setattr(rules, key, _number(value, key, low, high, whole=kind == "int"))
+        if "inventory" not in data:
+            # Starting stock of goods that don't exist in this game (fewer layers) becomes the same
+            # relief in the most effective good that does exist for that need.
+            stock = dict(rules.inventory)
+            for g, spec in rules.inventory.items():
+                need = BY_ID[g]["need"]
+                if rules.is_active(g) or not need or not isinstance(spec, (int, float)) or not spec:
+                    continue
+                best = next(iter(rules.goods_for(need)), None)
+                if best and isinstance(stock.get(best), (int, float)):
+                    default_relief = rules.relief_per_unit * BY_ID[g]["fit"] * (1 + rules.layer_bonus * (_DEFAULT_LAYERS[g] - 1))
+                    stock[best] += round(spec * default_relief / rules.relief(best))
+                stock[g] = 0
+            rules.inventory = stock
+        if "assets" not in data:
+            # No starting industries given: size them for this game (its layers, recipes, rates).
+            sized = demand_sized_shares(rules)
+            rules.assets = {g: {**spec, "average": sized[g]} if isinstance(spec, dict) and spec.get("dist") == "tiered"
+                            else spec for g, spec in rules.assets.items()}
+        layers = _catalog_layers(rules.inputs)   # raises on loops
+        deepest = max(layers.values())
+        if deepest > MAX_LAYERS:
+            raise ValueError(f"recipes are {deepest} layers deep; at most {MAX_LAYERS} are allowed")
         if rules.target_level >= rules.seek_threshold:
             raise ValueError("target_level must be below seek_threshold")
         if rules.purchase_min > rules.purchase_max:
@@ -273,13 +417,21 @@ LIMITS = {
     "liquidity_units": (0, 1e6, "float"),
     "capital_cash_ratio": (0, 100, "float"),
     "selling_enabled": (None, None, "bool"),
-    "stock_cap": (1, 1e9, "int"),
+    "stock_steps": (1, 1e6, "int"),
     "restock_below": (0, 1, "float"),
     "inputs": (None, None, "recipes"),
     "input_buffer_steps": (1, 10000, "int"),
+    "industry_layers": (1, MAX_LAYERS, "int"),
+    "layer_bonus": (0, 10, "float"),
+    "satisfies": (None, None, "satisfies"),
+    "expiry_enabled": (None, None, "bool"),
+    "shelf_life": ((GOODS, 0, 1e6, True), None, "map"),
     "input_reorder": (0, 1, "float"),
     "cost_floor": (None, None, "bool"),
     "max_output_stock": (0, 1e9, "int"),
+    "output_buffer_steps": (0, 100000, "int"),
+    "profit_check": (None, None, "bool"),
+    "labor_priority": (("value", "even"), None, "choice"),
     "gov_min_rate": (0, 10, "float"),
     "gov_labor_purchase": (0, 1e6, "float"),
     "purchase_min": (1, 10, "float"),
@@ -322,6 +474,66 @@ def _recipes(value):
         if parsed:
             recipes[good] = parsed
     return recipes
+
+
+# Default industries get this many times the capacity an average agent's needs take.
+SIZING_HEADROOM = 2.0
+MIN_DEFAULT_SHARES = 0.02
+
+
+def demand_sized_shares(rules):
+    """Asset shares per agent for each industry in this game, sized to what agents consume.
+
+    Each need's growth (average of its spread) is split over the goods that exist in this game
+    by the catalog's plan (renormalised); a need whose planned goods are all missing (e.g. a game
+    with fewer layers) is split evenly over the goods that can still relieve it. The inputs those
+    goods take are added down the layers, and every industry gets SIZING_HEADROOM times the
+    capacity that takes (at least MIN_DEFAULT_SHARES). Inactive industries get 0."""
+    active = rules.active_goods
+    units = {g: 0.0 for g in active}
+    for need in rules.consumer_needs:
+        goods = rules.goods_for(need)
+        plan = {g: BY_ID[g]["plan"] for g in goods if BY_ID[g]["plan"] > 0}
+        if not plan:
+            plan = {g: 1.0 for g in goods}
+        total = sum(plan.values())
+        rate = distributions.mean(rules.rates[need])
+        for g, p in plan.items():
+            units[g] += rate * p / total / rules.relief(g)
+    for g in sorted(active, key=rules.layer, reverse=True):   # deepest first: inputs flow down
+        for item, per_unit in rules.inputs.get(g, {}).items():
+            if item in units:
+                units[item] += units[g] * per_unit
+    shares = {}
+    for g in GOODS:
+        per_share = rules.asset_labor[g] * rules.productivity[g]
+        if g not in units or per_share <= 0:
+            shares[g] = 0.0
+        else:
+            shares[g] = round(max(MIN_DEFAULT_SHARES, units[g] * SIZING_HEADROOM / per_share), 2)
+    return shares
+
+
+def _satisfies(value):
+    """Validate {good: {"need": need, "fit": 0..1}}; replaces the whole table. Fit 0 or no need
+    means the good relieves nothing. Sleep can't be relieved by goods (it is recovered by resting)."""
+    if not isinstance(value, dict) or set(value) - set(GOODS):
+        raise ValueError(f"satisfies must map goods ({', '.join(GOODS)}) to a need and a fit")
+    out = {}
+    for good, spec in value.items():
+        if spec in (None, {}):
+            continue
+        if not isinstance(spec, dict) or set(spec) - {"need", "fit"}:
+            raise ValueError(f"satisfies.{good} must be {{\"need\": ..., \"fit\": ...}}")
+        need = spec.get("need")
+        if not need:   # None or "" (the setup screen's "nothing"): relieves no need
+            continue
+        if need not in NEEDS or need == "sleep":
+            raise ValueError(f"satisfies.{good}.need must be one of {', '.join(n for n in NEEDS if n != 'sleep')}")
+        fit = _number(spec.get("fit", 1.0), f"satisfies.{good}.fit", 0, 1)
+        if fit > 0:
+            out[good] = {"need": need, "fit": fit}
+    return out
 
 
 def is_primary(good, rules):

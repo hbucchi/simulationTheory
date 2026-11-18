@@ -44,13 +44,18 @@ const ui = {
 };
 
 const DOT_RADIUS = 6;
-const NEEDS = ["hunger", "sleep", "thirst", "boredom"];
-const CONSUMABLES = ["food", "water", "games"];   // consumed for needs
-const RAW = ["grain", "wood"];                     // raw materials: only used as industry inputs
-const GOODS = [...CONSUMABLES, ...RAW];            // every good is made by its own industry (assets)
-const RESOURCES = GOODS;                           // what agents hold and trade face to face
-const PRICED = [...GOODS, "labor"];         // everything with a price (labour's is the wage)
-const NEED_FOR = { food: "hunger", water: "thirst", games: "boredom" };
+// The industry catalog and the needs come from the server (catalog.js, loaded before this file).
+const CATALOG_INFO = Object.fromEntries(window.CATALOG.goods.map(e => [e.id, e]));
+const NEEDS = window.CATALOG.needs;                 // hunger, sleep, thirst, boredom, health, energy, shelter
+const GOODS = window.CATALOG.goods.map(e => e.id);  // every good is made by its own industry (assets)
+const RESOURCES = GOODS;                            // what agents hold and trade face to face
+const PRICED = [...GOODS, "labor"];                 // everything with a price (labour's is the wage)
+const CONSUMABLES = GOODS.filter(g => CATALOG_INFO[g].need);   // relieve a need by default
+const label = (g) => CATALOG_INFO[g]?.label ?? cap(g);
+// This game's industries (from the state): layer, whether it exists, need relieved, relief per unit.
+const industry = (g) => state.industries[g];
+const activeGoods = () => GOODS.filter(g => state.industries[g].active);
+const needOf = (g) => state.industries[g]?.need;
 const cap = (w) => w[0].toUpperCase() + w.slice(1);
 // Prices and money are shown in dollars, two decimals.
 const usd = (v) => `${v < 0 ? "−" : ""}$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -128,12 +133,12 @@ const FIELD_GROUPS = [
     { path: `rates.${n}`, label: cap(n), min: 0, max: 1, step: 0.001, get: a => a.modules.NeedsDecay.rates[n] }))},
   { legend: "Rest: sleep recovered per step while standing still", fields: [
     { path: "sleep_recovery", label: "Sleep recovery", min: 0, max: 1, step: 0.01, get: a => a.modules.Rest.recovery }]},
-  { legend: "Inventory", fields: RESOURCES.map(r => (
-    { path: `inventory.${r}`, label: cap(r), min: 0, step: 1, get: a => a.inventory[r] ?? 0 }))},
+  { legend: "Inventory (every good)", collapsed: true, fields: RESOURCES.map(r => (
+    { path: `inventory.${r}`, label: label(r), min: 0, step: 1, get: a => a.inventory[r] ?? 0 }))},
   { legend: "Labour", fields: [
     { path: "labor_capacity", label: "Labour capacity per step", min: 0, step: 0.05, get: a => a.labor.capacity }]},
-  { legend: "Assets owned (shares; 1 = one whole asset)", fields: GOODS.map(r => (
-    { path: `assets.${r}`, label: cap(r), min: 0, step: 0.01, get: a => +(a.assets[r] ?? 0).toFixed(4) }))},
+  { legend: "Industries owned (asset shares; 1 = one whole asset)", collapsed: true, fields: GOODS.map(r => (
+    { path: `assets.${r}`, label: label(r), min: 0, step: 0.01, get: a => +(a.assets[r] ?? 0).toFixed(4) }))},
 ];
 const FIELDS = FIELD_GROUPS.flatMap(g => g.fields);
 
@@ -297,67 +302,32 @@ function needColor(v) {
   return `hsl(${hue} 55% 55%)`;
 }
 
-// Price of each resource: total money / total units * (1 - that resource's share of units).
+// The economy, one row per industry (= per good), grouped by industry layer:
+// price (base × demand multiplier), units held, what is made / consumed / used as input /
+// thrown away per step (last 20 steps), the recipe, what it relieves and how long it keeps.
 function renderMarket() {
   const m = state.market;
-  const total = RESOURCES.reduce((sum, r) => sum + m.units[r], 0);
+  const goods = activeGoods();
+  const total = goods.reduce((sum, r) => sum + m.units[r], 0);
   ui.market.innerHTML = "";
-  const title = document.createElement("div");
-  title.className = "market-title";
-  title.textContent = `Market · ${usd(m.money)} / ${total} units = ${usd(total ? m.money / total : 0)} per unit`;
-  ui.market.append(title);
-  const row = document.createElement("div");
-  row.className = "market-row";
-  for (const r of RESOURCES) {
-    const share = total ? m.units[r] / total : 0;
-    const cell = document.createElement("div");
-    const price = document.createElement("b");
-    price.textContent = usd(m.prices[r]);
-    const mult = m.multiplier[r];
-    const arrow = document.createElement("span");
-    arrow.className = "price-move " + (mult > 1.02 ? "up" : mult < 0.98 ? "down" : "");
-    arrow.textContent = mult > 1.02 ? "▲" : mult < 0.98 ? "▼" : "";
-    // Card header: resource name, then price and direction on one line.
-    const name = Object.assign(document.createElement("span"), { className: "res-name", textContent: r });
-    const priceLine = Object.assign(document.createElement("div"), { className: "price-line" });
-    priceLine.append(price, arrow);
-    cell.append(name, priceLine);
-    // Demand pressure: base price x multiplier from buyers vs sellers.
-    const pressure = document.createElement("span");
-    pressure.className = "pressure";
-    pressure.textContent = `base ${usd(m.base_prices[r])} × ${mult.toFixed(2)} ` +
-      `(demand ${m.pressure[r].toFixed(2)}: ${m.buyers[r]} want / ${m.sellers[r]} sell · ` +
-      `concentration ${m.concentration_factor[r].toFixed(2)}: C ${m.concentration[r].toFixed(2)})` +
-      (m.markups[r] ? ` · +${(m.markups[r] * 100).toFixed(0)}%/unit` : "");
-    pressure.title = "Price = base × multiplier. The multiplier moves toward demand × concentration each step. " +
-      "Buyers: agents that want it. Sellers: agents with some to spare. C: 0 = sellable supply spread evenly, 1 = one agent holds it all.";
-    const priceChart = sparkline(m.price_history[r]);
-    priceChart.title = "Price, last 200 steps";
-    cell.append(pressure, priceChart);
-    const detail = document.createElement("span");
-    detail.textContent = `${m.units[r]} units · ${(share * 100).toFixed(0)}% share`;
-    // Average units per agent and how much it fell over the scarcity window.
-    const history = m.per_agent_history[r];
-    const perAgent = history.length ? history[history.length - 1] : 0;
-    const trend = document.createElement("span");
-    const decline = m.scarcity[r];
-    trend.textContent = `${perAgent.toFixed(1)} per agent` +
-      (decline > 0 ? ` · ▼ ${(decline * 100).toFixed(0)}% in ${history.length - 1} steps` : "");
-    trend.className = m.stockpiling[r] ? "scarce" : "";
-    const stockChart = sparkline(history);
-    stockChart.title = "Units per agent over the scarcity window";
-    stockChart.classList.add("stock");
-    cell.append(detail, trend, stockChart);
-    if (m.stockpiling[r]) {
-      const badge = document.createElement("span");
-      badge.className = "badge";
-      badge.textContent = "agents stockpiling";
-      cell.append(badge);
-    }
-    row.append(cell);
+  ui.market.append(Object.assign(document.createElement("div"), { className: "market-title",
+    textContent: `Market · ${usd(m.money)} / ${total} units = ${usd(total ? m.money / total : 0)} per unit · ` +
+      `${goods.length} industries in ${state.rules.industry_layers} layers` }));
+  const deepest = Math.max(...goods.map(g => industry(g).layer));
+  for (let layer = 1; layer <= deepest; layer++) {
+    const inLayer = goods.filter(g => industry(g).layer === layer);
+    if (!inLayer.length) continue;
+    const box = Object.assign(document.createElement("details"), { className: "layer-group" });
+    box.open = openLayers.has(layer);
+    box.ontoggle = () => box.open ? openLayers.add(layer) : openLayers.delete(layer);
+    const made = inLayer.reduce((s, g) => s + (m.produced_recent?.[g] || 0), 0);
+    const lost = inLayer.reduce((s, g) => s + (m.expired_recent?.[g] || 0), 0);
+    box.append(Object.assign(document.createElement("summary"), {
+      textContent: `Layer ${layer} · ${layer === 1 ? "extraction" : `uses layer ${layer - 1}`} · ${inLayer.length} industries · ` +
+        `making ${made.toFixed(2)}/step` + (lost >= 0.005 ? ` · ${lost.toFixed(2)}/step expiring` : "") }));
+    for (const g of inLayer) box.append(industryRow(g));
+    ui.market.append(box);
   }
-  ui.market.append(row);
-  renderIndustries();
   if (state.rules.investing_enabled) {
     const inv = document.createElement("div");
     inv.className = "market-title invest";
@@ -367,39 +337,42 @@ function renderMarket() {
   renderLaborCard();
 }
 
-// One row per industry: primary (capital + labour) or secondary (also inputs), its recipe,
-// how much capital exists, what it makes per step at full capacity, and what one asset costs.
+const openLayers = new Set([1, 2]);   // which layer groups are unfolded (kept across redraws)
+
 function recipeText(good) {
   const inputs = Object.entries(state.rules.inputs[good] || {});
-  return inputs.length ? `${inputs.map(([i, q]) => `${+q.toFixed(3)} ${i}`).join(" + ")} + labour → 1 ${good}`
-    : `labour → 1 ${good}`;
+  return inputs.length ? `1 unit = ${inputs.map(([i, q]) => `${+q.toFixed(3)} ${label(i).toLowerCase()}`).join(" + ")} + labour`
+    : "extracted with labour";
 }
 
-function renderIndustries() {
+function industryRow(g) {
   const m = state.market;
-  const box = Object.assign(document.createElement("div"), { className: "industries" });
-  box.append(Object.assign(document.createElement("div"), { className: "market-title",
-    textContent: "Industries · capital (asset shares) + labour, secondary ones also use inputs" }));
-  for (const g of GOODS) {
-    const primary = !Object.keys(state.rules.inputs[g] || {}).length;
-    const row = Object.assign(document.createElement("div"), { className: "industry-row" });
-    const tag = Object.assign(document.createElement("span"), {
-      className: `industry-tag ${primary ? "primary" : "secondary"}`, textContent: primary ? "primary" : "secondary" });
-    const name = Object.assign(document.createElement("b"), { textContent: g });
-    const recipe = Object.assign(document.createElement("span"), { className: "recipe", textContent: recipeText(g) });
-    const made = m.produced_recent?.[g] ?? 0;
-    const used = m.used_recent?.[g] ?? 0;
-    const stats = Object.assign(document.createElement("span"), { className: "industry-stats",
-      textContent: `${m.assets[g].toFixed(2)} shares · up to ${m.asset_output[g].toFixed(2)}/step · ` +
-        `making ${made.toFixed(2)}/step` + (used ? ` · ${used.toFixed(2)}/step used as inputs` : "") +
-        ` · asset ${usd(m.asset_prices[g])}` });
-    stats.title = "Averages over the last 20 steps. ";
-    stats.title += `Productivity ${m.productivity[g].toFixed(2)} units per labour. Asset price = profit per step ` +
-      "(output × (price − inputs) − labour × wage) ÷ return.";
-    row.append(name, tag, recipe, stats);
-    box.append(row);
-  }
-  ui.market.append(box);
+  const info = industry(g);
+  const row = Object.assign(document.createElement("div"), { className: "industry-row" });
+  const head = Object.assign(document.createElement("div"), { className: "industry-head" });
+  const mult = m.multiplier[g];
+  const arrow = mult > 1.02 ? "▲" : mult < 0.98 ? "▼" : "";
+  head.append(
+    Object.assign(document.createElement("b"), { textContent: label(g) }),
+    Object.assign(document.createElement("span"), { className: "sector", textContent: CATALOG_INFO[g].sector }),
+    Object.assign(document.createElement("span"), { className: "price", textContent: `${usd(m.prices[g])} ` }),
+    Object.assign(document.createElement("span"), { className: `price-move ${arrow === "▲" ? "up" : arrow ? "down" : ""}`, textContent: arrow }));
+  head.title = `Price = base ${usd(m.base_prices[g])} × ${mult.toFixed(2)} (demand ${m.pressure[g].toFixed(2)}: ` +
+    `${m.buyers[g]} want / ${m.sellers[g]} sell · concentration ${m.concentration_factor[g].toFixed(2)})`;
+  const life = state.rules.expiry_enabled ? state.rules.shelf_life[g] : 0;
+  const relieves = info.need ? `relieves ${info.need} ${info.relief.toFixed(3)}/unit` : "not consumed (input only)";
+  const flows = ["produced_recent", "consumed_recent", "used_recent", "expired_recent"].map(k => m[k]?.[g] || 0);
+  const detail = Object.assign(document.createElement("div"), { className: "industry-stats", textContent:
+    `${recipeText(g)} · ${relieves} · ${life ? `keeps ${life} steps` : "never expires"}` });
+  const numbers = Object.assign(document.createElement("div"), { className: "industry-stats", textContent:
+    `${m.units[g]} held · made ${flows[0].toFixed(2)} · eaten ${flows[1].toFixed(2)} · as input ${flows[2].toFixed(2)}` +
+    (flows[3] >= 0.005 ? ` · expired ${flows[3].toFixed(2)}` : "") + " /step · " +
+    `${m.assets[g].toFixed(2)} shares (asset ${usd(m.asset_prices[g])})` });
+  numbers.title = `Averages over the last 20 steps. Capacity ${m.asset_output[g].toFixed(2)}/step when fully staffed; ` +
+    `productivity ${m.productivity[g].toFixed(2)} units per labour.`;
+  row.append(head, detail, numbers);
+  if (m.stockpiling[g]) row.append(Object.assign(document.createElement("span"), { className: "badge", textContent: "agents stockpiling" }));
+  return row;
 }
 
 // Labour market: wage, capacity offered vs labour wanted, who got hired, workers' condition.
@@ -566,21 +539,22 @@ function renderAgents() {
     const lab = a.labor;
     const meta = document.createElement("div");
     meta.className = "meta";
+    const held = RESOURCES.filter(r => a.inventory[r]);
     const fields = [
-      ...RESOURCES.map(r => [r, a.inventory[r] ?? 0]),
+      ...(held.length ? held.map(r => [label(r).toLowerCase(), a.inventory[r]]) : [["goods", "none"]]),
       ["money", usd(a.money)],
       ["movement", a.depressed ? `${a.speed} px (depressed, ${a.movement} normally)` : `${a.speed} px`],
       ...GOODS.filter(r => a.assets[r]).map(r => {
         const price = state.market.asset_prices[r];
-        return [`${r} assets`, `${a.assets[r].toFixed(2)} (worth ${usd(a.assets[r] * price)}, ` +
+        return [`${label(r).toLowerCase()} industry`, `${a.assets[r].toFixed(2)} (worth ${usd(a.assets[r] * price)}, ` +
           `${(a.assets[r] * state.market.asset_output_each[r]).toFixed(2)}/step)`,
           `One whole ${r} asset costs ${usd(price)} now`];
       }),
       // Inputs its secondary industries keep in stock.
-      ...Object.entries(a.input_target || {}).map(([r, n]) => [`${r} input buffer`, n,
+      ...Object.entries(a.input_target || {}).map(([r, n]) => [`${label(r).toLowerCase()} input buffer`, n,
         `Keeps ${n} ${r} for its industries; buys more when below ${Math.round(n * state.rules.input_reorder)}`]),
       // Reserve it wants to hold because the resource is becoming scarce.
-      ...RESOURCES.filter(r => a.reserve?.[r]).map(r => [`${r} reserve`, a.reserve[r],
+      ...RESOURCES.filter(r => a.reserve?.[r]).map(r => [`${label(r).toLowerCase()} reserve`, a.reserve[r],
         "Wants to hold this much because it is becoming scarce"]),
     ];
     for (const [label, value, title] of fields) {
@@ -604,7 +578,7 @@ function renderAgents() {
       : a.activity === "sourcing" && target ? `buying ${a.seeking_for} for its industries from ${target.name}`
       : a.activity === "hiring" && target ? `hiring labour from ${target.name}`
       : a.activity === "selling" && target ? `selling ${a.seeking_for} to ${target.name}`
-      : a.activity === "searching" ? `searching: nobody has ${a.wants.join(" or ")} to sell`
+      : a.activity === "searching" ? `searching: nobody sells anything for ${a.wants.join(" or ")}`
       : a.activity;
     const owned = GOODS.filter(g => a.assets[g]);
     const worked = Object.entries(lab.employers).map(([who, u]) => `${u.toFixed(2)} for ${who}`).join(", ");
@@ -741,6 +715,14 @@ function buildForm() {
       label.append(f.label, input);
       fs.append(label);
     }
+    if (group.collapsed) {   // long lists (one field per good) start folded away
+      const box = Object.assign(document.createElement("details"), { className: "field-group" });
+      box.append(Object.assign(document.createElement("summary"), { textContent: group.legend }));
+      legend.remove();
+      box.append(fs);
+      ui.formFields.append(box);
+      continue;
+    }
     ui.formFields.append(fs);
   }
 }
@@ -830,21 +812,17 @@ function setStatus(message, isError = false) {
 function updateBalance() {
   ui.balance.innerHTML = "";
   // Goods come only from its assets (when staffed); labour from the agent itself.
-  for (const r of GOODS) {
-    const eaten = NEED_FOR[r] ? fieldValue(`rates.${NEED_FOR[r]}`) / state.rules.relief_per_unit : 0;
-    // Inputs its own secondary industries use at full capacity.
-    const asInput = GOODS.reduce((sum, g) => sum + fieldValue(`assets.${g}`) * state.market.asset_output_each[g] *
-      (state.rules.inputs[g]?.[r] || 0), 0);
-    const used = eaten + asInput;
-    const made = fieldValue(`assets.${r}`) * state.market.asset_output_each[r];
-    const net = made - used;
+  // Per need: how fast it grows vs how much relief its own industries make (at full staffing).
+  for (const need of state.consumer_needs) {
+    const grows = fieldValue(`rates.${need}`);
+    const made = activeGoods().filter(g => needOf(g) === need)
+      .reduce((sum, g) => sum + fieldValue(`assets.${g}`) * state.market.asset_output_each[g] * industry(g).relief, 0);
+    const net = made - grows;
     const line = document.createElement("span");
     const even = Math.abs(net) < 1e-9;
     line.className = even ? "" : net < 0 ? "short" : "surplus";
-    const verdict = even ? "balanced" : net < 0 ? `buys ${(-net).toFixed(3)}/step` : `sells ${net.toFixed(3)}/step`;
-    const inputNote = asInput ? ` (${asInput.toFixed(3)} as inputs)` : "";
-    if (!used && !made) continue;
-    line.textContent = `${r}: uses ${used.toFixed(3)}${inputNote} · its assets make ${made.toFixed(3)} per step when staffed → ${verdict}`;
+    line.textContent = `${need}: grows ${grows.toFixed(3)} · its industries make ${made.toFixed(3)} of relief per step → ` +
+      (even ? "balanced" : net < 0 ? `buys ${(-net).toFixed(3)}/step` : `sells ${net.toFixed(3)}/step`);
     ui.balance.append(line);
   }
   const jobs = GOODS.reduce((sum, g) => sum + fieldValue(`assets.${g}`) * state.market.asset_labor[g], 0);

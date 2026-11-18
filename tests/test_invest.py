@@ -4,15 +4,15 @@ from simulation import World, economy
 from simulation.modules import Invest
 from simulation.modules.invest import purchase_limit
 from simulation.rules import GOODS, Rules
+from tests.classic import CALM, CLASSIC
 
-CALM = {"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0}
 NO_ASSETS = {g: 0 for g in GOODS}
 FIXED = {"price_mode": "fixed", "demand_pricing_enabled": False, "fixed_prices": {"food": 1, "water": 1, "games": 1, "labor": 1}}
 
 
 def world_with(**rules):
     # No labour-saving unless a test asks for it: these tests are about output and prices.
-    return World(seed=1, rules=Rules.from_dict({"inputs": {}, "assets": NO_ASSETS, "labor_saving": {"food": 0, "water": 0, "games": 0},
+    return World(seed=1, rules=Rules.from_dict({**CLASSIC, "assets": NO_ASSETS, "labor_saving": {"food": 0, "water": 0, "games": 0},
                                                 **rules}))
 
 
@@ -151,15 +151,17 @@ class InvestTests(unittest.TestCase):
 
 
 class StockBandTests(unittest.TestCase):
-    rules = Rules.from_dict({"stock_cap": 100, "restock_below": 0.5})
+    # Thirst grows 0.01/step and the band covers 1000 steps: a cap of 10 relief = 100 water.
+    rules = Rules.from_dict({**CLASSIC, "stock_steps": 1000, "restock_below": 0.5})
 
     def agent(self, water):
-        return World(seed=1).create_agent(inventory={"water": water}, needs=CALM)
+        return World(seed=1, rules=self.rules).create_agent(inventory={"water": water}, needs=CALM,
+                                                            rates={"thirst": 0.01})
 
     def test_above_the_cap_is_surplus_to_sell(self):
         self.assertEqual(economy.surplus(self.agent(140), "water", self.rules), 40)
         self.assertEqual(economy.surplus(self.agent(90), "water", self.rules), 0)
-        self.assertEqual(economy.surplus(self.agent(140), "water", Rules.from_dict({"selling_enabled": False})), 0)
+        self.assertEqual(economy.surplus(self.agent(140), "water", Rules.from_dict({**CLASSIC, "selling_enabled": False})), 0)
 
     def test_below_the_floor_restocks_up_to_the_cap(self):
         self.assertEqual(economy.restock_shortfall(self.agent(40), "water", self.rules), 60)
@@ -169,9 +171,11 @@ class StockBandTests(unittest.TestCase):
         self.assertEqual(economy.spare(self.agent(70), "water", self.rules), 20)
 
     def test_restocking_buys_up_to_the_cap_with_money(self):
-        rules = Rules.from_dict({"stock_cap": 100, "restock_below": 0.5, "stockpile_budget": 1})
-        buyer = World(seed=1).create_agent(inventory={"water": 40, "food": 100, "games": 100}, needs=CALM, money=100)
-        seller = World(seed=1).create_agent(inventory={"water": 200}, needs=CALM)
+        rules = Rules.from_dict({**CLASSIC, "stock_steps": 1000, "restock_below": 0.5, "stockpile_budget": 1})
+        rates = {"hunger": 0.01, "thirst": 0.01, "boredom": 0.01}
+        buyer = World(seed=1, rules=rules).create_agent(inventory={"water": 40, "food": 100, "games": 100},
+                                                        needs=CALM, rates=rates, money=100)
+        seller = World(seed=1, rules=rules).create_agent(inventory={"water": 200}, needs=CALM, rates=rates)
         bought, paid, stocked, _ = economy.buy(buyer, seller, {"food": 1, "water": 1, "games": 1}, rules)
         self.assertEqual(bought, {"water": 60})
         self.assertEqual(paid, {"money": 60})          # money only, no food bartered away

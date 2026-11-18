@@ -18,6 +18,13 @@ const setupUi = {
 // Spread fields: `whole` = whole numbers, `tiered` = may be shared out in tiers,
 // `min`/`max` = the field's own limits. "seed" is not a rule but is sent with the rules.
 const per = (names, fn) => names.map(fn);
+// Layer of a good under the default recipes (used to group fields; the game's own layers follow its recipes).
+function catalogLayer(g, inputs = Object.fromEntries(GOODS.map(x => [x, CATALOG_INFO[x].inputs])), seen = new Set()) {
+  if (seen.has(g)) return 1;
+  seen.add(g);
+  const recipe = inputs[g] || {};
+  return 1 + Math.max(0, ...Object.keys(recipe).map(i => catalogLayer(i, inputs, new Set(seen))));
+}
 const SETUP_SECTIONS = [
   { title: "World", hint: "How many agents, and how meetings work.", fields: [
     { path: "agents", label: "Agents", kind: "int", min: 1, max: 500 },
@@ -30,21 +37,21 @@ const SETUP_SECTIONS = [
   { title: "Prices", hint: "Scarcity: total money ÷ total units × (1 − share of that resource). Fixed: the prices below.", fields: [
     { path: "price_mode", label: "Price rule", kind: "choice", full: true,
       options: [["scarcity", "Scarcity (changes with supply)"], ["fixed", "Fixed prices"]] },
-    ...per(PRICED, r => ({ path: `fixed_prices.${r}`, label: r === "labor" ? "Wage" : `${cap(r)} price`, kind: "float", min: 0, step: 0.01,
-      enabledWhen: v => v.price_mode === "fixed" })),
+    { path: "fixed_prices.labor", label: "Wage", kind: "float", min: 0, step: 0.01, enabledWhen: v => v.price_mode === "fixed" },
   ]},
   { title: "Starting agents", wide: true,
     hint: "What each new agent begins with. Every row has its own distribution; “Copy to all resources” reuses one.", fields: [
-    ...per(RESOURCES, r => ({ path: `inventory.${r}`, label: cap(r), kind: "spread", whole: true, tiered: true, min: 0 })),
-    ...per(GOODS, r => ({ path: `assets.${r}`, label: `${cap(r)} assets (shares)`, kind: "spread", tiered: true,
-      min: 0, step: 0.1 })),
+    ...per(RESOURCES, r => ({ path: `inventory.${r}`, label: label(r), kind: "spread", whole: true, tiered: true, min: 0,
+      group: `Starting stock · layer ${catalogLayer(r)} goods` })),
+    ...per(GOODS, r => ({ path: `assets.${r}`, label: `${label(r)} (shares)`, kind: "spread", tiered: true,
+      min: 0, step: 0.1, group: `Starting industries (asset shares) · layer ${catalogLayer(r)}` })),
     { path: "money", label: "Money", kind: "spread", tiered: true, min: 0, step: 0.01 },
     { path: "movement", label: "Movement (px)", kind: "spread", whole: true, min: 1, max: 200 },
     { path: "start_needs", label: "Starting needs", kind: "spread", min: 0, max: 1, step: 0.05 },
   ]},
   { title: "Labour capacity", wide: true, hint: "Labour is the only thing agents make themselves, and it is never stored: " +
       "each step agents can work up to their capacity (scaled by efficiency) and sell it in the labour market. Anything " +
-      "unsold is lost. Food, water and games are only made by assets worked by labour.", fields: [
+      "unsold is lost. Every good is only made by its industry's assets worked by labour.", fields: [
     { path: "labor_capacity", label: "Capacity per step", kind: "spread", min: 0, step: 0.05 },
   ]},
   { title: "Labour market", hint: "Base wage = labour share × value one unit of labour makes. The wage then follows " +
@@ -74,7 +81,7 @@ const SETUP_SECTIONS = [
   { title: "Stock band", hint: "Agents keep between the floor and the cap of each resource: above the cap they go " +
       "out to sell the surplus (to make money for assets); below the floor they go out to buy back up to the cap.", fields: [
     { path: "selling_enabled", label: "Agents sell surplus and restock", kind: "bool", full: true },
-    { path: "stock_cap", label: "Cap (units of each)", kind: "int", min: 1, enabledWhen: v => v.selling_enabled },
+    { path: "stock_steps", label: "Cap (steps of each need)", kind: "int", min: 1, enabledWhen: v => v.selling_enabled },
     { path: "restock_below", label: "Floor (0.5 = half the cap)", kind: "float", min: 0, max: 1, step: 0.05,
       enabledWhen: v => v.selling_enabled },
   ]},
@@ -94,10 +101,10 @@ const SETUP_SECTIONS = [
       "concentration. Pressure = ((buyers+1) ÷ (sellers+1)) ^ elasticity. Concentration = 1 + weight × C, where C is 0 when the " +
       "sellable supply is spread evenly and 1 when one agent holds it all. Under pressure, each extra unit in a deal costs more.", fields: [
     { path: "demand_pricing_enabled", label: "Prices react to demand and concentration", kind: "bool", full: true },
-    ...per(PRICED, r => ({ path: `price_elasticity.${r}`, label: `${cap(r)} elasticity (0 = none)`, kind: "float",
-      min: 0, max: 3, step: 0.1, enabledWhen: v => v.demand_pricing_enabled })),
-    ...per(RESOURCES, r => ({ path: `concentration_weight.${r}`, label: `${cap(r)} concentration weight`, kind: "float",
-      min: 0, max: 10, step: 0.1, enabledWhen: v => v.demand_pricing_enabled })),
+    { path: "price_elasticity.labor", label: "Labour elasticity (0 = none)", kind: "float", min: 0, max: 3, step: 0.1,
+      enabledWhen: v => v.demand_pricing_enabled },
+    { path: "concentration_weight.labor", label: "Labour concentration weight", kind: "float", min: 0, max: 10, step: 0.1,
+      enabledWhen: v => v.demand_pricing_enabled },
     { path: "price_adjust_speed", label: "Speed (share of gap per step)", kind: "float", min: 0.01, max: 1, step: 0.05,
       enabledWhen: v => v.demand_pricing_enabled },
     { path: "price_floor", label: "Never below base ×", kind: "float", min: 0.01, max: 1, step: 0.05,
@@ -107,33 +114,57 @@ const SETUP_SECTIONS = [
     { path: "unit_markup", label: "Extra unit costs more (0.05 = +5%)", kind: "float", min: 0, max: 1, step: 0.01,
       full: true, enabledWhen: v => v.demand_pricing_enabled },
   ]},
-  { title: "Industries", hint: "Every good has its own industry, whose capital is its assets. Primary (extraction) " +
-      "industries need only capital and labour. Secondary industries also use inputs made by other industries, e.g. " +
-      "“1 grain” means each unit of food uses 1 grain. Leave a recipe empty to make the industry primary. Output is " +
-      "limited by whatever runs out first: labour, capital or inputs.", fields: [
-    ...per(GOODS, g => ({ path: `inputs.${g}`, label: `${cap(g)} uses (per unit)`, kind: "recipe", full: true })),
+  { title: "Industries and layers", hint: "Every good has its own industry (sector and industry names follow the " +
+      "TRBC classification used by investing.com). Layer 1 industries extract (capital + labour); an industry that uses " +
+      "layer-n goods is layer n + 1. Industries deeper than the number of layers chosen here don't exist in this game. " +
+      "A unit relieves its need by base relief × fit × (1 + layer bonus × (layer − 1)), so deeper layers address needs " +
+      "better. Every unit is thrown away once it is older than its shelf life.", fields: [
+    { path: "industry_layers", label: "Industry layers in this game (1–10)", kind: "int", min: 1, max: 10, full: true },
+    { path: "layer_bonus", label: "Extra relief per layer (0.5 = +50%)", kind: "float", min: 0, max: 10, step: 0.1 },
+    { path: "expiry_enabled", label: "Goods expire after their shelf life", kind: "bool" },
     { path: "input_buffer_steps", label: "Owners keep inputs for (steps)", kind: "int", min: 1, max: 10000 },
     { path: "input_reorder", label: "… and reorder below (share)", kind: "float", min: 0, max: 1, step: 0.05 },
-    { path: "max_output_stock", label: "Stop producing above (units held, 0 = never)", kind: "int", min: 0 },
-    { path: "cost_floor", label: "Secondary goods never sell below unit cost", kind: "bool", full: true },
+    { path: "output_buffer_steps", label: "Stop producing above (steps of output held)", kind: "int", min: 0 },
+    { path: "max_output_stock", label: "… or above (units held, 0 = never)", kind: "int", min: 0 },
+    { path: "cost_floor", label: "Secondary goods never sell below their inputs", kind: "bool", full: true },
+    { path: "profit_check", label: "Industries stop hiring when labour costs more than it adds", kind: "bool", full: true },
+    { path: "labor_priority", label: "Labour goes", kind: "choice", full: true,
+      options: [["even", "Evenly over an owner's industries"], ["value", "To the most valuable industries first"]] },
   ]},
+  { title: "Industry catalog", wide: true, hint: "One block per industry. Recipe: what one unit uses (e.g. “1 grain”; " +
+      "empty = extraction). Relieves: the need consuming it lowers and how well (fit 0–1). Shelf life in steps (0 = never " +
+      "expires). Jobs per asset × units per labour = what one asset makes per step when fully staffed.", fields:
+    GOODS.flatMap(g => {
+      const e = CATALOG_INFO[g];
+      const group = `${e.label} · layer ${catalogLayer(g)} · ${e.sector} · ${e.industry}`;
+      return [
+        { path: `inputs.${g}`, label: "Uses per unit", kind: "recipe", full: true, group },
+        { path: `satisfies.${g}.need`, label: "Relieves", kind: "choice", group,
+          options: [["", "nothing (input only)"], ...NEEDS.filter(n => n !== "sleep").map(n => [n, n])] },
+        { path: `satisfies.${g}.fit`, label: "Fit (0–1)", kind: "float", min: 0, max: 1, step: 0.1, group, optional: true,
+          enabledWhen: v => !!v.satisfies?.[g]?.need },
+        { path: `shelf_life.${g}`, label: "Shelf life (steps)", kind: "int", min: 0, group },
+        { path: `asset_labor.${g}`, label: "Jobs per asset", kind: "float", min: 0, step: 0.05, group },
+        { path: `productivity.${g}`, label: "Units per labour", kind: "float", min: 0, step: 0.1, group },
+        { path: `productivity_growth.${g}`, label: "Productivity growth", kind: "float", min: -0.99, max: 100, step: 0.01, group },
+        { path: `labor_saving.${g}`, label: "Labour-saving", kind: "float", min: -1, max: 0.99, step: 0.01, group },
+        { path: `asset_return.${g}`, label: "Asset return", kind: "float", min: 0.0001, max: 10, step: 0.001, group },
+        { path: `fixed_prices.${g}`, label: "Fixed price", kind: "float", min: 0, step: 0.01, group,
+          enabledWhen: v => v.price_mode === "fixed" },
+        { path: `price_elasticity.${g}`, label: "Price elasticity", kind: "float", min: 0, max: 3, step: 0.1, group,
+          enabledWhen: v => v.demand_pricing_enabled },
+        { path: `concentration_weight.${g}`, label: "Concentration weight", kind: "float", min: 0, max: 10, step: 0.1, group,
+          enabledWhen: v => v.demand_pricing_enabled },
+      ];
+    }) },
   { title: "Assets, productivity and investment", hint: "Each good has its own asset. One asset share employs up to " +
       "“jobs per asset” labour per step; each unit of labour makes “productivity” units of the good, and productivity grows " +
-      "over time. Output = productivity × min(labour, shares × jobs per asset). The only assets are the starting ones; they " +
+      "over time (per-industry numbers are in the Industry catalog). Output = productivity × min(labour, shares × jobs " +
+      "per asset). The only assets are the starting ones; they " +
       "change hands between agents. Asset price = output per step × good price ÷ return. Agents invest spare cash in assets " +
       "of what they lack, buying from owners short of cash or holding more than the stock cap of that good.", fields: [
     { path: "investing_enabled", label: "Agents buy and sell assets", kind: "bool", full: true },
-    ...per(GOODS, r => ({ path: `asset_labor.${r}`, label: `${cap(r)}: jobs per asset (labour/step)`, kind: "float",
-      min: 0, step: 0.05 })),
-    ...per(GOODS, r => ({ path: `productivity.${r}`, label: `${cap(r)}: units per labour`, kind: "float", min: 0,
-      step: 0.1 })),
-    ...per(GOODS, r => ({ path: `productivity_growth.${r}`, label: `${cap(r)}: productivity growth (0.05 = 5%)`,
-      kind: "float", min: -0.99, max: 100, step: 0.01 })),
-    ...per(GOODS, r => ({ path: `labor_saving.${r}`, label: `${cap(r)}: labour-saving (0.03 = −3% labour/asset)`,
-      kind: "float", min: -1, max: 0.99, step: 0.01 })),
-    { path: "productivity_growth_steps", label: "… every (steps)", kind: "int", min: 1, max: 100000 },
-    ...per(GOODS, r => ({ path: `asset_return.${r}`, label: `${cap(r)} asset return (0.01 = 1%)`, kind: "float",
-      min: 0.0001, max: 10, step: 0.001, enabledWhen: v => v.investing_enabled })),
+    { path: "productivity_growth_steps", label: "Productivity grows every (steps)", kind: "int", min: 1, max: 100000 },
     { path: "liquidity_units", label: "Keep cash for (units of each)", kind: "float", min: 0, step: 1,
       enabledWhen: v => v.investing_enabled },
     { path: "min_investment", label: "Invest once spare cash ≥", kind: "float", min: 0.01, step: 1,
@@ -178,7 +209,7 @@ const PRESETS = [
   ["balanced", "Balanced (no shortages)", { rates: { thirst: 0.01 } }],
   // Small stocks: agents need each other (and owners need workers) from the start.
   ["lean", "Lean start (small stocks: lots of trading)", {
-    inventory: { food: 10, water: 10, games: 10 }, stock_cap: 20,
+    inventory: { food: 10, water: 10, games: 10 }, stock_steps: 20,
     money: 2250 }],   // keeps the starting price at $50
   ["spread", "Spread ownership (everyone owns some assets)", { assets: Object.fromEntries(GOODS.map(g =>
     [g, { dist: "uniform", min: 0, max: 2 }])) }],
@@ -213,15 +244,15 @@ function parseRecipe(text, good) {
   const recipe = {};
   for (const part of text.split("+").map(p => p.trim()).filter(Boolean)) {
     let amount, name, m;
-    if ((m = part.match(/^(\d*\.?\d+)?\s*([a-z]+)$/i))) [, amount, name] = m;        // "0.5 wood", "wood"
-    else if ((m = part.match(/^([a-z]+)\s+(\d*\.?\d+)$/i))) [, name, amount] = m;    // "wood 0.5"
+    if ((m = part.match(/^(\d*\.?\d+)?\s*([a-z_]+)$/i))) [, amount, name] = m;        // "0.5 wood", "wood"
+    else if ((m = part.match(/^([a-z_]+)\s+(\d*\.?\d+)$/i))) [, name, amount] = m;    // "wood 0.5"
     const input = name?.toLowerCase();
     if (!input || !GOODS.includes(input)) {
-      throw new Error(`${cap(good)} recipe: “${part}” — use amounts of ${GOODS.join(", ")}, e.g. “1 grain + 0.5 wood”`);
+      throw new Error(`${label(good)} recipe: “${part}” isn't a good — use amounts of goods by id, e.g. “1 grain + 0.5 natural_gas”`);
     }
-    if (input === good) throw new Error(`${cap(good)} can't be an input of itself`);
+    if (input === good) throw new Error(`${label(good)} can't be an input of itself`);
     const qty = amount === undefined ? 1 : Number(amount);
-    if (!(qty >= 0)) throw new Error(`${cap(good)} recipe: amount of ${input} must be ≥ 0`);
+    if (!(qty >= 0)) throw new Error(`${label(good)} recipe: amount of ${input} must be ≥ 0`);
     if (qty > 0) recipe[input] = (recipe[input] || 0) + qty;
   }
   return recipe;
@@ -302,9 +333,23 @@ function buildSetupForm() {
     hint.textContent = section.hint;
     const grid = document.createElement("div");
     grid.className = section.wide ? "spread-list" : "setup-fields";
+    // Fields with a `group` go into a collapsible block of that name inside the section.
+    const groups = new Map();
+    const gridFor = (f) => {
+      if (!f.group) return grid;
+      if (!groups.has(f.group)) {
+        const details = Object.assign(document.createElement("details"), { className: "setup-group" });
+        details.append(Object.assign(document.createElement("summary"), { textContent: f.group }));
+        const inner = Object.assign(document.createElement("div"), { className: f.kind === "spread" ? "spread-list" : "setup-fields" });
+        details.append(inner);
+        grid.append(details);
+        groups.set(f.group, inner);
+      }
+      return groups.get(f.group);
+    };
     for (const f of section.fields) {
       f.section = section;
-      if (f.kind === "spread") { grid.append(buildSpreadRow(f)); continue; }
+      if (f.kind === "spread") { gridFor(f).append(buildSpreadRow(f)); continue; }
       const label = document.createElement("label");
       if (f.full) label.classList.add("full");
       let el;
@@ -324,7 +369,7 @@ function buildSetupForm() {
       }
       el.name = f.path;
       label.append(f.label, el);
-      grid.append(label);
+      gridFor(f).append(label);
     }
     box.append(h, hint, grid);
     setupUi.sections.append(box);
@@ -549,9 +594,11 @@ function readSetup() {
       }
     }
     if (f.path === "seed") { seed = value; continue; }
-    const [group, key] = f.path.split(".");
-    if (key) (rules[group] ||= {})[key] = value;
-    else rules[group] = value;
+    // "a.b.c" -> rules.a.b.c
+    const keys = f.path.split(".");
+    let at = rules;
+    for (const k of keys.slice(0, -1)) at = (at[k] ||= {});
+    at[keys[keys.length - 1]] = value;
   }
   return { rules, seed };
 }
@@ -631,51 +678,53 @@ function renderPreview(r, error) {
   const avg = (spec) => spreadMean(spec);
   const varies = (spec) => typeof spec !== "number";
 
-  // Can the economy feed everyone? Goods need assets (capacity) and labour (to staff them).
+  // Industries in this game: layers from the recipes, cut at the chosen number of layers.
   const n = r.agents;
   const sharesPerAgent = (g) => avg(r.assets[g]);
   const perShare = (g) => r.asset_labor[g] * r.productivity[g];
-  // What everyone needs per step: consumables for needs, then (repeatedly, for chains) the
-  // inputs that making those takes.
-  const required = Object.fromEntries(GOODS.map(g => [g, NEED_FOR[g] ? avg(r.rates[NEED_FOR[g]]) / r.relief_per_unit * n : 0]));
-  const asInput = Object.fromEntries(GOODS.map(g => [g, 0]));
-  for (let pass = 0; pass < GOODS.length; pass++) {
-    for (const g of GOODS) asInput[g] = 0;
-    for (const [out, recipe] of Object.entries(r.inputs || {})) {
-      const made = (NEED_FOR[out] ? avg(r.rates[NEED_FOR[out]]) / r.relief_per_unit * n : 0) + asInput[out];
-      for (const [i, q] of Object.entries(recipe)) asInput[i] += made * q;
+  const layerOf = (g) => catalogLayer(g, r.inputs || {});
+  const active = GOODS.filter(g => layerOf(g) <= r.industry_layers);
+  const deepest = Math.max(...GOODS.map(layerOf));
+  const relief = (g) => {
+    const spec = r.satisfies?.[g];
+    return spec?.need && spec.fit > 0 ? r.relief_per_unit * spec.fit * (1 + r.layer_bonus * (layerOf(g) - 1)) : 0;
+  };
+  line(`Industries: ${active.length} of ${GOODS.length} exist (layers 1–${Math.min(r.industry_layers, deepest)} of the ` +
+       `${deepest} the recipes use). A layer-${Math.min(r.industry_layers, deepest)} good relieves ` +
+       `${(1 + r.layer_bonus * (Math.min(r.industry_layers, deepest) - 1)).toFixed(1)}× what a layer-1 good of the same fit does.`);
+  // Can the economy meet every need? Relief its industries can make at full staffing vs how fast needs grow.
+  for (const need of NEEDS.filter(x => x !== "sleep")) {
+    const goods = active.filter(g => r.satisfies?.[g]?.need === need && relief(g) > 0).sort((a, b) => relief(b) - relief(a));
+    const grows = avg(r.rates[need]) * n;
+    if (!goods.length) {
+      line(`${cap(need)}: nothing in this game relieves it (it grows ${grows.toFixed(3)}/step in total).`, grows ? "short" : "");
+      continue;
     }
+    const capacity = goods.reduce((sum, g) => sum + sharesPerAgent(g) * n * perShare(g) * relief(g), 0);
+    const best = goods[0];
+    const head = `${cap(need)}: grows ${grows.toFixed(3)}/step in total; its ${goods.length} good${goods.length === 1 ? "" : "s"} (best: ${label(best).toLowerCase()}, ` +
+                 `layer ${layerOf(best)}, ${relief(best).toFixed(3)}/unit) can relieve ${capacity.toFixed(3)}/step when fully staffed`;
+    const deadly = (need === "hunger" || need === "thirst") && r.death_enabled;
+    line(capacity >= grows ? `${head}.` : `${head} → short${deadly ? " (can kill)" : ""}.`, capacity >= grows ? "surplus" : "short");
   }
-  for (const g of GOODS) {
-    const need = NEED_FOR[g];
-    const rate = need ? avg(r.rates[need]) : 0;
-    const use = required[g] + asInput[g];
-    const capacity = sharesPerAgent(g) * n * perShare(g);
-    const kind = Object.keys(r.inputs?.[g] || {}).length ? `secondary, uses ${formatRecipe(r.inputs[g])} per unit` : "primary";
-    const why = asInput[g] ? ` (${asInput[g].toFixed(2)} as inputs)` : "";
-    const head = `${cap(g)} (${kind}): agents use ${use.toFixed(2)}/step${why}; its assets can make ` +
-                 `${capacity.toFixed(2)}/step when fully staffed`;
-    if (capacity >= use) line(`${head}.`, "surplus");
-    else {
-      const lasts = Math.round(avg(r.inventory[g]) / ((use - capacity) / n));
-      let text = `${head} → short ${(use - capacity).toFixed(2)}/step; stocks last ~${lasts} steps.`;
-      const toCritical = rate ? Math.round((1 - r.seek_threshold) / rate) : Infinity;
-      if (need && need !== "boredom" && r.death_enabled) text += ` Then ${need} kills in ~${toCritical} steps.`;
-      line(text, "short");
-    }
+  if (r.expiry_enabled) {
+    const quick = active.filter(g => r.shelf_life[g] > 0).sort((a, b) => r.shelf_life[a] - r.shelf_life[b]).slice(0, 4);
+    if (quick.length) line(`Expiry: ${quick.map(g => `${label(g).toLowerCase()} ${r.shelf_life[g]}`).join(", ")} steps keep the ` +
+                           "shortest; agents only stock perishables they will use in time.");
   }
   const supply = avg(r.labor_capacity) * n;
-  const jobs = GOODS.reduce((sum, g) => sum + sharesPerAgent(g) * n * r.asset_labor[g], 0);
+  const jobs = active.reduce((sum, g) => sum + sharesPerAgent(g) * n * r.asset_labor[g], 0);
+  const range = (vals) => { const lo = Math.min(...vals), hi = Math.max(...vals); return lo === hi ? `${lo}` : `${lo}–${hi}`; };
   line(`Labour: agents make ${supply.toFixed(2)}/step and assets can employ ${jobs.toFixed(2)}/step → ` +
        (supply >= jobs ? `${(supply - jobs).toFixed(2)}/step more work than jobs (labour will be cheap).`
                        : `${(jobs - supply).toFixed(2)}/step more jobs than workers, so assets can't all run.`),
        supply >= jobs ? "" : "short");
   line(`Labour is sold each step and never stored; owners first use their own. Over ${r.productivity_growth_steps} steps ` +
-       `each industry needs ${GOODS.map(g => `${g} ${(r.labor_saving[g] * 100).toFixed(0)}%`).join(", ")} less labour per asset ` +
-       `while each unit of labour makes ${GOODS.map(g => `${g} +${(r.productivity_growth[g] * 100).toFixed(0)}%`).join(", ")} more.`);
+       `industries need ${range(active.map(g => +(r.labor_saving[g] * 100).toFixed(0)))}% less labour per asset ` +
+       `while each unit of labour makes ${range(active.map(g => +(r.productivity_growth[g] * 100).toFixed(0)))}% more.`);
   const stock = RESOURCES.map(x => avg(r.inventory[x]));
-  const needPerStep = Math.max(...CONSUMABLES.map(x => avg(r.rates[NEED_FOR[x]]) / r.relief_per_unit));
-  const goodsStock = Math.min(...CONSUMABLES.map(x => avg(r.inventory[x])));
+  const needPerStep = Math.max(...["food", "water"].map(x => avg(r.rates[CATALOG_INFO[x].need]) / r.relief_per_unit));
+  const goodsStock = Math.min(...["food", "water"].map(x => avg(r.inventory[x])));
   if (goodsStock / needPerStep > 300) {
     line(`Agents start with enough of everything for ${Math.round(goodsStock / needPerStep)}+ steps, ` +
          "so they won't need to trade goods for a long time. Lower the starting inventory for more trading.");
@@ -689,11 +738,11 @@ function renderPreview(r, error) {
 
   if (r.demand_pricing_enabled) {
     const clamp = (v) => Math.min(Math.max(v, r.price_floor), r.price_cap);
-    for (const x of RESOURCES) {
-      const at = (b, s) => clamp(((b + 1) / (s + 1)) ** r.price_elasticity[x]);
-      line(`${cap(x)}: 9 buyers for 1 seller → ×${at(9, 1).toFixed(2)}; 1 buyer for 9 sellers → ×${at(1, 9).toFixed(2)}; ` +
-           `supply held by one agent → ×${clamp(1 + r.concentration_weight[x]).toFixed(2)}.`);
-    }
+    const e = active.reduce((sum, x) => sum + r.price_elasticity[x], 0) / active.length;
+    const w = active.reduce((sum, x) => sum + r.concentration_weight[x], 0) / active.length;
+    const at = (b, s) => clamp(((b + 1) / (s + 1)) ** e);
+    line(`At the average elasticity (${e.toFixed(2)}): 9 buyers for 1 seller → ×${at(9, 1).toFixed(2)}; 1 buyer for 9 ` +
+         `sellers → ×${at(1, 9).toFixed(2)}; supply held by one agent → ×${clamp(1 + w).toFixed(2)}.`);
     line(`Prices close ${(r.price_adjust_speed * 100).toFixed(0)}% of the gap each step` +
          (r.unit_markup ? `, and the 5th unit in one deal costs ×${((1 + r.unit_markup) ** 4).toFixed(2)} the first.` : "."));
   }
@@ -703,14 +752,10 @@ function renderPreview(r, error) {
     const units = stock.reduce((a, b) => a + b, 0);
     const startPrices = RESOURCES.map((x, i) => r.price_mode === "fixed" ? r.fixed_prices[x]
       : units ? avg(r.money) / units * (1 - stock[i] / units) : 0);
-    GOODS.forEach((x, i) => {
-      const out = perShare(x);
-      const grown = r.productivity[x] * (1 + r.productivity_growth[x]) ** (500 / r.productivity_growth_steps);
-      line(`${cap(x)} asset: employs ${r.asset_labor[x]} labour/step making ${out.toFixed(3)} ${x}/step ` +
-           `(productivity ${r.productivity[x]} → ${grown.toFixed(2)} after 500 steps); costs ` +
-           `${usd(out * startPrices[i] / r.asset_return[x])} at starting prices.`);
-    });
-    const held = GOODS.reduce((sum, x) => sum + avg(r.assets[x]), 0);
+    const values = active.map(x => perShare(x) * startPrices[RESOURCES.indexOf(x)] / r.asset_return[x]);
+    line(`One whole asset makes ${range(active.map(x => +perShare(x).toFixed(2)))} units/step when fully staffed and ` +
+         `costs about ${usd(Math.min(...values))}–${usd(Math.max(...values))} at starting prices (before wages).`);
+    const held = active.reduce((sum, x) => sum + avg(r.assets[x]), 0);
     line(`Assets: ${held.toFixed(2)} shares per agent on average. No new assets are ever made` +
          (held ? "; they only change hands between agents." : ", and with none to start nothing can be made."),
          held ? "" : "short");
@@ -735,13 +780,15 @@ function renderPreview(r, error) {
     : "Sleep: recovery is 0, so a tired agent stops forever.", rec ? "" : "short");
 
   if (r.price_mode === "fixed") {
-    line(`Prices are fixed: ${RESOURCES.map(x => `${x} ${usd(r.fixed_prices[x])}`).join(", ")}.`);
+    line(`Prices are fixed: ${["food", "water", "games"].map(x => `${x} ${usd(r.fixed_prices[x])}`).join(", ")}, … ` +
+         "(each industry's price is in the Industry catalog).");
   } else {
     const total = stock.reduce((a, b) => a + b, 0);
     const money = avg(r.money);
     const prices = RESOURCES.map((x, i) => total ? (money / total) * (1 - stock[i] / total) : 0);
-    line(`Starting prices (roughly): ${RESOURCES.map((x, i) => `${x} ${usd(prices[i])}`).join(", ")}. ` +
-         "Scarcer resources get dearer as stocks change.");
+    const shown = ["water", "food", "games"].map(x => `${x} ${usd(prices[RESOURCES.indexOf(x)])}`);
+    line(`Starting prices (roughly): ${shown.join(", ")}; goods nobody holds yet start dearest. ` +
+         "Scarcer resources get dearer as stocks change, and a good never sells below its inputs.");
   }
 }
 

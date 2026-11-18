@@ -39,6 +39,8 @@ from simulation import World
 from simulation.report import build_report
 from simulation.rules import Rules
 from simulation.agent import NEED_NAMES
+from simulation.catalog import CATALOG, SECTORS
+from simulation.rules import MAX_LAYERS, NEEDS
 from simulation.economy import GOODS, RESOURCES
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -175,6 +177,8 @@ class Handler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_GET(self):
+        if self.path == "/catalog.js":
+            return self._script(catalog_script())
         if self.path == "/api/state":
             return self._json(self.sim.state())
         if self.path.startswith("/api/report"):
@@ -235,6 +239,14 @@ class Handler(SimpleHTTPRequestHandler):
             raise ValueError("body must be a JSON object")
         return data
 
+    def _script(self, text):
+        data = text.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/javascript; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def _json(self, payload, status=200):
         data = json.dumps(payload).encode()
         self.send_response(status)
@@ -246,6 +258,12 @@ class Handler(SimpleHTTPRequestHandler):
     def log_message(self, fmt, *args):
         if not self.path.startswith("/api/"):
             super().log_message(fmt, *args)
+
+
+def catalog_script():
+    """The industry catalog and needs for the browser, as window.CATALOG (loaded before app.js)."""
+    data = {"goods": CATALOG, "needs": list(NEEDS), "sectors": list(SECTORS), "max_layers": MAX_LAYERS}
+    return f"window.CATALOG = {json.dumps(data)};\n"
 
 
 def lan_address():

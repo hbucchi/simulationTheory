@@ -5,6 +5,7 @@ import unittest
 from simulation import World, economy
 from simulation.distributions import allocate, normalize, sample
 from simulation.rules import Rules
+from tests.classic import CALM, CLASSIC
 
 
 def draws(spec, n=5000, whole=False):
@@ -90,7 +91,7 @@ class DistributionTests(unittest.TestCase):
 class RulesTests(unittest.TestCase):
     def test_partial_rules_keep_defaults(self):
         rules = Rules.from_dict({"inventory": {"water": 5}, "rates": {"thirst": 0.02}})
-        self.assertEqual(rules.inventory, {"food": 100, "water": 5, "games": 100, "grain": 20, "wood": 20})
+        self.assertEqual(rules.inventory, {**Rules().inventory, "water": 5})
         self.assertEqual(rules.rates["hunger"], 0.01)
 
     def test_invalid_rules_are_rejected(self):

@@ -13,7 +13,7 @@ from .government import Government
 from .labor import LaborMarket
 from .modules.invest import cash_needed, transfer_shares
 from .report import Recorder
-from .rules import SPREADS, Rules
+from .rules import NEEDS, SPREADS, Rules
 
 # Soft but distinguishable colours, matching the UI palette.
 AGENT_COLORS = ["#6c72f0", "#f08a6c", "#4fbf96", "#e9b949", "#a77de0", "#4aa3df", "#e77fa9", "#8cbf5f"]
@@ -64,6 +64,12 @@ class World:
         self.concentration = {r: 0.0 for r in economy.RESOURCES}
         self.price_history = {r: deque(maxlen=self.PRICE_HISTORY) for r in economy.PRICED}
         self.next_id = 1
+        # {good: {agent: units it can spare}}, worked out once per step in update_demand and used
+        # to pick sellers to walk to (the trade itself re-checks what the seller can spare).
+        self.spare_table = {}
+        self.buyer_sets = {}   # {good: agents that want it this step}
+        self.profitable = {}   # {good: its industry pays the wage at current prices} (update_profitability)
+        self.step_prices = None
 
     def clamp_position(self, x, y):
         return (min(max(x, 0.0), self.width), min(max(y, 0.0), self.height))
@@ -100,8 +106,7 @@ class World:
 
         rx, ry = self.random_position()
         x, y = self.clamp_position(rx if x is None else x, ry if y is None else y)
-        start_needs = {n: round(draw(r.start_needs, field="start_needs"), 2)
-                       for n in ("hunger", "sleep", "thirst", "boredom")}
+        start_needs = {n: round(draw(r.start_needs, field="start_needs"), 2) for n in NEEDS}
         start_needs.update(needs or {})
         # Rest runs first so a resting agent's sleep never grows that step.
         modules = [Rest(draw(r.sleep_recovery, field="sleep_recovery") if sleep_recovery is None else sleep_recovery),
@@ -116,16 +121,39 @@ class World:
             x, y, name=name, **start_needs,
             money=round(draw(r.money, field="money"), 2) if money is None else money,
             movement=draw(r.movement, True, "movement") if movement is None else movement,
-            inventory=Inventory(now=self.tick, items={
-                **{k: draw(v, True, "inventory") for k, v in r.inventory.items()},
-                                 **(inventory or {})}),
+            inventory=self.new_inventory({**{k: draw(v, True, "inventory") for k, v in r.inventory.items()},
+                                          **(inventory or {})}),
             modules=modules,
         )
         agent.depression_factor = r.depression_factor
         agent.labor_capacity = draw(r.labor_capacity, field="labor_capacity") if labor_capacity is None else labor_capacity
         drawn = {k: draw(v, False, "assets") for k, v in r.assets.items()}
-        agent.assets = {k: v for k, v in {**drawn, **(assets or {})}.items() if v}
+        agent.assets = {k: v for k, v in {**drawn, **(assets or {})}.items() if v and r.is_active(k)}
         return self.add_agent(agent)
+
+    # A starting stock is spread over this many batches of different ages, so it doesn't all
+    # expire on the same step.
+    START_BATCHES = 10
+
+    def new_inventory(self, items):
+        """An inventory for this game's rules: goods with a shelf life are perishable (when expiry
+        is on). Starting units of a perishable good are spread evenly over ages, so they expire
+        bit by bit over one shelf life. Goods of industries not in this game are left out."""
+        r = self.rules
+        life = {g: d for g, d in r.shelf_life.items() if d > 0 and r.is_active(g)} if r.expiry_enabled else {}
+        inventory = Inventory(perishable=life, now=self.tick)
+        for good, qty in items.items():
+            if not r.is_active(good):
+                continue
+            if good not in life:
+                inventory.items[good] = qty
+                continue
+            batches = max(1, min(int(qty), self.START_BATCHES))
+            for i in range(batches):
+                part = qty // batches + (1 if i < qty % batches else 0)
+                if part:
+                    inventory.add(good, part, expires=self.tick + math.ceil(life[good] * (i + 1) / batches))
+        return inventory
 
     def update_agent(self, agent, *, name=None, x=None, y=None, needs=None, inventory=None,
                      money=None, movement=None, labor_capacity=None, rates=None, sleep_recovery=None,
@@ -192,17 +220,32 @@ class World:
         resources it is short of in its reserve. Agents it has just met are skipped.
         """
         if stockpile:
-            wanted = [r for r in economy.RESOURCES
+            wanted = [r for r in self.rules.active_goods
                       if economy.stockpile_shortfall(agent, r, self.rules, self.scarcity) > 0
                       or economy.restock_shortfall(agent, r, self.rules) > 0
                       or economy.input_shortfall(agent, r, self.rules) > 0]
             wanted.sort(key=lambda r: self.scarcity[r], reverse=True)
         else:
-            wanted = [r for r in economy.RESOURCES if economy.demand(agent, r, self.rules) > 0]
-            wanted.sort(key=lambda r: economy.need_level(agent, r), reverse=True)
+            # Most pressing need first; any good that relieves it will do, so the nearest agent
+            # with spare of any of them is chosen (and the most effective good it has is named).
+            rules = self.rules
+            for need in sorted(rules.consumer_needs, key=lambda n: getattr(agent, n), reverse=True):
+                goods = [g for g in rules.goods_for(need) if economy.demand(agent, g, rules) > 0]
+                if not goods:
+                    continue
+                best = None
+                for o in self.agents:
+                    if o is agent or self.in_cooldown(agent, o):
+                        continue
+                    have = next((g for g in goods if self.spare_table.get(g, {}).get(o, 0) > 0), None)
+                    if have and (best is None or agent.distance_to(o) < agent.distance_to(best[0])):
+                        best = (o, have)
+                if best:
+                    return best
+            return None, None
         for resource in wanted:
-            sellers = [o for o in self.agents if o is not agent and not self.in_cooldown(agent, o)
-                       and economy.spare(o, resource, self.rules, self.scarcity) > 0]
+            sellers = [o for o in self.spare_table.get(resource, {}) if o is not agent and o in self.agents
+                       and not self.in_cooldown(agent, o)]
             if sellers:
                 return min(sellers, key=agent.distance_to), resource
         return None, None
@@ -221,10 +264,12 @@ class World:
         supply is, and move its price multiplier toward demand pressure x concentration
         (a fraction price_adjust_speed of the way per step)."""
         rules = self.rules
-        for r in economy.RESOURCES:
+        for r in rules.active_goods:
             self.buyer_agents[r] = [a for a in self.agents if economy.wants_to_buy(a, r, rules, self.scarcity)]
+            self.buyer_sets[r] = set(self.buyer_agents[r])
             self.buyers[r] = len(self.buyer_agents[r])
             spares = [economy.spare(a, r, rules, self.scarcity) for a in self.agents]
+            self.spare_table[r] = {a: n for a, n in zip(self.agents, spares) if n > 0}
             self.sellers[r] = sum(1 for s in spares if s > 0)
             self.concentration[r] = economy.concentration(spares)
             if rules.demand_pricing_enabled:
@@ -256,17 +301,44 @@ class World:
     def usable_jobs(self, agent, good):
         """Labour per step the agent's ``good`` industry can use right now: what its asset
         shares employ, cut to what its inputs in stock (plus input credit) can keep busy.
-        0 while the owner already holds rules.max_output_stock units of the good (unsold
-        stock piling up), so the labour goes to industries that can sell."""
-        limit = self.rules.max_output_stock
-        if limit and agent.inventory.count(good) >= limit:
+
+        0 (the industry doesn't work, so its labour goes where output is wanted) when:
+        - it doesn't pay: value added per unit of labour is below the wage (self.profitable);
+        - unsold output is piling up: the owner holds rules.max_output_stock units, or more than
+          rules.output_buffer_steps steps of this industry's output beyond its own input buffer."""
+        if not self.profitable.get(good, True):
             return 0.0
-        jobs = self.asset_jobs(good, agent.assets.get(good, 0))
+        rules = self.rules
+        shares = agent.assets.get(good, 0)
+        held = agent.inventory.count(good)
+        if rules.max_output_stock and held >= rules.max_output_stock:
+            return 0.0
+        if rules.output_buffer_steps:
+            buffer = max(1.0, self.asset_output(good, shares) * rules.output_buffer_steps)
+            if held >= buffer + economy.input_target(agent, good, rules):
+                return 0.0
+        jobs = self.asset_jobs(good, shares)
         productivity = self.productivity_now[good]
         for item, per_unit in self.rules.inputs.get(good, {}).items():
             stock = agent.inventory.count(item) + agent.input_credit.get(item, 0.0)
             jobs = min(jobs, stock / per_unit / productivity if productivity > 0 else 0.0)
         return jobs
+
+    def labor_value(self, agent, prices):
+        """Value created by one unit of labour in the agent's most valuable working industry:
+        productivity x (price - inputs). 0 if none of its industries can use labour now."""
+        return max((self.productivity_now[g] * self.value_added(g, prices)
+                    for g in agent.assets if self.usable_jobs(agent, g) > 0), default=0.0)
+
+    def update_profitability(self):
+        """Which industries pay at current prices: value added by one unit of labour
+        (productivity x (price - inputs)) at least the wage. With no wage yet, all of them."""
+        prices = self.current_prices()
+        self.step_prices = prices   # prices at the start of the step (used to rank industries)
+        wage = prices[economy.LABOR]
+        self.profitable = {g: not self.rules.profit_check or wage <= 0
+                           or self.productivity_now[g] * self.value_added(g, prices) >= wage - 1e-9
+                           for g in self.rules.active_goods}
 
     def input_cost(self, good, prices):
         """Cost of the inputs used to make one unit of ``good`` (0 for primary industries)."""
@@ -275,7 +347,7 @@ class World:
     def recent_flow(self, key, steps=20):
         """Average per step of a recorded flow ("produced" or "used") per good over the last ``steps``."""
         recent = list(islice(reversed(self.recorder.history), steps))
-        return {g: sum(s[key].get(g, 0) for s in recent) / len(recent) if recent else 0.0 for g in economy.GOODS}
+        return {g: sum(s.get(key, {}).get(g, 0) for s in recent) / len(recent) if recent else 0.0 for g in economy.GOODS}
 
     def unit_cost(self, good, prices):
         """Cost of making one unit of ``good``: its inputs plus the labour it takes at the wage."""
@@ -320,18 +392,15 @@ class World:
 
     def current_prices(self, include_labor=True):
         """Goods: base price (scarcity formula or fixed) x demand-pressure multiplier.
-        With rules.cost_floor, a secondary good never costs less than its unit cost (see
-        unit_cost). Labour: the labour market's wage."""
+        With rules.cost_floor, a secondary good never costs less than the inputs it is made
+        from (see input_cost). Labour: the labour market's wage."""
         base = economy.market_prices(self.agents, self.rules)
         prices = {r: base[r] * self.price_multiplier[r] for r in economy.RESOURCES}
         if self.rules.cost_floor and self.rules.price_mode != "fixed":
-            # Inputs can themselves be made from inputs, so repeat until every floor holds.
-            for _ in range(len(economy.GOODS)):
-                floors = {g: self.unit_cost(g, prices) for g in self.rules.inputs if g in prices}
-                if all(prices[g] >= floor - 1e-9 for g, floor in floors.items()):
-                    break
-                for g, floor in floors.items():
-                    prices[g] = max(prices[g], floor)
+            # Shallow layers first, so each good's inputs already carry their own floor.
+            rules = self.rules
+            for g in sorted((g for g in rules.inputs if rules.is_active(g)), key=rules.layer):
+                prices[g] = max(prices[g], self.input_cost(g, prices))
         if include_labor:
             prices[economy.LABOR] = self.labor.wage
         return prices
@@ -365,9 +434,11 @@ class World:
         self.grow_assets()
         self.update_scarcity()
         self.update_demand()
+        self.update_profitability()
         self.labor.clear(self)
         for agent in self.agents:
             agent.inventory.now = self.tick
+            self.discard_expired(agent)
         for agent in list(self.agents):
             if agent not in self.agents:
                 continue
@@ -379,6 +450,16 @@ class World:
                         and not self.in_cooldown(agent, other)):
                     self.interact(agent, other)
         self.recorder.end_step(self, self._dead_flows)
+
+    # Expiries smaller than this (per agent and good, in one step) aren't written to the event log.
+    LOG_EXPIRED_FROM = 5
+
+    def discard_expired(self, agent):
+        """Throw away the agent's units past their shelf life, and count them for the report."""
+        for good, qty in agent.inventory.expire().items():
+            agent.flow["expired"][good] = agent.flow["expired"].get(good, 0) + qty
+            if qty >= self.LOG_EXPIRED_FROM:
+                self.log(f"{agent.name} threw away {qty:g} {good} (expired)")
 
     def check_death(self, agent):
         """Hunger or thirst at 1.00 (after eating/drinking what it had) kills the agent.
@@ -505,6 +586,12 @@ class World:
             "contact_distance": self.contact_distance,
             "seed": self.seed,
             "rules": self.rules.to_dict(),
+            # This game's industries: layer (from the recipes), whether it exists (layer <= the
+            # game's industry_layers), the need it relieves and how much one unit relieves.
+            "industries": {g: {"layer": self.rules.layer(g), "active": self.rules.is_active(g),
+                               "need": self.rules.need_of(g), "relief": self.rules.relief(g)}
+                           for g in economy.GOODS},
+            "consumer_needs": list(self.rules.consumer_needs),
             "government": self.government.to_dict(),
             "market": {
                 "prices": self.current_prices(),
@@ -529,6 +616,8 @@ class World:
                 # Average units made / used as inputs per step over the last 20 steps.
                 "produced_recent": self.recent_flow("produced"),
                 "used_recent": self.recent_flow("used"),
+                "expired_recent": self.recent_flow("expired"),
+                "consumed_recent": self.recent_flow("consumed"),
                 "labor": self.labor.to_dict(),
                 "asset_trades": self.asset_trades,
                 "asset_trade_money": self.asset_trade_money,
@@ -541,7 +630,7 @@ class World:
                 "units": {r: sum(a.inventory.count(r) for a in self.agents) for r in economy.RESOURCES},
             },
             "agents": [dict(a.to_dict(self.rules), reserve={
-                r: economy.stockpile_target(a, r, self.rules, self.scarcity) for r in economy.RESOURCES})
+                r: n for r in self.rules.active_goods if (n := economy.stockpile_target(a, r, self.rules, self.scarcity))})
                 for a in self.agents],
             # Only pairs that can interact; pairs in cooldown just overlap.
             "contacts": [[a.id, b.id] for a, b in self.contacts() if not self.in_cooldown(a, b)],

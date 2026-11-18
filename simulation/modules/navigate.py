@@ -76,7 +76,7 @@ class Navigate(Module):
             return
 
         if not needy:
-            for resource in sorted(economy.RESOURCES, reverse=True,
+            for resource in sorted(world.rules.active_goods, reverse=True,
                                    key=lambda r: economy.surplus(agent, r, world.rules, world.scarcity)):
                 if not economy.surplus(agent, resource, world.rules, world.scarcity):
                     break

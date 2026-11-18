@@ -55,7 +55,11 @@ class Invest(Module):
         short = {o: gap for o, gap in sorted(short.items(), key=lambda kv: kv[0].money) if gap >= min_sale}
         for resource in ranked_assets(world):
             price = asset_prices[resource]
-            lacks = economy.wants_to_buy(agent, resource, rules, world.scarcity) or not rules.selling_enabled
+            # Who wants each good is worked out once per step (World.update_demand); ask directly
+            # if that hasn't run yet.
+            buyers = world.buyer_sets.get(resource)
+            wants = agent in buyers if buyers is not None else economy.wants_to_buy(agent, resource, rules, world.scarcity)
+            lacks = wants or not rules.selling_enabled
             if price <= 0 or not lacks:
                 continue   # worthless, or it isn't short of this resource
             # Cash-short owners first (they need the money most), then owners over the cap.
@@ -108,9 +112,7 @@ def purchase_limit(agent, asset_prices, ratio):
 
 def cash_needed(agent, prices, rules):
     """Money an agent wants on hand: its liquidity plus the cost of what it needs to buy now."""
-    liquidity = rules.liquidity_units * sum(prices[g] for g in economy.CONSUMABLES)
-    shopping = sum(economy.demand(agent, r, rules) * prices[r] for r in economy.RESOURCES)
-    return liquidity + shopping
+    return economy.liquidity_cost(prices, rules) + economy.shopping_cost(agent, prices, rules)
 
 
 def asset_yield(resource, world):
@@ -121,4 +123,4 @@ def asset_yield(resource, world):
 
 def ranked_assets(world):
     """Resources ordered from the best asset to buy to the worst."""
-    return sorted(economy.GOODS, key=lambda r: asset_yield(r, world), reverse=True)
+    return sorted(world.rules.active_goods, key=lambda r: asset_yield(r, world), reverse=True)

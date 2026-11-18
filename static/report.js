@@ -311,33 +311,51 @@ function renderReport(r) {
     ]),
   );
 
-  // Prices.
+  // Prices: the average price of each industry layer, and the wage.
+  const goods = activeGoods();
+  const layers = [...new Set(goods.map(g => industry(g).layer))].sort((a, b) => a - b);
+  const layerAvg = (p, L) => { const gs = goods.filter(g => industry(g).layer === L); return gs.reduce((a, g) => a + p.prices[g], 0) / gs.length; };
   lineChart($("chart-prices"), { x, xLabel: "Step", title: "Prices", tipFormat: fmt.money,
-    series: PRICED.map((res, i) => ({ label: res === "labor" ? "Wage" : cap(res), color: SERIES[i], values: s.map(p => p.prices[res]) })) });
-  table($("table-prices"), ["", "Now", "Min", "Avg", "Max", "Change"], PRICED.map((res, i) => {
+    series: [...layers.map((L, i) => ({ label: `Layer ${L} (avg)`, color: SERIES[i % SERIES.length], values: s.map(p => layerAvg(p, L)) })),
+             { label: "Wage", color: "var(--muted)", values: s.map(p => p.prices.labor) }] });
+  const priced = [...goods.sort((a, b) => industry(a).layer - industry(b).layer), "labor"];
+  table($("table-prices"), ["", "Layer", "Now", "Min", "Avg", "Max", "Change"], priced.map(res => {
     const p = r.prices[res];
     const change = Object.assign(document.createElement("span"), { className: p.change >= 0 ? "up" : "down",
       textContent: fmt.signedPct(p.change) });
-    return [swatchLabel(res === "labor" ? "Wage" : cap(res), SERIES[i]), fmt.money(p.now), fmt.money(p.min), fmt.money(p.avg), fmt.money(p.max), change];
+    return [res === "labor" ? "Wage" : label(res), res === "labor" ? "" : `${industry(res).layer}`, fmt.money(p.now),
+            fmt.money(p.min), fmt.money(p.avg), fmt.money(p.max), change];
   }));
 
-  // Production vs consumption, one small chart per good (same scale for fair comparison).
+  // Production vs use vs expiry, one small chart per industry layer (same scale for fair comparison).
   // "Used" = consumed for needs + used up as industry inputs.
-  const usedOf = (p, g) => p.consumed[g] + (p.used?.[g] || 0);
-  const flows = Object.fromEntries(GOODS.map(g => [g, { produced: flow(p => p.produced[g]), consumed: flow(p => usedOf(p, g)) }]));
-  const flowMax = Math.max(1e-9, ...GOODS.flatMap(g => [...flows[g].produced, ...flows[g].consumed]));
+  const sumLayer = (p, key, L) => goods.filter(g => industry(g).layer === L).reduce((a, g) => a + (p[key]?.[g] || 0), 0);
+  const flows = Object.fromEntries(layers.map(L => [L, {
+    produced: flow(p => sumLayer(p, "produced", L)),
+    used: flow(p => sumLayer(p, "consumed", L) + sumLayer(p, "used", L)),
+    expired: flow(p => sumLayer(p, "expired", L)) }]));
+  const flowMax = Math.max(1e-9, ...layers.flatMap(L => [...flows[L].produced, ...flows[L].used, ...flows[L].expired]));
   const flowTicks = niceTicks(flowMax);
-  for (const g of GOODS) {
-    lineChart($(`chart-flow-${g}`), { x, xLabel: "Step", height: 150, yMax: flowTicks[flowTicks.length - 1], title: `${g} flow`,
-      series: [{ label: "Produced", color: SERIES[0], values: flows[g].produced },
-               { label: NEED_FOR[g] ? "Consumed" : "Used", color: SERIES[1], values: flows[g].consumed }] });
+  const box = $("flow-layers");
+  box.innerHTML = "";
+  for (const L of layers) {
+    const cell = document.createElement("div");
+    cell.append(Object.assign(document.createElement("h3"), { className: "mini-title", textContent: `Layer ${L}` }));
+    const chart = document.createElement("div");
+    cell.append(chart);
+    box.append(cell);
+    lineChart(chart, { x, xLabel: "Step", height: 150, yMax: flowTicks[flowTicks.length - 1], title: `Layer ${L} flow`,
+      series: [{ label: "Produced", color: SERIES[0], values: flows[L].produced },
+               { label: "Used", color: SERIES[1], values: flows[L].used },
+               { label: "Expired", color: SERIES[3], values: flows[L].expired }] });
   }
-  table($("table-flows"), ["Good", "Produced", "Consumed", "As input", "Net"], GOODS.map(g => {
-    const asInput = t.used?.[g] || 0;
-    const net = t.produced[g] - t.consumed[g] - asInput;
+  table($("table-flows"), ["Good", "Layer", "Produced", "Consumed", "As input", "Expired", "Net"], goods.map(g => {
+    const asInput = t.used?.[g] || 0, expired = t.expired?.[g] || 0;
+    const net = t.produced[g] - t.consumed[g] - asInput - expired;
     const netCell = Object.assign(document.createElement("span"), { className: net >= 0 ? "up-good" : "down-bad",
       textContent: `${net >= 0 ? "+" : ""}${fmt.num(net, 0)}` });
-    return [cap(g), fmt.num(t.produced[g], 0), fmt.num(t.consumed[g], 0), fmt.num(asInput, 0), netCell];
+    return [label(g), `${industry(g).layer}`, fmt.num(t.produced[g], 0), fmt.num(t.consumed[g], 0), fmt.num(asInput, 0),
+            fmt.num(expired, 0), netCell];
   }));
 
   // Employment.

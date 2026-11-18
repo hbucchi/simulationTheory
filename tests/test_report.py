@@ -3,8 +3,8 @@ import unittest
 from simulation import World, economy
 from simulation.report import bottom_share, build_report, gini, lorenz, top_share
 from simulation.rules import GOODS, Rules
+from tests.classic import CALM, CLASSIC
 
-CALM = {"hunger": 0, "sleep": 0, "thirst": 0, "boredom": 0}
 
 
 class MeasureTests(unittest.TestCase):
@@ -24,8 +24,8 @@ class MeasureTests(unittest.TestCase):
 
 class RecorderTests(unittest.TestCase):
     def test_snapshot_counts_production_consumption_and_income(self):
-        world = World(seed=1, rules=Rules.from_dict({"investing_enabled": False, "selling_enabled": False,
-                                                     "assets": {g: 0 for g in GOODS}, "inputs": {},
+        world = World(seed=1, rules=Rules.from_dict({**CLASSIC, "investing_enabled": False, "selling_enabled": False,
+                                                     "assets": {g: 0 for g in GOODS},
                                                      "asset_labor": {"food": 1},
                                                      "labor_saving": {"food": 0, "water": 0, "games": 0},
                                                      "efficiency_weights": {"hunger": 0, "thirst": 0, "sleep": 0,
@@ -80,8 +80,8 @@ class DistributionReportTests(unittest.TestCase):
 
     def test_asset_concentration_uses_shares_not_value(self):
         world = World(seed=1, rules=Rules.from_dict({"investing_enabled": False, "selling_enabled": False}))
-        world.create_agent(assets={"food": 4, "water": 0, "games": 0})
-        world.create_agent(assets={"food": 0, "water": 0, "games": 0})
+        world.create_agent(assets={**{g: 0 for g in GOODS}, "food": 4})
+        world.create_agent(assets={g: 0 for g in GOODS})
         world.asset_prices = lambda prices=None: {g: 0.0 for g in economy.GOODS}   # assets worth nothing...
         world.step()
         self.assertAlmostEqual(world.recorder.history[-1]["gini_assets"], 0.5)   # ...but one agent owns them all
