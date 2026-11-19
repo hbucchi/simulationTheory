@@ -54,7 +54,7 @@ def wellbeing(agent, rules):
 
 def cost_of_living(agent, prices, rules):
     """Money per step the agent would spend buying all the goods it uses."""
-    return sum(economy.need_cost(agent, need, prices, rules) for need in rules.consumer_needs)
+    return economy.living_cost(agent, prices, rules)
 
 
 def general_need(agent, prices, rules):

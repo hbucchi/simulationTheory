@@ -234,6 +234,16 @@ const SETUP_SECTIONS = [
     { path: "default_steps", label: "Default after unpaid (steps)", kind: "int", min: 1, enabledWhen: v => v.banking_enabled },
     { path: "deposit_share", label: "Share of spare cash deposited", kind: "float", min: 0, max: 1, step: 0.05,
       enabledWhen: v => v.banking_enabled },
+    { path: "consumer_credit", label: "Agents may borrow to pay for what they need now", kind: "bool", full: true,
+      enabledWhen: v => v.banking_enabled },
+    { path: "max_payment_to_income", label: "Loan payments ≤ (× income)", kind: "float", min: 0, max: 10, step: 0.05,
+      enabledWhen: v => v.banking_enabled && v.consumer_credit },
+  ]},
+  { title: "Budget", hint: "Every agent knows its budget: what living costs it per step (the cheapest goods for each " +
+      "need, housing included, net of what its own industries make) plus its loan payments. It keeps that many steps of " +
+      "it (a “month”) on top of the cash it needs right now, and only invests or builds with what is left. " +
+      "Loans are paid only out of money left after what it needs to buy now.", fields: [
+    { path: "budget_steps", label: "Budget covers (steps)", kind: "int", min: 0, max: 100000 },
   ]},
   { title: "Central government", hint: "A minimum interest rate that no asset's return can fall below (higher rates " +
       "make assets cheaper), and labour bought every step with newly created money. Both can be changed during the game " +

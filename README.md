@@ -175,10 +175,10 @@ labour.
 ### Industry catalog, layers and expiry
 
 Every good is made by its own **industry**, whose capital is that good's assets.
-`simulation/catalog.py` defines 36 industries named after the TRBC sectors and
+`simulation/catalog.py` defines 37 industries named after the TRBC sectors and
 industries that investing.com's screener uses (Energy, Basic Materials,
 Industrials, Consumer Cyclicals, Consumer Non-Cyclicals, Healthcare, Technology,
-Telecommunications, Utilities, Real Estate):
+Telecommunications, Utilities, Real Estate, Financials):
 
 | Layer | Industries |
 |---|---|
@@ -405,8 +405,70 @@ the economy together with the dead agent's own money.
   in public works. This is how money is injected into the economy.
 
 Both start from the setup screen (*Central government*) and can be changed
-while the game runs in the **Government** tab, which also shows money created,
+while the game runs in the **Government & banks** tab, which also shows money created,
 labour bought and the effect on prices.
+
+### Banks
+
+Banks are an industry (**Banking**, sector Financials), so they need resources to exist:
+
+- **A banking plant**: asset shares of the banking industry. Like any industry it is built
+  from capital goods (3 machinery + 2 construction per share) and run with labour and
+  electricity (0.3 per unit), so it is a layer-3 industry: games with fewer layers, or
+  without electricity, have no banks. The plant makes **banking services**, and every loan
+  uses them up (one unit per `loan_per_service` lent, default $1,000). Services can't be
+  traded and expire after 50 steps.
+- **Minimum capital** (`bank_min_capital`, default $5,000, Basel-style): the founder's own
+  money, moved into the bank as its equity before it can open. Borrowed money doesn't
+  count. An agent that owns a banking plant but can't put up the capital can't open a
+  bank (the log says so). An investor only starts building a bank plant if it can also
+  pay the minimum capital.
+
+How a bank works (rates per step):
+
+- **Deposits.** Agents keep what their budget needs (below) on hand and deposit part of
+  the rest (`deposit_share`) in the nearest bank. They can spend deposits like cash, as if
+  paying by card. Depositors earn the deposit rate, max(`deposit_rate`, the government's
+  minimum rate), on the share of deposits the bank has lent out: cash in the vault earns
+  the bank nothing, so it can't pay interest on it.
+- **Loans.** The loan rate is the deposit rate + `loan_spread`. Investors borrow to build when
+  the asset earns more than the loan costs, up to `max_loan_to_value` of their assets (the
+  collateral). Agents short of cash for what they need now can borrow the gap
+  (**consumer credit**, unsecured) as long as all their loan payments stay within
+  `max_payment_to_income` of their income. Loans are repaid over `loan_steps` steps:
+  each step interest on the balance + balance ÷ steps left.
+- **Limits on lending.** A bank keeps `reserve_ratio` of deposits as cash, and its equity
+  must stay at least `capital_ratio` × its loans (Basel capital adequacy, default 8%) and at
+  least the minimum capital. So $5,000 of capital supports up to $5,000 ÷ 0.08 = $62,500
+  of loans.
+- **Money creation.** Lent money is spent, the seller deposits it, and the bank lends part of
+  it again. With reserve ratio *ρ*, deposits can grow to 1 + (1 − *ρ*) + (1 − *ρ*)² + … = 1/*ρ*
+  times the cash first put in (the **money multiplier**, shown in the Banking panel).
+- **Repayment and default.** Agents pay for what they need now first and the loan only
+  out of what's left. A loan unpaid for `default_steps` steps in a row defaults: the bank's
+  owner takes asset shares worth the debt (paying the bank their value) and the rest is
+  written off.
+- **Profit and failure.** Profit = interest received − interest paid. Equity above what the
+  bank must keep is paid to its owner as dividends. A bank whose equity falls below zero
+  fails: it stops lending and pays depositors back pro rata from what comes in.
+
+**Turning banking on and off.** On the setup screen (*Banking*: on/off, number of starting
+banks and their plant size, minimum capital, ratios, rates) and at any time during a game in
+the **Government & banks** tab (on/off, rates, ratios, minimum capital). Switched off,
+banks stop lending, pay depositors back, collect their loans and close; switched on again,
+owners with a plant and the capital reopen them. To leave banks out of a game entirely,
+untick *Banking* in the industry picker.
+
+### Budget
+
+Every agent knows its **budget** for the next `budget_steps` steps (default 30, "a month"):
+
+    budget = cash needed now + budget_steps × (living cost per step + loan payments per step)
+
+The living cost is the cheapest way to keep each need from growing (food, water, housing,
+energy, ...), net of what the agent's own industries make. Investing and building only use
+money (cash + deposits) **above** the budget. Agent cards show the budget and what's left
+to invest (or how short it is).
 
 ### Stock band
 
@@ -532,11 +594,12 @@ python3 -m unittest discover -s tests
 server.py                 local HTTP server + JSON API (see the docstring at the top)
 simulation/agent.py       Agent class (properties, movement helper)
 simulation/inventory.py   Inventory class
-simulation/catalog.py     the 36 industries: sector, recipe, effects on needs, shelf life, defaults
+simulation/catalog.py     the 37 industries: sector, recipe, effects on needs, shelf life, defaults
 simulation/economy.py     needs, consumption and trading rules
 simulation/rules.py       Rules: every game-wide setting chosen on the setup screen
 simulation/distributions.py  fixed / uniform / normal / skewed per-agent values
 simulation/world.py       World: the box, agents, step loop, contacts, departures
+simulation/banking.py     banks: minimum capital, deposits, loans, reserve/capital ratios, default, failure
 simulation/modules/       pluggable behaviours (build.py: new assets from capital goods)
     needs.py              NeedsDecay: needs grow every step
     production.py         Production: industries (assets) worked by labour, using inputs

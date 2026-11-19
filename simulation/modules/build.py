@@ -2,7 +2,7 @@ import math
 
 from .. import economy
 from .base import Module
-from .invest import asset_yield, cash_needed, purchase_limit
+from .invest import asset_yield, budget_needed, cash_needed, purchase_limit
 
 # Smallest project worth starting (asset shares).
 MIN_PROJECT_SHARES = 0.05
@@ -79,7 +79,8 @@ class Build(Module):
         prices = world.current_prices()
         deposits = sum(agent.deposits.values())
         # Deposits count as its money: it takes them out when it builds.
-        spare = agent.money + deposits - cash_needed(agent, prices, rules)
+        # Only what is left after its budget (living costs and loan payments for budget_steps).
+        spare = agent.money + deposits - budget_needed(agent, prices, world)
         if spare < rules.min_investment:
             return
         asset_prices = world.step_asset_prices()

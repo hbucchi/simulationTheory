@@ -20,13 +20,15 @@ How a bank works (all per step, rates per step):
   government's minimum rate), on the share of them the bank has lent out (interest
   it earns from loans; idle cash earns nothing).
 - Loans. Investors starting a building project can borrow what their own money doesn't
-  cover, when the asset's yield beats the loan rate (deposit rate + loan_spread). The
-  bank lends only when:
+  cover, when the asset's yield beats the loan rate (deposit rate + loan_spread), up to
+  max_loan_to_value of their assets. Agents that can't pay for what they need right now
+  (consumer_credit) can borrow the gap, unsecured, as long as all their loan payments
+  stay within max_payment_to_income of their income. The bank lends only when:
     1. reserves stay at least reserve_ratio x deposits (cash kept for withdrawals);
     2. equity stays at least capital_ratio x loans (Basel capital adequacy) and at
        least bank_min_capital;
     3. it has the banking services to handle it (loan / loan_per_service units);
-    4. the borrower's debt stays within max_loan_to_value x its asset shares' value.
+    4. the borrower can carry it (collateral or income, above).
   A loan is repaid over loan_steps steps: each step interest on the balance plus
   1/(steps left) of it. A borrower that can't pay for default_steps steps in a row
   defaults: the bank's owner takes asset shares worth the debt (paying the bank their
@@ -170,6 +172,10 @@ class Banking:
     def deposits_of(self, agent):
         return sum(b.deposits.get(agent.id, 0.0) for b in self.banks)
 
+    def payments_of(self, agent):
+        """What the agent's loans cost it per step (interest + repayment)."""
+        return sum(l.payment() for b in self.banks for l in b.loans if l.borrower_id == agent.id)
+
     def debt_of(self, agent):
         return sum(l.balance for b in self.banks for l in b.loans if l.borrower_id == agent.id)
 
@@ -220,6 +226,13 @@ class Banking:
         held = sum(shares * prices.get(g, 0.0) for g, shares in agent.assets.items())
         return max(0.0, world.rules.max_loan_to_value * (held + extra_collateral) - self.debt_of(agent))
 
+    def affordable_loan(self, world, agent):
+        """Largest new loan whose payment keeps all the agent's loan payments within
+        max_payment_to_income of its income (per step)."""
+        room = world.rules.max_payment_to_income * agent.income_avg - self.payments_of(agent)
+        per_unit = self.loan_rate_now(world) + 1 / world.rules.loan_steps   # first payment per money lent
+        return max(0.0, room / per_unit)
+
     def lendable(self, world, bank):
         """Most a bank can lend now (reserve ratio, capital ratio, banking services)."""
         owner = world.agent_by_id(bank.owner_id)
@@ -232,11 +245,15 @@ class Banking:
         by_services = owner.inventory.count("banking") * world.rules.loan_per_service
         return max(0.0, min(by_reserves, by_capital, by_services))
 
-    def borrow(self, world, agent, amount, purpose, extra_collateral=0.0):
-        """Lend the agent up to ``amount`` from the nearest open bank that can. Returns the amount."""
+    def borrow(self, world, agent, amount, purpose, extra_collateral=0.0, unsecured=False):
+        """Lend the agent up to ``amount`` from the nearest open bank that can. Returns the amount.
+        Secured loans (building) are limited by collateral; unsecured ones (consumption) by what
+        the agent's income can repay."""
         if not self.available(world) or amount <= 0:
             return 0.0
-        amount = min(amount, self.credit_limit(world, agent, extra_collateral))
+        limit = (self.affordable_loan(world, agent) if unsecured
+                 else self.credit_limit(world, agent, extra_collateral))
+        amount = min(amount, limit)
         if amount < MIN_DEPOSIT:
             return 0.0
         bank = self.nearest_open(world, agent, key=lambda b: self.lendable(world, b) >= MIN_DEPOSIT
@@ -305,15 +322,18 @@ class Banking:
             world.log(f"{agent.name} opened {bank.name} with {self.min_capital:.2f} of capital")
 
     def _collect(self, world, bank):
-        """Borrowers pay interest and principal; long-unpaid loans default."""
+        """Borrowers pay interest and principal, but only out of money left after what they need
+        to buy right now (food and water come before debt); long-unpaid loans default."""
+        prices = world.current_prices()
         for loan in list(bank.loans):
             borrower = world.agent_by_id(loan.borrower_id)
             if borrower is None:
                 self._write_off(world, bank, loan, "its borrower died")
                 continue
             due = loan.payment()
-            self.cash_up(borrower, due)
-            if borrower.money + 1e-9 < due:
+            needs_now = economy.shopping_cost(borrower, prices, world.rules)
+            self.cash_up(borrower, due + needs_now)
+            if borrower.money - needs_now + 1e-9 < due:
                 loan.missed += 1
                 if loan.missed >= world.rules.default_steps:
                     self._default(world, bank, loan, borrower)
@@ -436,6 +456,12 @@ class Banking:
             need = cash_needed(agent, prices, rules)
             if agent.money < need and agent.deposits:
                 self.withdraw(agent, DEPOSIT_KEEP * need - agent.money)
+            behind = agent.debt and any(l.missed for b in self.banks for l in b.loans if l.borrower_id == agent.id)
+            if rules.consumer_credit and has_open and agent.money < need and not behind:
+                # Can't pay for what it needs right now: borrow the gap (if its income allows).
+                short = economy.shopping_cost(agent, prices, rules) - agent.money
+                if short >= MIN_DEPOSIT:
+                    self.borrow(world, agent, short, "consumption", unsecured=True)
             elif has_open:
                 keep = DEPOSIT_KEEP * need + rules.min_investment
                 if agent.money > keep + MIN_DEPOSIT:

@@ -44,7 +44,8 @@ class Invest(Module):
         # Same cash rule as sellers use, so an agent never invests money it then has to sell back for.
         # Bank deposits count as its money (it takes them out to pay).
         deposits = sum(agent.deposits.values())
-        spare = agent.money + deposits - cash_needed(agent, prices, rules)
+        # Only what is left after its budget (living costs and loan payments for budget_steps).
+        spare = agent.money + deposits - budget_needed(agent, prices, world)
         if spare < rules.min_investment:
             return
         asset_prices = world.step_asset_prices()
@@ -132,6 +133,22 @@ def purchase_limit(agent, asset_prices, ratio):
 def cash_needed(agent, prices, rules):
     """Money an agent wants on hand: its liquidity plus the cost of what it needs to buy now."""
     return economy.liquidity_cost(prices, rules) + economy.shopping_cost(agent, prices, rules)
+
+
+def budget(agent, prices, world):
+    """The agent's budget for the next rules.budget_steps steps ("a month"):
+    {"living": living cost per step, "loans": loan payments per step, "steps": budget_steps,
+     "total": what it keeps before investing (cash needed now + steps x (living + loans))}."""
+    rules = world.rules
+    living = economy.living_cost(agent, prices, rules)
+    loans = world.banking.payments_of(agent) if agent.debt else 0.0
+    total = cash_needed(agent, prices, rules) + rules.budget_steps * (living + loans)
+    return {"living": living, "loans": loans, "steps": rules.budget_steps, "total": total}
+
+
+def budget_needed(agent, prices, world):
+    """Money the agent keeps before it invests or builds (see budget)."""
+    return budget(agent, prices, world)["total"]
 
 
 def asset_yield(resource, world):

@@ -787,6 +787,16 @@ class World:
         scarce = [r for r, d in self.scarcity.items() if d >= self.rules.scarcity_trigger and self.rules.is_active(r)]
         return {r: n for r in scarce if (n := economy.stockpile_target(agent, r, self.rules, self.scarcity))}
 
+    def _agent_entry(self, agent, full, prices):
+        entry = dict(agent.to_dict(self.rules, full=full), reserve=self.reserve_of(agent))
+        if full:
+            from .modules.invest import budget
+            b = budget(agent, prices, self)
+            entry["budget"] = {k: round(v, 2) for k, v in b.items()}
+            entry["budget"]["spare"] = round(economy.money_of(agent) - b["total"], 2)
+            entry["income"] = round(agent.income_avg, 2)
+        return entry
+
     def to_dict(self, detail=None):
         """The whole state for the UI. ``detail``: ids of agents to describe in full ("all" for
         everyone); the rest get a compact entry (position, needs, goods, activity). By default
@@ -795,6 +805,7 @@ class World:
             detail = "all" if len(self.agents) <= FULL_DETAIL_AGENTS else ()
         if detail != "all":
             detail = set(detail)
+        prices = self.current_prices()
         return {
             "tick": self.tick,
             "width": self.width,
@@ -851,8 +862,7 @@ class World:
                 "money": sum(a.money for a in self.agents),
                 "units": {r: sum(a.inventory.count(r) for a in self.agents) for r in economy.RESOURCES},
             },
-            "agents": [dict(a.to_dict(self.rules, full=detail == "all" or a.id in detail), reserve=self.reserve_of(a))
-                       for a in self.agents],
+            "agents": [self._agent_entry(a, detail == "all" or a.id in detail, prices) for a in self.agents],
             # Only pairs that can interact; pairs in cooldown just overlap.
             "contacts": [[a.id, b.id] for a, b in self.contacts() if not self.in_cooldown(a, b)],
             "events": self.events[-50:],

@@ -182,5 +182,55 @@ class FailureAndSwitchTests(unittest.TestCase):
         self.assertTrue(all(not a.deposits for a in w.agents))
 
 
+class BudgetAndConsumerCreditTests(unittest.TestCase):
+    def test_budget_is_living_costs_and_loan_payments_over_the_budget_steps(self):
+        from simulation.modules.invest import budget, cash_needed
+        w = World(seed=4, rules=Rules.from_dict({"agents": 10, "budget_steps": 30}))
+        w.spawn_random_agents()
+        for _ in range(5):
+            w.step()
+        a = w.agents[0]
+        prices = w.current_prices()
+        b = budget(a, prices, w)
+        self.assertGreater(b["living"], 0)
+        self.assertAlmostEqual(b["total"], cash_needed(a, prices, w.rules) + 30 * (b["living"] + b["loans"]))
+        entry = next(x for x in w.to_dict()["agents"] if x["id"] == a.id)
+        self.assertIn("budget", entry)
+
+    def test_agents_only_invest_what_is_left_after_their_budget(self):
+        from simulation.modules.invest import Invest, budget
+        w = bank_world(investing_enabled=True, budget_steps=100000)   # a budget nobody can cover
+        investor = w.create_agent(needs=CALM, money=50000)
+        w.create_agent(needs=CALM, money=0, assets={"water": 2})
+        self.assertGreater(budget(investor, w.current_prices(), w)["total"], 50000)
+        Invest().on_step(investor, w)
+        self.assertEqual(investor.assets, {})
+
+    def test_consumer_loans_are_limited_by_income(self):
+        w = bank_world(bank_min_capital=1000, max_payment_to_income=0.5, loan_steps=100,
+                       deposit_rate=0.0, loan_spread=0.0)
+        open_bank(w, money=1000, services=100)
+        w.banking.banks[0].reserves += 100000
+        broke = w.create_agent(needs=CALM, money=0)
+        self.assertEqual(w.banking.borrow(w, broke, 500, "consumption", unsecured=True), 0)   # no income
+        worker = w.create_agent(needs=CALM, money=0)
+        worker.income_avg = 2.0          # payments <= 1/step; at 0% over 100 steps: up to 100
+        self.assertAlmostEqual(w.banking.borrow(w, worker, 500, "consumption", unsecured=True), 100)
+        self.assertEqual(w.banking.borrow(w, worker, 500, "consumption", unsecured=True), 0)
+
+    def test_needs_come_before_loan_payments(self):
+        w = bank_world(bank_min_capital=1000)
+        owner, bank = open_bank(w, money=1000)
+        w.create_agent(needs=CALM, money=50000, inventory={"water": 20, "food": 20})   # gives goods a price
+        borrower = w.create_agent(needs={**CALM, "thirst": 0.9}, money=0, inventory={g: 0 for g in GOODS})
+        w.banking.borrow(w, borrower, 200, "test", extra_collateral=1000)
+        from simulation import economy
+        self.assertGreater(economy.shopping_cost(borrower, w.current_prices(), w.rules), 200)
+        balance = bank.loans[0].balance
+        w.banking.step(w)            # it needs its 200 for water: the payment is missed
+        self.assertEqual(bank.loans[0].missed, 1)
+        self.assertEqual(bank.loans[0].balance, balance)
+
+
 if __name__ == "__main__":
     unittest.main()

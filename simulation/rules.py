@@ -250,6 +250,14 @@ class Rules:
     loan_per_service: float = 1000.0   # money lent per unit of banking services used
     default_steps: int = 30            # unpaid steps in a row before a loan defaults
     deposit_share: float = 0.5         # share of spare cash agents deposit each step
+    # Budget: every agent knows what living costs it (the cheapest goods for each need, housing
+    # included) plus what its loans cost per step, and keeps budget_steps steps of that (a
+    # "month") before it invests or builds with anything left over.
+    budget_steps: int = 30
+    # Consumer credit: an agent that can't pay for what it needs now may borrow the gap, as long as
+    # all its loan payments stay within max_payment_to_income of its income.
+    consumer_credit: bool = True
+    max_payment_to_income: float = 0.4
 
     # Prices
     price_mode: str = "scarcity"       # "scarcity": money/units*(1-share); "fixed": fixed_prices
@@ -538,6 +546,9 @@ LIMITS = {
     "loan_per_service": (0.01, 1e9, "float"),
     "default_steps": (1, 100000, "int"),
     "deposit_share": (0, 1, "float"),
+    "budget_steps": (0, 100000, "int"),
+    "consumer_credit": (None, None, "bool"),
+    "max_payment_to_income": (0, 10, "float"),
     "excluded_industries": (None, None, "goods"),
     "building_enabled": (None, None, "bool"),
     "build_cost": (None, None, "build_cost"),

@@ -600,6 +600,11 @@ function renderAgents() {
       ["money", usd(a.money)],
       ...(a.deposits ? [["in the bank", usd(a.deposits)]] : []),
       ...(a.debt ? [["owes the bank", usd(a.debt)]] : []),
+      ...(a.budget ? [["monthly budget", usd(a.budget.total),
+        `Keeps ${usd(a.budget.total)} before investing: cash for what it needs now + ${a.budget.steps} steps × ` +
+        `(living ${usd(a.budget.living)} + loan payments ${usd(a.budget.loans)} per step). ` +
+        `Income ${usd(a.income)}/step.`],
+        [a.budget.spare >= 0 ? "left to invest" : "short of budget", usd(Math.abs(a.budget.spare))]] : []),
       ["movement", a.depressed ? `${a.speed} px (depressed, ${a.movement} normally)` : `${a.speed} px`],
       ...GOODS.filter(r => a.assets[r]).map(r => {
         const price = state.market.asset_prices[r];

@@ -191,6 +191,18 @@ def need_cost(agent, need, prices, rules=DEFAULT_RULES):
     return min(costs, default=0.0)
 
 
+def living_cost(agent, prices, rules=DEFAULT_RULES):
+    """Money per step it costs the agent to live: for every need, the cheapest way to buy what
+    keeps it from growing (food, water, housing, ...), net of what its own assets make.
+    Cached for the same prices (once per step)."""
+    cached = agent.__dict__.get("_living")
+    if cached and cached[0] is prices and cached[1] is agent.output_capacity:
+        return cached[2]
+    value = sum(need_cost(agent, need, prices, rules) for need in rules.consumer_needs)
+    agent._living = (prices, agent.output_capacity, value)
+    return value
+
+
 def shopping_cost(agent, prices, rules=DEFAULT_RULES):
     """Money to buy what it needs right now, the cheapest way for each need."""
     total = 0.0
