@@ -205,6 +205,36 @@ const SETUP_SECTIONS = [
     { path: "capital_cash_ratio", label: "Capitalist keeps cash ÷ assets ≥", kind: "float", min: 0, max: 100, step: 0.05,
       enabledWhen: v => v.investing_enabled },
   ]},
+  { title: "Banking", hint: "Banks are an industry. To open, a bank needs a banking plant (asset shares, built from " +
+      "machinery and construction like any industry, run with labour and electricity) and its founder's own money: at least " +
+      "the minimum capital goes in as the bank's equity. The plant makes banking services, and every loan uses them up " +
+      "(one unit per “money lent per service unit”). Agents deposit spare cash; investors borrow to build when the asset " +
+      "earns more than the loan costs. A bank lends only while it keeps the reserve ratio of deposits in cash and equity " +
+      "of at least the capital ratio of its loans (Basel). Rates are per step.", fields: [
+    { path: "banking_enabled", label: "Banking on (can be switched during the game)", kind: "bool", full: true },
+    { path: "starting_banks", label: "Banks at the start", kind: "int", min: 0, max: 1000,
+      enabledWhen: v => v.banking_enabled },
+    { path: "starting_bank_shares", label: "… each with a plant of (shares)", kind: "float", min: 0.05, step: 0.1,
+      enabledWhen: v => v.banking_enabled },
+    { path: "bank_min_capital", label: "Minimum capital to open a bank ($)", kind: "float", min: 0, step: 500,
+      enabledWhen: v => v.banking_enabled },
+    { path: "capital_ratio", label: "Capital ratio: equity ≥ (× loans)", kind: "float", min: 0, max: 1, step: 0.01,
+      enabledWhen: v => v.banking_enabled },
+    { path: "reserve_ratio", label: "Reserve ratio: cash ≥ (× deposits)", kind: "float", min: 0, max: 1, step: 0.01,
+      enabledWhen: v => v.banking_enabled },
+    { path: "deposit_rate", label: "Deposit rate (per step)", kind: "float", min: 0, max: 1, step: 0.0005,
+      enabledWhen: v => v.banking_enabled },
+    { path: "loan_spread", label: "Loan rate = deposit rate +", kind: "float", min: 0, max: 1, step: 0.0005,
+      enabledWhen: v => v.banking_enabled },
+    { path: "loan_steps", label: "Loans repaid over (steps)", kind: "int", min: 1, enabledWhen: v => v.banking_enabled },
+    { path: "max_loan_to_value", label: "Debt ≤ (× value of its assets)", kind: "float", min: 0, max: 10, step: 0.05,
+      enabledWhen: v => v.banking_enabled },
+    { path: "loan_per_service", label: "Money lent per service unit ($)", kind: "float", min: 0.01, step: 100,
+      enabledWhen: v => v.banking_enabled },
+    { path: "default_steps", label: "Default after unpaid (steps)", kind: "int", min: 1, enabledWhen: v => v.banking_enabled },
+    { path: "deposit_share", label: "Share of spare cash deposited", kind: "float", min: 0, max: 1, step: 0.05,
+      enabledWhen: v => v.banking_enabled },
+  ]},
   { title: "Central government", hint: "A minimum interest rate that no asset's return can fall below (higher rates " +
       "make assets cheaper), and labour bought every step with newly created money. Both can be changed during the game " +
       "in the Government tab.", fields: [
@@ -940,6 +970,17 @@ function renderPreview(r, error) {
     line(`Government: no asset valued below ${(r.gov_min_rate * 100).toFixed(2)}% per step` +
          (r.gov_labor_purchase ? `; buys ${r.gov_labor_purchase} labour per step with new money ` +
           `(about ${usd(r.gov_labor_purchase * startLaborPrice())} created per step at the starting labour price).` : "."));
+  }
+
+  if (r.banking_enabled) {
+    const multiplier = r.reserve_ratio > 0 ? (1 / r.reserve_ratio).toFixed(0) : "unlimited";
+    line(game.active.has("banking")
+      ? `Banking: ${r.starting_banks} bank${r.starting_banks === 1 ? "" : "s"} at the start, each needing ${usd(r.bank_min_capital)} ` +
+        `of its founder's money; deposits ${(r.deposit_rate * 100).toFixed(2)}%, loans ` +
+        `${((r.deposit_rate + r.loan_spread) * 100).toFixed(2)}% per step. Each bank can lend up to ` +
+        `${usd(r.capital_ratio > 0 ? r.bank_min_capital / r.capital_ratio : Infinity)} on its minimum capital, and deposits can ` +
+        `grow to about ${multiplier}× the cash put in (money multiplier).`
+      : "Banking is on, but the banking industry isn't in this game (it needs electricity, layer 3).", game.active.has("banking") ? "" : "short");
   }
 
   const g = avg(r.rates.sleep), rec = avg(r.sleep_recovery);

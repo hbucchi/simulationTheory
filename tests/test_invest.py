@@ -146,7 +146,9 @@ class InvestTests(unittest.TestCase):
         for _ in range(300):
             world.step()
         if len(world.agents) == 15:   # nobody died (deaths remove money and assets)
-            self.assertAlmostEqual(sum(a.money for a in world.agents), money, places=6)
+            # Base money: agents' cash plus banks' cash (deposits and loans only move it).
+            base = sum(a.money for a in world.agents) + sum(b.reserves for b in world.banking.banks)
+            self.assertAlmostEqual(base, money, places=6)
             for r in economy.RESOURCES:
                 self.assertAlmostEqual(sum(a.assets.get(r, 0) for a in world.agents), assets[r], places=6)
 

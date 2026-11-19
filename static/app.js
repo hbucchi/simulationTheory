@@ -42,6 +42,10 @@ const ui = {
   govRevert: $("gov-revert"),
   govStatus: $("gov-status"),
   govStats: $("gov-stats"),
+  bankForm: $("bank-form"), bankEnabled: $("bank-enabled"), bankDeposit: $("bank-deposit"),
+  bankSpread: $("bank-spread"), bankReserve: $("bank-reserve"), bankCapital: $("bank-capital"),
+  bankMinCapital: $("bank-min-capital"), bankRevert: $("bank-revert"), bankStatus: $("bank-status"),
+  bankStats: $("bank-stats"), bankList: $("bank-list"),
 };
 
 const DOT_RADIUS = 6;
@@ -594,6 +598,8 @@ function renderAgents() {
     const fields = [
       ...(held.length ? held.map(r => [label(r).toLowerCase(), a.inventory[r]]) : [["goods", "none"]]),
       ["money", usd(a.money)],
+      ...(a.deposits ? [["in the bank", usd(a.deposits)]] : []),
+      ...(a.debt ? [["owes the bank", usd(a.debt)]] : []),
       ["movement", a.depressed ? `${a.speed} px (depressed, ${a.movement} normally)` : `${a.speed} px`],
       ...GOODS.filter(r => a.assets[r]).map(r => {
         const price = state.market.asset_prices[r];
@@ -733,6 +739,7 @@ function renderGovernment() {
     card.append(l, v, n);
     ui.govStats.append(card);
   }
+  renderBanking();
 }
 
 ui.govRateRange.oninput = () => { govDirty = true; setGovInputs(Number(ui.govRateRange.value), Number(ui.govBuy.value)); };
@@ -757,6 +764,85 @@ ui.govForm.onsubmit = async (e) => {
     ui.govStatus.className = "status error";
   }
   ui.govStatus.hidden = false;
+};
+
+// ---------- Banking (in the Government tab) ----------
+
+let bankDirty = false;   // the banking form has unsaved edits: don't overwrite them
+
+function fillBanking(force = false) {
+  if (bankDirty && !force) return;
+  bankDirty = false;
+  const b = state.banking;
+  ui.bankEnabled.checked = b.enabled;
+  ui.bankDeposit.value = +(b.deposit_rate * 100).toFixed(4);
+  ui.bankSpread.value = +(b.loan_spread * 100).toFixed(4);
+  ui.bankReserve.value = +(b.reserve_ratio * 100).toFixed(2);
+  ui.bankCapital.value = +(b.capital_ratio * 100).toFixed(2);
+  ui.bankMinCapital.value = b.min_capital;
+}
+
+function renderBanking() {
+  const b = state.banking;
+  fillBanking();
+  ui.bankForm.querySelectorAll("input, button").forEach(el => { el.disabled = !b.industry_active; });
+  const stats = b.industry_active ? [
+    ["Banks", `${b.open} open`, `${b.closed} closed · ${b.failed} failed`],
+    ["Rates", `${(b.deposit_rate_now * 100).toFixed(2)}% / ${(b.loan_rate_now * 100).toFixed(2)}%`, "deposits / loans, per step"],
+    ["Deposits", usd(b.deposits), `${usd(b.reserves)} held as reserves`],
+    ["Loans", usd(b.loans), "outstanding"],
+    ["Money supply", usd(b.money_supply), "cash + deposits"],
+    ["Money multiplier", `×${b.multiplier.toFixed(2)}`, "money supply ÷ (cash + reserves)"],
+  ] : [["Banking", "not in this game", "the banking industry was left out (setup screen)"]];
+  ui.bankStats.innerHTML = "";
+  for (const [label, value, note] of stats) {
+    const card = Object.assign(document.createElement("div"), { className: "stat" });
+    card.append(Object.assign(document.createElement("div"), { className: "stat-label", textContent: label }),
+                Object.assign(document.createElement("div"), { className: "stat-value", textContent: value }),
+                Object.assign(document.createElement("div"), { className: "stat-note", textContent: note }));
+    ui.bankStats.append(card);
+  }
+  ui.bankList.innerHTML = "";
+  for (const bank of b.banks) {
+    const card = Object.assign(document.createElement("div"), { className: `bank-card ${bank.status.replace(" ", "-")}` });
+    const head = Object.assign(document.createElement("div"), { className: "bank-head" });
+    head.append(Object.assign(document.createElement("b"), { textContent: bank.name }),
+                Object.assign(document.createElement("span"), { className: "bank-status", textContent: bank.status }));
+    const ratio = bank.loans > 0 ? `${(bank.equity / bank.loans * 100).toFixed(0)}% of loans` : "no loans";
+    const lines = [
+      `Equity ${usd(bank.equity)} (${ratio}; founder put in ${usd(bank.capital_in)})`,
+      `Deposits ${usd(bank.deposits)} from ${bank.depositors} · reserves ${usd(bank.reserves)}`,
+      `Loans ${usd(bank.loans)} to ${bank.borrowers} · banking services ${bank.services} units · plant ${bank.shares} shares`,
+      `Interest in ${usd(bank.interest_received)} · out ${usd(bank.interest_paid)} · dividends ${usd(bank.dividends)}` +
+        (bank.written_off ? ` · written off ${usd(bank.written_off)}` : ""),
+    ];
+    card.append(head, ...lines.map(t => Object.assign(document.createElement("div"), { className: "bank-line", textContent: t })));
+    ui.bankList.append(card);
+  }
+}
+
+ui.bankForm.oninput = () => { bankDirty = true; };
+ui.bankRevert.onclick = () => { ui.bankStatus.hidden = true; fillBanking(true); };
+ui.bankForm.onsubmit = async (e) => {
+  e.preventDefault();
+  try {
+    const next = await api("/api/banking", {
+      enabled: ui.bankEnabled.checked,
+      deposit_rate: Number(ui.bankDeposit.value) / 100,
+      loan_spread: Number(ui.bankSpread.value) / 100,
+      reserve_ratio: Number(ui.bankReserve.value) / 100,
+      capital_ratio: Number(ui.bankCapital.value) / 100,
+      min_capital: Number(ui.bankMinCapital.value),
+    });
+    bankDirty = false;
+    render(next);
+    ui.bankStatus.textContent = "Banking settings apply from the next step.";
+    ui.bankStatus.className = "status";
+  } catch (err) {
+    ui.bankStatus.textContent = err.message;
+    ui.bankStatus.className = "status error";
+  }
+  ui.bankStatus.hidden = false;
 };
 
 // ---------- Manage tab: one form for creating and editing ----------

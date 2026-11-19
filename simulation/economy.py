@@ -6,6 +6,7 @@ Need scale reminder: 0.00 = satisfied, 1.00 = desperate.
 import math
 
 from .rules import DEFAULT_RULES, GOODS, LABOR, PRICED, RESOURCES
+from .catalog import OWN_USE_GOODS
 
 # Which need a good relieves, and how much one unit relieves, come from the game's Rules
 # (rules.need_of / rules.relief / rules.goods_for): several goods can relieve the same need,
@@ -37,7 +38,8 @@ def market_prices(agents, rules=DEFAULT_RULES):
     """
     if rules.price_mode == "fixed":
         return dict(rules.fixed_prices)
-    money = sum(a.money for a in agents)
+    # Money people can spend: cash plus bank deposits.
+    money = sum(a.money + sum(a.deposits.values()) for a in agents)
     units = dict.fromkeys(RESOURCES, 0)
     for a in agents:   # whole units, as Inventory.count would give, without a call per good
         for r, n in a.inventory.items.items():
@@ -75,6 +77,11 @@ def earn(agent, amount, source):
     """Record income for the report: source is "wages", "goods", "assets" or "government"."""
     agent.flow["income"] += amount
     agent.flow["sources"][source] = agent.flow["sources"].get(source, 0.0) + amount
+
+
+def money_of(agent):
+    """Money the agent can use: cash plus bank deposits."""
+    return agent.money + sum(agent.deposits.values()) if agent.deposits else agent.money
 
 
 def pay(payer, payee, amount):
@@ -344,7 +351,7 @@ def restock_shortfall(agent, resource, rules=DEFAULT_RULES):
 def surplus(agent, resource, rules=DEFAULT_RULES, scarcity=None):
     """Units above what the agent keeps (its share of the stock cap for the good's need, any
     reserve, its own input buffer) that it goes out to sell."""
-    if not rules.selling_enabled:
+    if not rules.selling_enabled or resource in OWN_USE_GOODS:
         return 0
     keep = 0
     need = rules.need_of(resource)
@@ -412,7 +419,10 @@ def wants_anything(agent, rules=DEFAULT_RULES, scarcity=None):
 
 def spare(agent, resource, rules=DEFAULT_RULES, scarcity=None):
     """Units the agent can give away without hurting its needs, its reserve, its stock floor
-    (in relief for the good's need) or the input buffer of its own industries."""
+    (in relief for the good's need) or the input buffer of its own industries. Services made
+    for the owner's own use (banking) are never given away."""
+    if resource in OWN_USE_GOODS:
+        return 0
     keep = 0
     need = rules.need_of(resource)
     if need:
@@ -426,7 +436,7 @@ def spare(agent, resource, rules=DEFAULT_RULES, scarcity=None):
 def spare_and_surplus(agent, resource, rules=DEFAULT_RULES, scarcity=None):
     """(spare(...), surplus(...)) in one go, sharing the work they have in common."""
     count = agent.inventory.count(resource)
-    if not count:
+    if not count or resource in OWN_USE_GOODS:
         return 0, 0
     extra = input_target(agent, resource, rules) + project_need(agent, resource)
     reserve = stockpile_target(agent, resource, rules, scarcity)

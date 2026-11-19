@@ -2,7 +2,7 @@ import math
 
 from .. import economy
 from .base import Module
-from .invest import cash_needed, purchase_limit
+from .invest import asset_yield, cash_needed, purchase_limit
 
 # Smallest project worth starting (asset shares).
 MIN_PROJECT_SHARES = 0.05
@@ -75,28 +75,44 @@ class Build(Module):
 
     def plan(self, agent, world):
         rules = world.rules
+        banking = world.banking
         prices = world.current_prices()
-        spare = agent.money - cash_needed(agent, prices, rules)
+        deposits = sum(agent.deposits.values())
+        # Deposits count as its money: it takes them out when it builds.
+        spare = agent.money + deposits - cash_needed(agent, prices, rules)
         if spare < rules.min_investment:
             return
         asset_prices = world.step_asset_prices()
         budget = min(spare, purchase_limit(agent, asset_prices, rules.capital_cash_ratio))
-        # Best q first (the same for every agent this step); build the best one it can get.
+        owns_bank = any(b.owner_id == agent.id for b in banking.banks)
+        # Best q first (the same for every agent this step); build the best one it can get. A new
+        # bank also needs its founder's own minimum capital on top of the plant.
         best = None
         for good, best_q, best_cost in ranked_builds(world, prices, asset_prices):
+            if good == "banking" and not owns_bank and spare - best_cost * MIN_PROJECT_SHARES < banking.min_capital:
+                continue
             if self.available(good, world, agent):
                 best = good
                 break
         if best is None:
             return
-        shares = min(MAX_PROJECT_SHARES, budget / best_cost)
+        if best == "banking" and not owns_bank:
+            budget = min(budget, spare - banking.min_capital)
+        # Borrow what its own money doesn't cover, when the asset earns more than the loan costs.
+        wanted = MAX_PROJECT_SHARES * best_cost
+        borrowed = 0.0
+        if budget < wanted and banking.available(world) and asset_yield(best, world) > banking.loan_rate_now(world):
+            borrowed = banking.borrow(world, agent, wanted - budget, f"building {best}",
+                                      extra_collateral=asset_prices[best] * MAX_PROJECT_SHARES)
+        shares = min(MAX_PROJECT_SHARES, (budget + borrowed) / best_cost)
         if shares < MIN_PROJECT_SHARES:
             return
+        banking.cash_up(agent, cash_needed(agent, prices, rules) + shares * best_cost)
         need = {k: math.ceil(round(units * shares, 9)) for k, units in rules.build_cost[best].items()}
         agent.project = {"good": best, "shares": round(shares, 4), "need": need, "started": world.tick,
-                         "q": round(best_q, 2)}
+                         "q": round(best_q, 2), "borrowed": round(borrowed, 2)}
         world.log(f"{agent.name} started building {shares:.2f} {best} asset(s) (worth {best_q:.1f}x their cost): "
-                  f"needs {economy.describe(need)}")
+                  f"needs {economy.describe(need)}" + (f", {borrowed:.2f} of it borrowed" if borrowed else ""))
 
     @staticmethod
     def available(good, world, agent):

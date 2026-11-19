@@ -15,6 +15,8 @@ API
     POST   /api/agents/<id> {...}     edit an agent (only the fields sent change)
     DELETE /api/agents/<id>           remove an agent
     POST   /api/government {"min_rate": r, "labor_purchase": n}
+    POST   /api/banking    {"enabled": bool, "deposit_rate": r, "loan_spread": r, "reserve_ratio": r,
+                            "capital_ratio": r, "min_capital": m}  (any subset; changes live)
                                       change government policy while the game runs
 
 Agent fields: name, x, y, movement, money,
@@ -95,6 +97,18 @@ class Simulation:
                 gov.labor_purchase = labor_purchase
             self.world.log(f"Government policy: minimum rate {gov.min_rate:.2%}, "
                            f"buying {gov.labor_purchase:g} labour per step")
+            return self.world.to_dict(self.detail)
+
+    def set_banking(self, changes):
+        """Switch banking on/off or change its rates while the game runs."""
+        with self.lock:
+            bank = self.world.banking
+            for key, value in changes.items():
+                setattr(bank, key, value)
+            self.world.log("Banking " + ("on" if bank.enabled else "off (banks wind down)") +
+                           f": deposit rate {bank.deposit_rate:.2%}, loan spread {bank.loan_spread:.2%}, "
+                           f"reserve ratio {bank.reserve_ratio:.0%}, capital ratio {bank.capital_ratio:.0%}, "
+                           f"minimum capital {bank.min_capital:,.0f}")
             return self.world.to_dict(self.detail)
 
     def remove_agent(self, agent_id):
@@ -230,6 +244,22 @@ class Handler(SimpleHTTPRequestHandler):
                         "auto_excluded": list(rules.auto_excluded), "consumer_needs": list(rules.consumer_needs)}
             if self.path == "/api/agents":
                 return self.sim.add_agent(parse_agent_config(body))
+            if self.path == "/api/banking":
+                limits = {"deposit_rate": (0, 1), "loan_spread": (0, 1), "reserve_ratio": (0, 1),
+                          "capital_ratio": (0, 1), "min_capital": (0, 1e12)}
+                changes = {}
+                for key, value in body.items():
+                    if key == "detail":
+                        continue
+                    if key == "enabled":
+                        if not isinstance(value, bool):
+                            raise ValueError("enabled must be true or false")
+                        changes[key] = value
+                    elif key in limits:
+                        changes[key] = _number(value, key, *limits[key])
+                    else:
+                        raise ValueError(f"unknown banking setting: {key}")
+                return self.sim.set_banking(changes)
             if self.path == "/api/government":
                 rate = body.get("min_rate")
                 buy = body.get("labor_purchase")

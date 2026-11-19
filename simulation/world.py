@@ -9,6 +9,7 @@ from . import distributions, economy
 from .agent import Agent
 from .inventory import Inventory
 from .modules import Build, Consume, Invest, Mood, Navigate, NeedsDecay, Production, Rest
+from .banking import Banking
 from .government import Government
 from .labor import LaborMarket
 from .modules.invest import cash_needed, transfer_shares
@@ -47,6 +48,8 @@ class World:
         self.cooldowns = {}  # frozenset({id_a, id_b}) -> tick until which they ignore each other
         self.labor = LaborMarket()
         self.government = Government(self.rules.gov_min_rate, self.rules.gov_labor_purchase)
+        self.banking = Banking(self.rules)
+        self._by_id = {}
         self.recorder = Recorder()  # per-step snapshots for the Report view
         self._dead_flows = []       # flows of agents that died this step (still counted)
         self.asset_trades = 0        # purchases of asset shares between agents
@@ -74,7 +77,7 @@ class World:
         # Per-step caches (set at the start of step(), cleared at its end): one price list for the
         # whole step, asset prices, owners short of cash, and who is seeking whom.
         self._step_cache = None
-        self.grid = {}              # spatial grid for contact checks: cell -> set of agents
+        self.grid = {}              # spatial grid for contact checks: cell -> {agent: None} (a dict, so the order is the same every run)
         self._cell = {}             # agent -> its cell
         # {good: {agent: units it can spare}}, worked out once per step in update_demand and used
         # to pick sellers to walk to (the trade itself re-checks what the seller can spare).
@@ -97,6 +100,7 @@ class World:
         if agent.color is None:
             agent.color = AGENT_COLORS[(agent.id - 1) % len(AGENT_COLORS)]
         self.agents.append(agent)
+        self._by_id[agent.id] = agent
         self.alive.add(agent)
         return agent
 
@@ -198,6 +202,8 @@ class World:
 
     def remove_agent(self, agent):
         self.agents.remove(agent)
+        self._by_id.pop(agent.id, None)
+        self.banking.forget(self, agent)
         self.alive.discard(agent)
         self._grid_remove(agent)
         for other in self.agents:
@@ -214,6 +220,17 @@ class World:
                  for k, v in r.inventory.items()}
         assets = {k: distributions.allocate(v, n, self.rng, False, *SPREADS["assets"][1:3])
                   for k, v in r.assets.items()}
+        # Starting banks: banking plants for rules.starting_banks agents that can put up the
+        # minimum capital, spread evenly over them from richest to poorest (no random draws, so
+        # the rest of the game is the same with or without banks); the richest if too few can.
+        if r.is_active("banking") and r.starting_banks:
+            richest = sorted(range(n), key=lambda i: -money[i])
+            able = [i for i in richest if money[i] >= r.bank_min_capital]
+            k = min(len(able), r.starting_banks)
+            chosen = [able[j * len(able) // k] for j in range(k)] if k else []
+            chosen += [i for i in richest if i not in chosen][:r.starting_banks - k]
+            for i in chosen:
+                assets["banking"][i] = assets["banking"][i] + r.starting_bank_shares
         for i in range(n):
             self.create_agent(money=round(money[i], 2), inventory={k: v[i] for k, v in stock.items()},
                               assets={k: v[i] for k, v in assets.items()})
@@ -222,7 +239,7 @@ class World:
         return self.cooldowns.get(frozenset((a.id, b.id)), -1) >= self.tick
 
     def agent_by_id(self, agent_id):
-        return next((a for a in self.agents if a.id == agent_id), None)
+        return self._by_id.get(agent_id)
 
     def owners_of(self, good):
         """Agents holding asset shares of ``good`` (once per step; fresh outside a step)."""
@@ -488,7 +505,7 @@ class World:
         so the search doesn't scan every agent for every seller.
         """
         candidates = [o for o in self.buyer_agents[resource] if o is not agent and o in self.alive
-                      and o.money > 0 and not self.in_cooldown(agent, o)]
+                      and economy.money_of(o) > 0 and not self.in_cooldown(agent, o)]
         # Closest first; the (costlier) re-check stops at the first that still wants it.
         for o in sorted(candidates, key=agent.distance_to):
             if economy.wants_to_buy(o, resource, self.rules, self.scarcity):
@@ -590,6 +607,7 @@ class World:
                         self.interact(agent, other)
         finally:
             self._step_cache = None
+        self.banking.step(self)
         self.recorder.end_step(self, self._dead_flows)
 
     # ---- spatial grid: contacts are only looked for in the 3 x 3 cells around an agent ----
@@ -605,19 +623,19 @@ class World:
         self.grid, self._cell = {}, {}
         for agent in self.agents:
             cell = self._cell_of(agent)
-            self.grid.setdefault(cell, set()).add(agent)
+            self.grid.setdefault(cell, {})[agent] = None
             self._cell[agent] = cell
 
     def _grid_remove(self, agent):
         cell = self._cell.pop(agent, None)
         if cell is not None:
-            self.grid.get(cell, set()).discard(agent)
+            self.grid.get(cell, {}).pop(agent, None)
 
     def _grid_move(self, agent):
         cell = self._cell_of(agent)
         if self._cell.get(agent) != cell:
             self._grid_remove(agent)
-            self.grid.setdefault(cell, set()).add(agent)
+            self.grid.setdefault(cell, {})[agent] = None
             self._cell[agent] = cell
 
     def _neighbours(self, agent):
@@ -674,6 +692,8 @@ class World:
             for buyer in near:
                 if quantity <= 1e-9:
                     return
+                if buyer.deposits:
+                    self.banking.cash_up(buyer, economy.money_of(buyer))
                 budget = max(0.0, buyer.money - cash_needed(buyer, prices, rules))
                 amount = quantity if price <= 0 else min(quantity, budget / price)
                 if whole:
@@ -719,6 +739,10 @@ class World:
         if not (economy.wants_anything(a, rules, scarcity) or economy.wants_anything(b, rules, scarcity)):
             return  # a casual bump: nobody needs anything
         prices = self.current_prices()
+        # Paying "by card": both can spend their bank deposits (they redeposit the spare later).
+        for x in (a, b):
+            if x.deposits:
+                self.banking.cash_up(x, economy.money_of(x))
         deals = economy.trade(a, b, prices, rules, self.rng, scarcity, self.unit_markups())
         for buyer, seller, bought, paid, stocked, unit_prices in deals:
             self.recorder.count("goods_deals")
@@ -785,6 +809,7 @@ class World:
                                "effects": self.rules.effects_of(g)}
                            for g in economy.GOODS},
             "consumer_needs": list(self.rules.consumer_needs),
+            "banking": self.banking.to_dict(self),
             # Industries left out because their recipe needs a good that isn't in this game.
             "auto_excluded": list(self.rules.auto_excluded),
             "government": self.government.to_dict(),

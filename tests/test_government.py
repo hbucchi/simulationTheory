@@ -51,7 +51,9 @@ class LabourPurchaseTests(unittest.TestCase):
             world.step()
         self.assertGreater(world.government.money_created, 0)
         if len(world.agents) == 10:
-            self.assertAlmostEqual(sum(a.money for a in world.agents), start + world.government.money_created, places=6)
+            # Base money: agents' cash plus the cash banks hold (deposits and loans only move it).
+            base = sum(a.money for a in world.agents) + sum(b.reserves for b in world.banking.banks)
+            self.assertAlmostEqual(base, start + world.government.money_created, places=6)
 
     def test_off_by_default(self):
         world = World(seed=2, rules=Rules.from_dict({"agents": 5}))

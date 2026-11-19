@@ -95,6 +95,8 @@ class Agent:
         self.income_avg = 0.0
         self.consumption_avg = 0.0
         self.project = None      # building project (Build): {"good", "shares", "need", "started"}
+        self.deposits = {}       # bank id -> balance (kept in step by banking.py)
+        self.debt = 0.0          # what it owes the banks
         self.target_id = None
         self.seeking_for = None  # resource it is going to buy from target_id (Navigate)
         self.depart_heading = 0.0  # radians
@@ -146,6 +148,7 @@ class Agent:
                 "id": self.id, "name": self.name, "x": round(self.x, 2), "y": round(self.y, 2),
                 "needs": {k: round(v, 2) for k, v in self.needs.items()},
                 "money": round(self.money, 2), "movement": self.movement, "speed": self.speed,
+                "deposits": round(sum(self.deposits.values()), 2), "debt": round(self.debt, 2),
                 "assets": dict(self.assets), "depressed": self.depressed,
                 "inventory": self._held(), "color": self.color, "activity": self.activity,
                 "target_id": self.target_id, "project": self.project, "seeking_for": self.seeking_for,
@@ -162,6 +165,7 @@ class Agent:
             "y": round(self.y, 2),
             "needs": {k: round(v, 2) for k, v in self.needs.items()},
             "money": round(self.money, 2),
+            "deposits": round(sum(self.deposits.values()), 2), "debt": round(self.debt, 2),
             "movement": self.movement,
             "speed": self.speed,
             "assets": dict(self.assets),

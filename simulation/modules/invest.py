@@ -42,7 +42,9 @@ class Invest(Module):
             return
         prices = world.current_prices()
         # Same cash rule as sellers use, so an agent never invests money it then has to sell back for.
-        spare = agent.money - cash_needed(agent, prices, rules)
+        # Bank deposits count as its money (it takes them out to pay).
+        deposits = sum(agent.deposits.values())
+        spare = agent.money + deposits - cash_needed(agent, prices, rules)
         if spare < rules.min_investment:
             return
         asset_prices = world.step_asset_prices()
@@ -69,6 +71,8 @@ class Invest(Module):
             if not limits:
                 continue
             bought = {}
+            world.banking.cash_up(agent, cash_needed(agent, prices, rules) + spare)
+            spare = min(spare, agent.money - cash_needed(agent, prices, rules))
             for seller, limit in limits.items():
                 if spare <= 1e-9:
                     break
@@ -103,8 +107,8 @@ def cash_short_owners(world, prices):
         return cache["cash_short"]
     rules = world.rules
     min_sale = rules.min_investment * MIN_SALE_SHARE
-    short = {o: cash_needed(o, prices, rules) - o.money for o in world.agents if o.assets}
-    short = {o: gap for o, gap in sorted(short.items(), key=lambda kv: kv[0].money) if gap >= min_sale}
+    short = {o: cash_needed(o, prices, rules) - economy.money_of(o) for o in world.agents if o.assets}
+    short = {o: gap for o, gap in sorted(short.items(), key=lambda kv: economy.money_of(kv[0])) if gap >= min_sale}
     if cache is not None:
         cache["cash_short"] = short
     return short
@@ -118,9 +122,11 @@ def transfer_shares(seller, buyer, resource, shares):
 
 
 def purchase_limit(agent, asset_prices, ratio):
-    """Most the agent can spend on a new asset and still hold ``ratio`` x its assets in cash."""
+    """Most the agent can spend on a new asset and still hold ``ratio`` x its assets in cash
+    (bank deposits count as cash)."""
     held = sum(shares * asset_prices.get(g, 0.0) for g, shares in agent.assets.items())
-    return max(0.0, (agent.money - ratio * held) / (1 + ratio))
+    cash = agent.money + sum(agent.deposits.values())
+    return max(0.0, (cash - ratio * held) / (1 + ratio))
 
 
 def cash_needed(agent, prices, rules):

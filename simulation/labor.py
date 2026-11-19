@@ -60,7 +60,7 @@ def cost_of_living(agent, prices, rules):
 def general_need(agent, prices, rules):
     """How much the agent needs a job, 0..1: short of money and/or pressing needs."""
     cushion = rules.comfort_steps * cost_of_living(agent, prices, rules)
-    money_short = min(1.0, max(0.0, 1 - agent.money / cushion)) if cushion > 0 else 0.0
+    money_short = min(1.0, max(0.0, 1 - economy.money_of(agent) / cushion)) if cushion > 0 else 0.0
     pressing = max((getattr(agent, n) for n in rules.consumer_needs), default=0.0)
     return rules.money_weight * money_short + (1 - rules.money_weight) * pressing
 
@@ -132,7 +132,7 @@ class LaborMarket:
         ref_wage = self.wage if self.wage > 0 else base
         stats["wanted"] = sum(
             min(e.labor_need - e.labor_available,
-                max(0.0, e.money - cash_needed(e, prices, rules)) / ref_wage if ref_wage > 0 else 0.0)
+                max(0.0, economy.money_of(e) - cash_needed(e, prices, rules)) / ref_wage if ref_wage > 0 else 0.0)
             for e in employers)
         stats["jobs_funded"] = stats["own_use"] + stats["wanted"]
 
@@ -161,7 +161,12 @@ class LaborMarket:
             employers.sort(key=lambda e: world.labor_value(e, prices), reverse=True)
         for employer in employers:
             want = employer.labor_need - employer.labor_available
-            budget = max(0.0, employer.money - cash_needed(employer, prices, rules))
+            need = cash_needed(employer, prices, rules)
+            budget = max(0.0, economy.money_of(employer) - need)
+            if budget > 0 and employer.deposits:
+                # Wages are paid in cash: take what's needed out of the bank.
+                world.banking.cash_up(employer, need + min(budget, want * ref_wage * 2))
+                budget = min(budget, max(0.0, employer.money - need))
             for worker in offers:
                 if want <= 1e-9 or budget <= 1e-9:
                     break

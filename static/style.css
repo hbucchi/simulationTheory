@@ -597,3 +597,18 @@ input.recipe-input { width: 190px; }
   .small-multiples, .report-grid { grid-template-columns: minmax(0, 1fr); }
   .report-grid > * { min-width: 0; }
 }
+
+/* Banking panel (Government tab) */
+.bank-title { margin-top: 22px; }
+.bank-toggle { font-weight: 600; margin-bottom: 10px; }
+.bank-fields { display: grid; gap: 8px; margin-bottom: 10px; }
+.bank-fields label { justify-content: space-between; font-size: 12.5px; }
+.bank-fields input { width: 90px; }
+.bank-list { display: grid; gap: 8px; margin-top: 12px; }
+.bank-card { background: var(--panel-2); border-radius: var(--radius); padding: 10px 12px; font-size: 12.5px; }
+.bank-head { display: flex; justify-content: space-between; margin-bottom: 4px; }
+.bank-status { font-size: 11px; color: var(--good); }
+.bank-card.failed .bank-status { color: var(--bad); }
+.bank-card.winding-down .bank-status { color: var(--muted); }
+.bank-line { color: var(--muted); font-variant-numeric: tabular-nums; }
+.bank-fields label > span { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 190px; color: var(--muted); }

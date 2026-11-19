@@ -11,7 +11,7 @@ each new agent is drawn from; see distributions.py.
 from dataclasses import asdict, dataclass, field, fields
 
 from . import distributions
-from .catalog import BY_ID, CAPITAL_GOODS, CATALOG, default_build_cost
+from .catalog import BY_ID, CAPITAL_GOODS, CATALOG, OWN_USE_GOODS, default_build_cost
 
 GOODS = tuple(e["id"] for e in CATALOG)   # every good; each is made by its own industry (assets)
 # Default split (a game's rules can change what each good does, see Rules.effects):
@@ -231,6 +231,25 @@ class Rules:
     # may fall below, and units of labour bought every step with newly created money.
     gov_min_rate: float = 0.0
     gov_labor_purchase: float = 0.0
+
+    # Banking (see banking.py). Banks are an industry ("banking"): its plant is built from capital
+    # goods, runs on labour and electricity and makes the banking services that loans use up
+    # (one unit per loan_per_service lent). A bank also needs its founder's own money: at least
+    # bank_min_capital (Basel-style minimum capital) goes in as its equity before it can open.
+    # Rates are per step; the deposit rate is never below the government's minimum rate.
+    banking_enabled: bool = True
+    starting_banks: int = 3            # agents that start with a banking plant (and open a bank)
+    starting_bank_shares: float = 1.0  # banking shares each of them starts with
+    bank_min_capital: float = 5000.0   # founder's own money a bank needs to open (and to lend)
+    capital_ratio: float = 0.08        # equity >= this x loans (Basel capital adequacy)
+    reserve_ratio: float = 0.1         # reserves >= this x deposits
+    deposit_rate: float = 0.001
+    loan_spread: float = 0.003         # loan rate = deposit rate + this
+    loan_steps: int = 300              # loans are repaid over this many steps
+    max_loan_to_value: float = 0.6     # debt <= this x the borrower's asset shares (+ what it builds)
+    loan_per_service: float = 1000.0   # money lent per unit of banking services used
+    default_steps: int = 30            # unpaid steps in a row before a loan defaults
+    deposit_share: float = 0.5         # share of spare cash agents deposit each step
 
     # Prices
     price_mode: str = "scarcity"       # "scarcity": money/units*(1-share); "fixed": fixed_prices
@@ -506,6 +525,19 @@ LIMITS = {
     "inputs": (None, None, "recipes"),
     "input_buffer_steps": (1, 10000, "int"),
     "industry_layers": (1, MAX_LAYERS, "int"),
+    "banking_enabled": (None, None, "bool"),
+    "starting_banks": (0, 1000, "int"),
+    "starting_bank_shares": (0.05, 1000, "float"),
+    "bank_min_capital": (0, 1e12, "float"),
+    "capital_ratio": (0, 1, "float"),
+    "reserve_ratio": (0, 1, "float"),
+    "deposit_rate": (0, 1, "float"),
+    "loan_spread": (0, 1, "float"),
+    "loan_steps": (1, 100000, "int"),
+    "max_loan_to_value": (0, 10, "float"),
+    "loan_per_service": (0.01, 1e9, "float"),
+    "default_steps": (1, 100000, "int"),
+    "deposit_share": (0, 1, "float"),
     "excluded_industries": (None, None, "goods"),
     "building_enabled": (None, None, "bool"),
     "build_cost": (None, None, "build_cost"),
@@ -602,8 +634,8 @@ def demand_sized_shares(rules):
     shares = {}
     for g in GOODS:
         per_share = rules.asset_labor[g] * rules.productivity[g]
-        if g not in units or per_share <= 0:
-            shares[g] = 0.0
+        if g not in units or per_share <= 0 or g in OWN_USE_GOODS:
+            shares[g] = 0.0   # (banks come from starting_banks instead)
         else:
             least = CAPITAL_DEFAULT_SHARES if g in CAPITAL_GOODS else MIN_DEFAULT_SHARES
             shares[g] = round(max(least, units[g] * SIZING_HEADROOM / per_share), 2)

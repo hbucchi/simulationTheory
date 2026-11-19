@@ -21,6 +21,8 @@ Each entry:
              their layer's default (deeper layers need less labour per unit, see rules.py)
   capital    (optional) True for capital goods: what new assets (industry capacity) are built from
              (machinery, construction). Electronics also serves as technology equipment.
+  service    (optional) True for services the owner makes only for its own use and never trades
+             (banking: the services a bank's loans use up, see banking.py)
   asset_labor (optional) jobs per asset share, for industries whose plants make very little per
              step: capital goods and housing get about a tenth of the usual capacity per asset,
              so building new capital or homes takes time (labour per unit stays normal).
@@ -109,6 +111,13 @@ CATALOG = [
      "inputs": {"textiles": 1.0, "electricity": 0.1}, "effects": {"shelter": 0.5, "boredom": 0.1}, "shelf_life": 3000, "stock": 5,
      "shares": 0.02, "plan": 0.3},
 
+    # Banks (see banking.py): the plant makes banking services from labour and electricity;
+    # every loan uses them up. Nobody consumes or trades them, so the industry isn't demand-sized:
+    # the starting banks come from rules.starting_banks.
+    {"id": "banking", "label": "Banking", "sector": "Financials", "industry": "Banking Services",
+     "inputs": {"electricity": 0.3}, "effects": {}, "shelf_life": 50, "stock": 0, "shares": 0.0, "plan": 0,
+     "service": True},
+
     # ---------------- Layer 4: advanced manufacturing ----------------
     {"id": "electronics", "label": "Electronics", "sector": "Technology", "industry": "Electronic Equipment & Parts",
      "inputs": {"steel": 0.3, "plastics": 0.5, "electricity": 0.5, "machinery": 0.1}, "effects": {"boredom": 0.6, "energy": -0.2, "sleep": -0.1},
@@ -137,6 +146,8 @@ CATALOG = [
 BY_ID = {entry["id"]: entry for entry in CATALOG}
 
 CAPITAL_GOODS = tuple(e["id"] for e in CATALOG if e.get("capital"))
+# Services an industry makes only for its own use (never traded): banking.
+OWN_USE_GOODS = tuple(e["id"] for e in CATALOG if e.get("service"))
 
 # Services that run on technology rather than machinery.
 TECH_SERVICES = ("telecom", "media", "healthcare", "software")
@@ -154,5 +165,5 @@ def default_build_cost(good, layer):
         return {"machinery": 3.0, "construction": 2.0}
     return {"machinery": 2.0, "construction": 2.0, "electronics": 2.0}
 
-SECTORS = ("Energy", "Basic Materials", "Industrials", "Consumer Cyclicals", "Consumer Non-Cyclicals",
+SECTORS = ("Financials", "Energy", "Basic Materials", "Industrials", "Consumer Cyclicals", "Consumer Non-Cyclicals",
            "Healthcare", "Technology", "Telecommunications", "Utilities", "Real Estate")
