@@ -25,15 +25,41 @@ function catalogLayer(g, inputs = Object.fromEntries(GOODS.map(x => [x, CATALOG_
   const recipe = inputs[g] || {};
   return 1 + Math.max(0, ...Object.keys(recipe).map(i => catalogLayer(i, inputs, new Set(seen))));
 }
+// Industries that exist in a game (as rules.py): layer <= industry_layers, not excluded, and
+// every input of the recipe exists too. Returns {active: Set, auto: {good: missing input}}.
+function gameIndustries(r) {
+  const inputs = r.inputs || {};
+  const layerOf = (g) => catalogLayer(g, inputs);
+  const excluded = new Set(r.excluded_industries || []);
+  const active = new Set(), auto = {};
+  for (const g of [...GOODS].sort((a, b) => layerOf(a) - layerOf(b))) {
+    if (layerOf(g) > r.industry_layers || excluded.has(g)) continue;
+    const missing = Object.keys(inputs[g] || {}).find(i => !active.has(i));
+    if (missing) auto[g] = missing; else active.add(g);
+  }
+  return { active, auto };
+}
+
+// Quick starts for the industry picker: how many layers, every industry in them included.
+const GAME_SIZES = [[1, "Simple · layer 1"], [2, "Basic · layers 1–2"], [3, "Standard · layers 1–3"], [10, "Full · every layer"]];
+
 const SETUP_SECTIONS = [
   { title: "World", hint: "How many agents, and how meetings work.", fields: [
-    { path: "agents", label: "Agents", kind: "int", min: 1, max: 500 },
+    { path: "agents", label: "Agents", kind: "int", min: 1, max: 5000 },
     { path: "seed", label: "Seed", kind: "int", optional: true, placeholder: "random" },
     { path: "contact_distance", label: "Touch distance (px)", kind: "float", min: 1, max: 200, step: 1 },
     { path: "depart_steps", label: "Walk apart (steps)", kind: "int", min: 0, max: 1000 },
     { path: "cooldown_steps", label: "Ignore each other after a deal (steps)", kind: "int", min: 0, max: 10000 },
     { path: "retry_steps", label: "… after no deal (steps)", kind: "int", min: 0, max: 10000 },
   ]},
+  { title: "Game size: layers and industries", wide: true, fields: [
+    { path: "industry_layers", label: "Industry layers in this game (1–10)", kind: "int", min: 1, max: 10, full: true },
+    { path: "#autosize", label: "Size starting industries to this game (recommended when you change layers or industries)",
+      kind: "bool", full: true, local: true },
+    { path: "excluded_industries", label: "Industries in this game", kind: "industries", full: true },
+  ], hint: "Pick a smaller economy for a simpler (and faster) game: fewer layers, or leave out single industries. " +
+      "Every industry the game keeps still needs all the inputs of its recipe, so leaving one out also leaves out what " +
+      "is made from it. Each good is checked against every agent each step, so fewer industries also run faster." },
   { title: "Prices", hint: "Scarcity: total money ÷ total units × (1 − share of that resource). Fixed: the prices below.", fields: [
     { path: "price_mode", label: "Price rule", kind: "choice", full: true,
       options: [["scarcity", "Scarcity (changes with supply)"], ["fixed", "Fixed prices"]] },
@@ -120,7 +146,6 @@ const SETUP_SECTIONS = [
       "A unit relieves its need by base relief × fit × (1 + layer bonus × (layer − 1)), so deeper layers address needs " +
       "better. Every unit is thrown away once it is older than its shelf life. New industry capacity is built from capital " +
       "goods (machinery, construction), which are made very slowly, so building takes time.", fields: [
-    { path: "industry_layers", label: "Industry layers in this game (1–10)", kind: "int", min: 1, max: 10, full: true },
     { path: "building_enabled", label: "Investors build new assets from capital goods", kind: "bool", full: true },
     { path: "build_min_q", label: "Build when an asset is worth ≥ (× its cost)", kind: "float", min: 0, step: 0.1,
       enabledWhen: v => v.building_enabled },
@@ -340,7 +365,7 @@ function buildSetupForm() {
     hint.className = "section-hint";
     hint.textContent = section.hint;
     const grid = document.createElement("div");
-    grid.className = section.wide ? "spread-list" : "setup-fields";
+    grid.className = section.wide && section.fields.some(f => f.kind === "spread") ? "spread-list" : "setup-fields";
     // Fields with a `group` go into a collapsible block of that name inside the section.
     const groups = new Map();
     const gridFor = (f) => {
@@ -358,6 +383,7 @@ function buildSetupForm() {
     for (const f of section.fields) {
       f.section = section;
       if (f.kind === "spread") { gridFor(f).append(buildSpreadRow(f)); continue; }
+      if (f.kind === "industries") { gridFor(f).append(buildIndustryPicker(f)); continue; }
       const label = document.createElement("label");
       if (f.full) label.classList.add("full");
       let el;
@@ -383,6 +409,89 @@ function buildSetupForm() {
     setupUi.sections.append(box);
   }
   for (const [id, name] of PRESETS) setupUi.preset.add(new Option(name, id));
+}
+
+// ---------- industry picker ----------
+// One checkbox per industry, grouped by layer: unticked industries are left out of the game.
+// Industries deeper than the chosen layers, or whose recipe needs a missing good, are greyed out.
+
+const industryBox = (g) => setupUi.form.elements[`industry#${g}`];
+
+function buildIndustryPicker(f) {
+  const box = Object.assign(document.createElement("div"), { className: "industry-picker full" });
+  const sizes = Object.assign(document.createElement("div"), { className: "game-sizes" });
+  for (const [layers, text] of GAME_SIZES) {
+    const b = Object.assign(document.createElement("button"), { type: "button", className: "chip", textContent: text });
+    b.onclick = () => {
+      setupInput("industry_layers").value = layers;
+      for (const g of GOODS) industryBox(g).checked = true;
+      setupInput("#autosize").checked = true;
+      updateSetup();
+    };
+    sizes.append(b);
+  }
+  box.append(Object.assign(document.createElement("p"), { className: "section-hint",
+    textContent: "Untick an industry to leave it out. Anything made from it is left out too." }), sizes);
+  const byLayer = {};
+  for (const g of GOODS) (byLayer[catalogLayer(g)] ||= []).push(g);
+  for (const [layer, goods] of Object.entries(byLayer)) {
+    const details = Object.assign(document.createElement("details"), { className: "setup-group industry-layer", open: layer <= 2 });
+    details.dataset.layer = layer;
+    const summary = document.createElement("summary");
+    summary.append(`Layer ${layer} `, Object.assign(document.createElement("span"), { className: "layer-count" }));
+    const all = Object.assign(document.createElement("button"), { type: "button", className: "link-btn", textContent: "all" });
+    const none = Object.assign(document.createElement("button"), { type: "button", className: "link-btn", textContent: "none" });
+    all.onclick = (e) => { e.preventDefault(); goods.forEach(g => industryBox(g).checked = true); updateSetup(); };
+    none.onclick = (e) => { e.preventDefault(); goods.forEach(g => industryBox(g).checked = false); updateSetup(); };
+    summary.append(all, none);
+    const grid = Object.assign(document.createElement("div"), { className: "industry-grid" });
+    for (const g of goods) {
+      const item = Object.assign(document.createElement("label"), { className: "industry-item" });
+      const cb = Object.assign(document.createElement("input"), { type: "checkbox", name: `industry#${g}` });
+      const need = mainNeedOf(g);
+      item.append(cb, Object.assign(document.createElement("span"), { textContent: label(g) }),
+                  Object.assign(document.createElement("small"), { className: "why", textContent: need || "input" }));
+      grid.append(item);
+    }
+    details.append(summary, grid);
+    box.append(details);
+  }
+  return box;
+}
+
+// The need a good relieves most under the catalog's effects (or null for pure inputs).
+function mainNeedOf(g) {
+  const effects = CATALOG_INFO[g].effects || {};
+  const best = Object.entries(effects).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])[0];
+  return best ? best[0] : null;
+}
+
+function fillIndustryPicker(excluded) {
+  const out = new Set(excluded || []);
+  for (const g of GOODS) industryBox(g).checked = !out.has(g);
+}
+
+const readIndustryPicker = () => GOODS.filter(g => !industryBox(g).checked);
+
+// Grey out industries that can't be in this game, and say why.
+function updateIndustryPicker(values) {
+  if (!values) return;
+  const { active, auto } = gameIndustries(values);
+  const layerOf = (g) => catalogLayer(g, values.inputs || {});
+  for (const g of GOODS) {
+    const item = industryBox(g).closest("label");
+    const why = item.querySelector(".why");
+    const deep = layerOf(g) > values.industry_layers;
+    item.classList.toggle("deep", deep);
+    item.classList.toggle("auto", !!auto[g]);
+    item.classList.toggle("on", active.has(g));
+    why.textContent = deep ? `layer ${layerOf(g)}: too deep`
+      : auto[g] ? `needs ${label(auto[g]).toLowerCase()}` : (mainNeedOf(g) || "input");
+  }
+  for (const details of setupUi.form.querySelectorAll(".industry-layer")) {
+    const goods = GOODS.filter(g => catalogLayer(g) === Number(details.dataset.layer));
+    details.querySelector(".layer-count").textContent = `(${goods.filter(g => active.has(g)).length} of ${goods.length} in)`;
+  }
 }
 
 // ---------- tiers editor ----------
@@ -572,6 +681,8 @@ function copyToGroup(f) {
 function fillSetup(rules, seed = "") {
   for (const f of SETUP_FIELDS) {
     if (f.kind === "spread") { fillSpread(f, getPath(rules, f.path)); continue; }
+    if (f.kind === "industries") { fillIndustryPicker(rules.excluded_industries); continue; }
+    if (f.path === "#autosize") { setupInput(f.path).checked = true; continue; }
     const el = setupInput(f.path);
     const value = f.path === "seed" ? seed : getPath(rules, f.path);
     if (f.kind === "bool") el.checked = value;
@@ -585,9 +696,14 @@ function fillSetup(rules, seed = "") {
 function readSetup() {
   const rules = {};
   let seed = null;
+  const autosize = setupInput("#autosize").checked;
   for (const f of SETUP_FIELDS) {
     let value;
-    if (f.kind === "spread") value = readSpread(f);
+    if (f.local) continue;
+    // Auto-sized: the server sizes the starting industries for this game's layers and industries.
+    if (autosize && f.path.startsWith("assets.")) continue;
+    if (f.kind === "industries") value = readIndustryPicker();
+    else if (f.kind === "spread") value = readSpread(f);
     else {
       const el = setupInput(f.path);
       if (f.kind === "bool") value = el.checked;
@@ -639,9 +755,20 @@ function drawHistogram(canvas, spec, f) {
 function updateSetup() {
   let values = null, error = null;
   try { values = readSetup().rules; } catch (err) { error = err.message; }
+  updateIndustryPicker(values);
+  const autosize = setupInput("#autosize").checked;
   for (const f of SETUP_FIELDS) {
-    const factory = f.path === "seed" ? undefined : getPath(rulesInfo.factory, f.path);
+    const factory = f.path === "seed" || f.local ? undefined : getPath(rulesInfo.factory, f.path);
+    if (f.kind === "industries") continue;
     if (f.kind === "spread") {
+      if (f.path.startsWith("assets.")) {
+        // While auto-sized these rows show what the server will use (read-only).
+        const row = rowOf(f);
+        row.classList.toggle("disabled", autosize);
+        row.title = autosize ? "Sized for this game: untick “Size starting industries” to set it yourself" : "";
+        for (const el of row.querySelectorAll("input, select")) el.disabled = autosize;
+        if (autosize) continue;
+      }
       let spec = null;
       try { spec = readSpread(f); } catch { /* reported in the preview */ }
       const row = rowOf(f);
@@ -665,7 +792,28 @@ function updateSetup() {
     const now = f.kind === "bool" ? el.checked : f.kind === "choice" ? el.value : Number(el.value);
     el.classList.toggle("changed", factory !== undefined && el.value !== "" && now !== factory);
   }
-  renderPreview(values, error);
+  if (!values) return renderPreview(null, error);
+  resolvePreview(values);
+}
+
+// The preview shows the rules as the server will fill them in (industries sized for this game,
+// stock of missing goods converted), asked for a moment after the last change.
+let resolveTimer = null, resolveSeq = 0;
+function resolvePreview(values) {
+  clearTimeout(resolveTimer);
+  resolveTimer = setTimeout(async () => {
+    const seq = ++resolveSeq;
+    try {
+      const resolved = await api("/api/rules/resolve", { rules: values });
+      if (seq !== resolveSeq) return;   // a newer change is on its way
+      if (setupInput("#autosize").checked) {
+        for (const f of SETUP_FIELDS) if (f.path.startsWith("assets.")) fillSpread(f, getPath(resolved.rules, f.path));
+      }
+      renderPreview({ ...values, assets: resolved.rules.assets, inventory: resolved.rules.inventory }, null);
+    } catch (err) {
+      if (seq === resolveSeq) renderPreview(null, err.message);
+    }
+  }, 150);
 }
 
 function setStatusSetup(message) {
@@ -691,7 +839,8 @@ function renderPreview(r, error) {
   const sharesPerAgent = (g) => avg(r.assets[g]);
   const perShare = (g) => r.asset_labor[g] * r.productivity[g];
   const layerOf = (g) => catalogLayer(g, r.inputs || {});
-  const active = GOODS.filter(g => layerOf(g) <= r.industry_layers);
+  const game = gameIndustries(r);
+  const active = GOODS.filter(g => game.active.has(g));
   const deepest = Math.max(...GOODS.map(layerOf));
   // Relief one unit of good g gives need n (positive effects only), as in rules.py.
   const reliefFor = (g, n) => {
@@ -701,13 +850,22 @@ function renderPreview(r, error) {
   line(`Industries: ${active.length} of ${GOODS.length} exist (layers 1–${Math.min(r.industry_layers, deepest)} of the ` +
        `${deepest} the recipes use). A layer-${Math.min(r.industry_layers, deepest)} good relieves ` +
        `${(1 + r.layer_bonus * (Math.min(r.industry_layers, deepest) - 1)).toFixed(1)}× what a layer-1 good of the same fit does.`);
+  const left = (r.excluded_industries || []).filter(g => layerOf(g) <= r.industry_layers);
+  const autoOut = Object.entries(game.auto);
+  if (left.length || autoOut.length) {
+    line(`Left out: ${left.map(g => label(g).toLowerCase()).join(", ") || "none"}` +
+         (autoOut.length ? `; and so also ${autoOut.map(([g, m]) => `${label(g).toLowerCase()} (needs ${label(m).toLowerCase()})`).join(", ")}` : "") + ".");
+  }
+  if (!r.assets) return;
   // Can the economy meet every need? Relief its industries can make at full staffing vs how fast needs grow.
   for (const need of NEEDS.filter(x => x !== "sleep")) {
     const relief = (g) => reliefFor(g, need);
     const goods = active.filter(g => relief(g) > 0).sort((a, b) => relief(b) - relief(a));
     const grows = avg(r.rates[need]) * n;
     if (!goods.length) {
-      line(`${cap(need)}: nothing in this game relieves it (it grows ${grows.toFixed(3)}/step in total).`, grows ? "short" : "");
+      const deadly = (need === "hunger" || need === "thirst") && r.death_enabled && grows > 0;
+      line(`${cap(need)}: nothing in this game relieves it (it grows ${grows.toFixed(3)}/step in total)` +
+           (deadly ? ". ⚠ Agents will die of it: include an industry that relieves it." : "."), grows ? "short" : "");
       continue;
     }
     const capacity = goods.reduce((sum, g) => sum + sharesPerAgent(g) * n * perShare(g) * relief(g), 0);
@@ -833,6 +991,10 @@ setupUi.form.onsubmit = async (e) => {
   e.preventDefault();
   try {
     const { rules, seed } = readSetup();
+    const { active } = gameIndustries(rules);
+    const fatal = ["hunger", "thirst"].filter(need => rules.death_enabled && spreadMean(rules.rates[need]) > 0 &&
+      ![...active].some(g => (rules.effects?.[g]?.[need] || 0) > 0));
+    if (fatal.length && !confirm(`Nothing in this game relieves ${fatal.join(" or ")}, so every agent will die. Start anyway?`)) return;
     const next = await api("/api/reset", { rules, seed });
     selectedId = null;
     editingId = null;

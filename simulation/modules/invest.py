@@ -45,14 +45,12 @@ class Invest(Module):
         spare = agent.money - cash_needed(agent, prices, rules)
         if spare < rules.min_investment:
             return
-        asset_prices = world.asset_prices(prices)
+        asset_prices = world.step_asset_prices()
         spare = min(spare, purchase_limit(agent, asset_prices, rules.capital_cash_ratio))
         if spare < rules.min_investment:
             return
-        # Owners short of cash, worked out once: {agent: shortfall}, most short first.
-        short = {o: cash_needed(o, prices, rules) - o.money for o in world.agents if o is not agent and o.assets}
-        min_sale = rules.min_investment * MIN_SALE_SHARE
-        short = {o: gap for o, gap in sorted(short.items(), key=lambda kv: kv[0].money) if gap >= min_sale}
+        # Owners short of cash: {agent: shortfall}, most short first (worked out once per step).
+        short = {o: gap for o, gap in cash_short_owners(world, prices).items() if o is not agent}
         for resource in ranked_assets(world):
             price = asset_prices[resource]
             # Who wants each good is worked out once per step (World.update_demand); ask directly
@@ -63,10 +61,10 @@ class Invest(Module):
             if price <= 0 or not lacks:
                 continue   # worthless, or it isn't short of this resource
             # Cash-short owners first (they need the money most), then owners over the cap.
-            limits = {o: short[o] for o in short if o.assets.get(resource, 0) > 0}
-            for o in world.agents:
-                if (o is not agent and o not in limits and o.assets.get(resource, 0) > 0
-                        and economy.surplus(o, resource, rules, world.scarcity)):
+            owners = world.owners_of(resource)
+            limits = {o: short[o] for o in owners if o in short}
+            for o in owners:
+                if (o is not agent and o not in limits and world.surpluses_of(o).get(resource)):
                     limits[o] = o.assets[resource] * SURPLUS_SELL_SHARE * price
             if not limits:
                 continue
@@ -97,6 +95,21 @@ class Invest(Module):
             return
 
 
+def cash_short_owners(world, prices):
+    """{owner: how much cash it is short}, most short first, for owners short by at least
+    MIN_SALE_SHARE of min_investment. Worked out once per step (fresh outside a step)."""
+    cache = world._step_cache
+    if cache and "cash_short" in cache:
+        return cache["cash_short"]
+    rules = world.rules
+    min_sale = rules.min_investment * MIN_SALE_SHARE
+    short = {o: cash_needed(o, prices, rules) - o.money for o in world.agents if o.assets}
+    short = {o: gap for o, gap in sorted(short.items(), key=lambda kv: kv[0].money) if gap >= min_sale}
+    if cache is not None:
+        cache["cash_short"] = short
+    return short
+
+
 def transfer_shares(seller, buyer, resource, shares):
     seller.assets[resource] -= shares
     if seller.assets[resource] <= 1e-9:
@@ -122,5 +135,11 @@ def asset_yield(resource, world):
 
 
 def ranked_assets(world):
-    """Resources ordered from the best asset to buy to the worst."""
-    return sorted(world.rules.active_goods, key=lambda r: asset_yield(r, world), reverse=True)
+    """Resources ordered from the best asset to buy to the worst (once per step)."""
+    cache = world._step_cache
+    if cache and "ranked_assets" in cache:
+        return cache["ranked_assets"]
+    ranked = sorted(world.rules.active_goods, key=lambda r: asset_yield(r, world), reverse=True)
+    if cache is not None:
+        cache["ranked_assets"] = ranked
+    return ranked

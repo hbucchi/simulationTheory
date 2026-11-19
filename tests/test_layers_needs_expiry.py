@@ -2,7 +2,8 @@ import unittest
 
 from simulation import World, economy
 from simulation.catalog import CATALOG, SECTORS
-from simulation.rules import GOODS, MAX_LAYERS, Rules
+from simulation import distributions
+from simulation.rules import GOODS, MAX_LAYERS, SIZING_HEADROOM, Rules
 from tests.classic import CALM
 
 NO_STOCK = {g: 0 for g in GOODS}
@@ -61,10 +62,17 @@ class GameSizingTests(unittest.TestCase):
         full, one = Rules.from_dict({}), Rules.from_dict({"industry_layers": 1})
         catalog = {e["id"]: e["shares"] for e in CATALOG}
         self.assertEqual({g: full.assets[g]["average"] for g in GOODS}, catalog)    # full game = the catalog
-        # Without food, meat or meals, hunger falls on raw grain and livestock: bigger farms.
-        self.assertGreater(one.assets["grain"]["average"], catalog["grain"])
-        self.assertGreater(one.assets["livestock"]["average"], catalog["livestock"])
+        # Without food, meat or meals, hunger falls on raw grain and livestock: their farms alone
+        # can relieve SIZING_HEADROOM x the hunger an average agent builds up.
+        capacity = sum(one.assets[g]["average"] * one.asset_labor[g] * one.productivity[g] * one.relief(g, "hunger")
+                       for g in one.goods_for("hunger"))
+        self.assertGreaterEqual(capacity, SIZING_HEADROOM * distributions.mean(one.rates["hunger"]) * 0.99)
+        self.assertNotEqual(one.assets["grain"]["average"], catalog["grain"])
         self.assertEqual(one.assets["food"]["average"], 0)
+        # An input people also consume gets extra capacity for that: grain feeds food and is eaten.
+        food_use = full.assets["food"]["average"] * full.asset_labor["food"] * full.productivity["food"]
+        grain_made = full.assets["grain"]["average"] * full.asset_labor["grain"] * full.productivity["grain"]
+        self.assertGreater(grain_made, food_use * full.inputs["food"]["grain"] * SIZING_HEADROOM * 0.99)
         # Explicit assets are kept as given.
         self.assertEqual(Rules.from_dict({"industry_layers": 1, "assets": {"grain": 5}}).assets["grain"], 5)
 

@@ -177,6 +177,9 @@ class Rules:
     # Industries deeper than industry_layers (1-10, chosen when the game starts) don't exist in
     # this game: nobody owns, holds or makes their goods.
     industry_layers: int = max(_DEFAULT_LAYERS.values())
+    # Industries left out of this game by choice (a simpler game). Any industry whose recipe
+    # needs a good that doesn't exist (excluded, or too deep) is left out too: see auto_excluded.
+    excluded_industries: list = field(default_factory=list)
     # Building new capacity. New asset shares of industry g are built from capital goods:
     # build_cost[g] = {capital good: units per share} (machinery, construction, electronics).
     # An investor starts a project when an existing asset is worth at least build_min_q times
@@ -276,7 +279,14 @@ class Rules:
         cache = getattr(self, "_cache", None)
         if cache is None:
             layers = _catalog_layers(self.inputs)
-            active = tuple(g for g in GOODS if layers[g] <= self.industry_layers)
+            excluded = set(self.excluded_industries)
+            exists = set()
+            # Shallow layers first, so an industry's inputs are already decided.
+            for g in sorted(GOODS, key=lambda g: layers[g]):
+                if (layers[g] <= self.industry_layers and g not in excluded
+                        and all(item in exists for item in self.inputs.get(g, {}))):
+                    exists.add(g)
+            active = tuple(g for g in GOODS if g in exists)
             effect, need_of, goods_for = {}, {}, {}
             for g in active:
                 signed = {}
@@ -303,8 +313,20 @@ class Rules:
 
     @property
     def active_goods(self):
-        """Goods whose industry exists in this game (layer <= industry_layers)."""
+        """Goods whose industry exists in this game: layer <= industry_layers, not excluded, and
+        every input of its recipe exists too."""
         return (self._cache or self._derived())["active"]
+
+    @property
+    def auto_excluded(self):
+        """Industries within the game's layers, not excluded by choice, that are still left out
+        because their recipe needs a good that doesn't exist in this game."""
+        cache = self._cache or self._derived()
+        if "auto_excluded" not in cache:
+            chosen = set(self.excluded_industries)
+            cache["auto_excluded"] = tuple(g for g in GOODS if cache["layers"][g] <= self.industry_layers
+                                           and g not in chosen and g not in cache["active_set"])
+        return cache["auto_excluded"]
 
     def is_active(self, good):
         return good in (self._cache or self._derived())["active_set"]
@@ -327,6 +349,17 @@ class Rules:
     def goods_for(self, need):
         """Active goods that relieve ``need`` (as a main need or a side benefit), most effective first."""
         return (self._cache or self._derived())["goods_for"].get(need, [])
+
+    def main_goods_for(self, need):
+        """Active goods whose main need is ``need``."""
+        cache = self._cache or self._derived()
+        if "main_goods" not in cache:
+            main = {}
+            for g in cache["active"]:
+                if g in cache["need_of"]:
+                    main.setdefault(cache["need_of"][g], []).append(g)
+            cache["main_goods"] = main
+        return cache["main_goods"].get(need, ())
 
     @property
     def consumer_needs(self):
@@ -373,6 +406,10 @@ class Rules:
             elif kind == "map":
                 names, low, high, whole = low
                 setattr(rules, key, {**getattr(rules, key), **_number_map(value, key, names, low, high, whole)})
+            elif kind == "goods":
+                if not isinstance(value, list) or any(g not in GOODS for g in value):
+                    raise ValueError(f"{key} must be a list of industries ({', '.join(GOODS)})")
+                setattr(rules, key, sorted(set(value), key=GOODS.index))
             elif kind == "bool":
                 if not isinstance(value, bool):
                     raise ValueError(f"{key} must be true or false")
@@ -383,21 +420,20 @@ class Rules:
                 setattr(rules, key, value)
             else:
                 setattr(rules, key, _number(value, key, low, high, whole=kind == "int"))
-        if "inventory" not in data:
-            # Starting stock of goods that don't exist in this game (fewer layers) becomes the same
-            # relief in the most effective good that does exist for that need.
-            stock = dict(rules.inventory)
-            for g, spec in rules.inventory.items():
-                need = main_need(BY_ID[g]["effects"])
-                if rules.is_active(g) or not need or not isinstance(spec, (int, float)) or not spec:
-                    continue
-                best = next(iter(rules.goods_for(need)), None)
-                if best and isinstance(stock.get(best), (int, float)):
-                    fit = BY_ID[g]["effects"][need]
-                    default_relief = rules.relief_per_unit * fit * (1 + rules.layer_bonus * (_DEFAULT_LAYERS[g] - 1))
-                    stock[best] += round(spec * default_relief / rules.relief(best, need))
-                stock[g] = 0
-            rules.inventory = stock
+        # Starting stock of goods that don't exist in this game (fewer layers, or left out)
+        # becomes the same relief in the most effective good that does exist for that need.
+        stock = dict(rules.inventory)
+        for g, spec in rules.inventory.items():
+            need = main_need(BY_ID[g]["effects"])
+            if rules.is_active(g) or not need or not isinstance(spec, (int, float)) or not spec:
+                continue
+            best = next(iter(rules.goods_for(need)), None)
+            if best and isinstance(stock.get(best), (int, float)):
+                fit = BY_ID[g]["effects"][need]
+                default_relief = rules.relief_per_unit * fit * (1 + rules.layer_bonus * (_DEFAULT_LAYERS[g] - 1))
+                stock[best] += round(spec * default_relief / rules.relief(best, need))
+            stock[g] = 0
+        rules.inventory = stock
         if "assets" not in data:
             # No starting industries given: size them for this game (its layers, recipes, rates).
             sized = demand_sized_shares(rules)
@@ -430,7 +466,7 @@ SPREADS = {
 
 # Other rules: key -> (low, high, kind). For "map": ((names, low, high, whole), None, "map").
 LIMITS = {
-    "agents": (1, 500, "int"),
+    "agents": (1, 5000, "int"),
     "relief_per_unit": (0.001, 1, "float"),
     "seek_threshold": (0, 1, "float"),
     "target_level": (0, 1, "float"),
@@ -470,6 +506,7 @@ LIMITS = {
     "inputs": (None, None, "recipes"),
     "input_buffer_steps": (1, 10000, "int"),
     "industry_layers": (1, MAX_LAYERS, "int"),
+    "excluded_industries": (None, None, "goods"),
     "building_enabled": (None, None, "bool"),
     "build_cost": (None, None, "build_cost"),
     "build_min_q": (0, 100, "float"),
@@ -531,7 +568,9 @@ def _recipes(value):
 # Default industries get this many times the capacity an average agent's needs take.
 SIZING_HEADROOM = 2.0
 MIN_DEFAULT_SHARES = 0.02
-CAPITAL_DEFAULT_SHARES = 0.1   # capital industries: no consumers, but new capacity is built from them
+CAPITAL_DEFAULT_SHARES = 0.1
+# Inputs that also relieve a need get this many times the capacity their industries' use takes.
+INPUT_LEAKAGE = 2.0   # capital industries: no consumers, but new capacity is built from them
 
 
 def demand_sized_shares(rules):
@@ -556,7 +595,10 @@ def demand_sized_shares(rules):
     for g in sorted(active, key=rules.layer, reverse=True):   # deepest first: inputs flow down
         for item, per_unit in rules.inputs.get(g, {}).items():
             if item in units:
-                units[item] += units[g] * per_unit
+                # An input people can also consume (grain, livestock, water) gets eaten directly
+                # too, which would starve the industries made from it: give it extra capacity.
+                leak = INPUT_LEAKAGE if rules.need_of(item) else 1.0
+                units[item] += units[g] * per_unit * leak
     shares = {}
     for g in GOODS:
         per_share = rules.asset_labor[g] * rules.productivity[g]

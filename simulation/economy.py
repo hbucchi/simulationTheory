@@ -86,8 +86,16 @@ def pay(payer, payee, amount):
 
 
 def held_relief(agent, need, rules=DEFAULT_RULES):
-    """How much of ``need`` the agent's stock could relieve: units x relief over every good for it."""
-    return sum(agent.inventory.count(g) * rules.relief(g, need) for g in rules.goods_for(need))
+    """How much of ``need`` the agent's stock could relieve: units x relief over every good for it.
+    Cached until the agent's inventory changes (or the rules do)."""
+    inv = agent.inventory
+    cache = agent.__dict__.setdefault("_held_cache", {})
+    key = (need, inv.version, id(rules))
+    if key not in cache:
+        if len(cache) > 64:
+            cache.clear()
+        cache[key] = sum(inv.count(g) * rules.relief(g, need) for g in rules.goods_for(need))
+    return cache[key]
 
 
 def benefit(agent, good, rules=DEFAULT_RULES, target=None):
@@ -165,8 +173,7 @@ def net_use(agent, resource, rules=DEFAULT_RULES, need=None):
     per_unit = rules.relief(resource, need) if need else 0
     if per_unit <= 0:
         return 0.0
-    rates = next((m.rates for m in agent.modules if hasattr(m, "rates")), {})
-    used = rates.get(need, 0) / per_unit
+    used = _rates(agent).get(need, 0) / per_unit
     return max(0.0, used - agent.output_capacity.get(resource, 0))
 
 
@@ -188,20 +195,24 @@ def shopping_cost(agent, prices, rules=DEFAULT_RULES):
     return total
 
 
-_liquidity_memo = [None, None, 0.0]   # (prices, rules, value): the same for every agent at given prices
+_liquidity_memo = {}   # id(prices) -> (prices, rules, value): the same for every agent at given prices
 
 
 def liquidity_cost(prices, rules=DEFAULT_RULES):
     """Price of rules.liquidity_units baseline units of relief (relief_per_unit each) for every
     need, bought the cheapest way: the cash an agent keeps on hand."""
-    if _liquidity_memo[0] is prices and _liquidity_memo[1] is rules:
-        return _liquidity_memo[2]
+    hit = _liquidity_memo.get(id(prices))
+    if hit and hit[0] is prices and hit[1] is rules:
+        return hit[2]
     total = 0.0
     for need in rules.consumer_needs:
         per_relief = [prices[g] / rules.relief(g, need) for g in rules.goods_for(need) if g in prices]
         total += min(per_relief, default=0.0) * rules.relief_per_unit
-    _liquidity_memo[:] = [prices, rules, rules.liquidity_units * total]
-    return _liquidity_memo[2]
+    if len(_liquidity_memo) > 8:
+        _liquidity_memo.clear()
+    # Keeping prices in the entry keeps its id from being reused by another dict.
+    _liquidity_memo[id(prices)] = (prices, rules, rules.liquidity_units * total)
+    return _liquidity_memo[id(prices)][2]
 
 
 def stockpile_target(agent, resource, rules=DEFAULT_RULES, scarcity=None):
@@ -221,8 +232,16 @@ def stockpile_target(agent, resource, rules=DEFAULT_RULES, scarcity=None):
 
 def need_rate(agent, need):
     """How fast the agent's ``need`` grows per step."""
-    rates = next((m.rates for m in agent.modules if hasattr(m, "rates")), {})
-    return rates.get(need, 0.0)
+    return _rates(agent).get(need, 0.0)
+
+
+def _rates(agent):
+    """The agent's need growth rates (its NeedsDecay module's table, found once)."""
+    rates = agent.__dict__.get("_rates")
+    if rates is None:
+        rates = next((m.rates for m in agent.modules if hasattr(m, "rates")), {})
+        agent._rates = rates
+    return rates
 
 
 def band_relief(agent, need, rules=DEFAULT_RULES, fraction=1.0):
@@ -258,8 +277,18 @@ def _need_gap(agent, resource, rules):
 def input_target(agent, resource, rules=DEFAULT_RULES):
     """Units of ``resource`` the agent keeps as industry input: input_buffer_steps steps of what its
     secondary industries use at full capacity (agent.output_capacity). 0 if it uses none."""
-    use = sum(cap * rules.inputs.get(g, {}).get(resource, 0) for g, cap in agent.output_capacity.items())
-    return math.ceil(round(use * rules.input_buffer_steps, 9)) if use > 0 else 0
+    # Worked out for all inputs at once and cached until output_capacity (set each step) changes.
+    capacity = agent.output_capacity
+    cached = agent.__dict__.get("_input_targets")
+    if cached is None or cached[0] is not capacity or cached[1] is not rules:
+        use = {}
+        for g, cap in capacity.items():
+            for item, per_unit in rules.inputs.get(g, {}).items():
+                use[item] = use.get(item, 0) + cap * per_unit
+        targets = {item: math.ceil(round(u * rules.input_buffer_steps, 9)) for item, u in use.items() if u > 0}
+        cached = (capacity, rules, targets)
+        agent._input_targets = cached
+    return cached[2].get(resource, 0)
 
 
 def project_need(agent, resource):
@@ -333,6 +362,43 @@ def wants_to_buy(agent, resource, rules=DEFAULT_RULES, scarcity=None):
             or project_shortfall(agent, resource) > 0)
 
 
+def wanted_goods(agent, rules=DEFAULT_RULES, scarcity=None):
+    """Every active good wants_to_buy() is true for, worked out need by need instead of good by
+    good (the same answer, much faster for big catalogs: used once per step per agent)."""
+    wanted = set()
+    seek, target = rules.seek_threshold, rules.target_level
+    restock = rules.selling_enabled
+    for need in rules.consumer_needs:
+        level = getattr(agent, need)
+        held = None
+        if level > seek:
+            held = held_relief(agent, need, rules)
+            if level - held >= target:                 # demand() > 0 for every good relieving it
+                wanted.update(rules.goods_for(need))
+        if restock:
+            if held is None:
+                held = held_relief(agent, need, rules)
+            if held < band_relief(agent, need, rules, rules.restock_below):
+                for g in rules.main_goods_for(need):
+                    if g not in wanted and restock_shortfall(agent, g, rules) > 0:
+                        wanted.add(g)
+    if scarcity and rules.stockpiling_enabled:
+        for g, decline in scarcity.items():
+            if decline >= rules.scarcity_trigger and g not in wanted and rules.is_active(g) \
+                    and stockpile_shortfall(agent, g, rules, scarcity) > 0:
+                wanted.add(g)
+    if agent.output_capacity:
+        input_target(agent, "", rules)                 # fills the cached table of targets
+        for g in agent._input_targets[2]:
+            if g not in wanted and rules.is_active(g) and input_shortfall(agent, g, rules) > 0:
+                wanted.add(g)
+    if agent.project:
+        for g in agent.project["need"]:
+            if g not in wanted and rules.is_active(g) and project_shortfall(agent, g) > 0:
+                wanted.add(g)
+    return wanted
+
+
 def stockpile_shortfall(agent, resource, rules=DEFAULT_RULES, scarcity=None):
     return max(0, stockpile_target(agent, resource, rules, scarcity) - agent.inventory.count(resource))
 
@@ -355,6 +421,24 @@ def spare(agent, resource, rules=DEFAULT_RULES, scarcity=None):
     keep = max(keep, stockpile_target(agent, resource, rules, scarcity)) + input_target(agent, resource, rules)
     keep += project_need(agent, resource)
     return max(0, agent.inventory.count(resource) - keep)
+
+
+def spare_and_surplus(agent, resource, rules=DEFAULT_RULES, scarcity=None):
+    """(spare(...), surplus(...)) in one go, sharing the work they have in common."""
+    count = agent.inventory.count(resource)
+    if not count:
+        return 0, 0
+    extra = input_target(agent, resource, rules) + project_need(agent, resource)
+    reserve = stockpile_target(agent, resource, rules, scarcity)
+    need = rules.need_of(resource)
+    gap = _need_gap(agent, resource, rules) if need else 0.0
+    keep = _kept_for_need(agent, resource, max(band_relief(agent, need, rules, rules.restock_below), gap),
+                          rules) if need else 0
+    spare_units = max(0, count - (max(keep, reserve) + extra))
+    if not spare_units or not rules.selling_enabled:
+        return spare_units, 0
+    keep = _kept_for_need(agent, resource, band_relief(agent, need, rules) + gap, rules) if need else 0
+    return spare_units, max(0, count - (max(keep, reserve) + extra))
 
 
 def _settle_one(buyer, seller, buying, prices, rules, scarcity=None, money_only=False):
@@ -426,8 +510,15 @@ def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, mar
         good = benefit(buyer, r, rules, target)
         value = -good / prices[r] if prices.get(r, 0) > 0 else -good * 1e9
         return (-getattr(buyer, target), value)
-    wants = sorted((r for r in rules.active_goods if r in prices), key=order)
+    # Only goods it wants can have a goal above its stock (see wanted_goods). Paying with a good
+    # (barter) can make it wanted mid-deal, so goods it holds stay in the running.
+    wanted = wanted_goods(buyer, rules, scarcity)
+    given_away = set()
+    wants = sorted((r for r in rules.active_goods if r in prices and (r in wanted or buyer.inventory.count(r))),
+                   key=order)
     for resource in wants:
+        if resource not in wanted and resource not in given_away:
+            continue
         need_goal = purchase_goal(buyer, resource, rules, rng)
         shortfall = restock_shortfall(buyer, resource, rules)
         restock = buyer.inventory.count(resource) + shortfall if shortfall else 0
@@ -451,6 +542,7 @@ def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, mar
             given, money = settled
             transfer(seller, buyer, resource)
             if given:
+                given_away.add(given)
                 transfer(buyer, seller, given)
                 paid[given] = paid.get(given, 0) + 1
             pay(buyer, seller, money)

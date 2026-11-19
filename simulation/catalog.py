@@ -29,48 +29,49 @@ Each entry:
              the default industries; the shares of a need's goods add up to 1)
   shares     default asset shares per agent (owned by 10% of the agents), sized to demand: each need
              is split over its goods (e.g. thirst 70% water, 30% beverages), inputs are added down
-             the layers, and every industry gets 2x the capacity that takes (at least 0.02)
+             the layers (twice over for inputs people also consume, like grain, which gets eaten
+             as well as milled), and every industry gets 2x the capacity that takes (at least 0.02)
 """
 
 CATALOG = [
     # ---------------- Layer 1: extraction (capital + labour only) ----------------
     {"id": "grain", "label": "Grain", "sector": "Consumer Non-Cyclicals", "industry": "Fishing & Farming",
-     "inputs": {}, "effects": {"hunger": 0.6}, "shelf_life": 800, "stock": 30, "shares": 0.27, "plan": 0},
+     "inputs": {}, "effects": {"hunger": 0.6}, "shelf_life": 800, "stock": 30, "shares": 0.67, "plan": 0},
     {"id": "livestock", "label": "Livestock", "sector": "Consumer Non-Cyclicals", "industry": "Fishing & Farming",
-     "inputs": {}, "effects": {"hunger": 0.6, "health": -0.1}, "shelf_life": 0, "stock": 0, "shares": 0.09, "plan": 0},
+     "inputs": {}, "effects": {"hunger": 0.6, "health": -0.1}, "shelf_life": 0, "stock": 0, "shares": 0.27, "plan": 0},
     {"id": "water", "label": "Water", "sector": "Utilities", "industry": "Water & Related Utilities",
-     "inputs": {}, "effects": {"thirst": 1.0}, "shelf_life": 0, "stock": 100, "shares": 0.69, "plan": 0.7},
+     "inputs": {}, "effects": {"thirst": 1.0}, "shelf_life": 0, "stock": 100, "shares": 0.86, "plan": 0.7},
     {"id": "wood", "label": "Timber", "sector": "Basic Materials", "industry": "Forest & Wood Products",
-     "inputs": {}, "effects": {"energy": 0.5, "shelter": 0.1, "health": -0.1}, "shelf_life": 0, "stock": 20, "shares": 0.21, "plan": 0.1},
+     "inputs": {}, "effects": {"energy": 0.5, "shelter": 0.1, "health": -0.1}, "shelf_life": 0, "stock": 20, "shares": 0.41, "plan": 0.1},
     {"id": "crude_oil", "label": "Crude oil", "sector": "Energy", "industry": "Oil & Gas Exploration and Production",
-     "inputs": {}, "effects": {"energy": 0.2, "health": -0.3}, "shelf_life": 0, "stock": 0, "shares": 0.09, "plan": 0},
+     "inputs": {}, "effects": {"energy": 0.2, "health": -0.3}, "shelf_life": 0, "stock": 0, "shares": 0.23, "plan": 0},
     {"id": "natural_gas", "label": "Natural gas", "sector": "Energy", "industry": "Natural Gas Utilities",
-     "inputs": {}, "effects": {"energy": 0.6}, "shelf_life": 0, "stock": 0, "shares": 0.07, "plan": 0},
+     "inputs": {}, "effects": {"energy": 0.6}, "shelf_life": 0, "stock": 0, "shares": 0.24, "plan": 0},
     {"id": "coal", "label": "Coal", "sector": "Energy", "industry": "Coal",
-     "inputs": {}, "effects": {"energy": 0.4, "health": -0.3}, "shelf_life": 0, "stock": 0, "shares": 0.07, "plan": 0},
+     "inputs": {}, "effects": {"energy": 0.4, "health": -0.3}, "shelf_life": 0, "stock": 0, "shares": 0.2, "plan": 0},
     {"id": "ore", "label": "Metal ore", "sector": "Basic Materials", "industry": "Metals & Mining",
      "inputs": {}, "effects": {}, "shelf_life": 0, "stock": 0, "shares": 0.02, "plan": 0},
     {"id": "stone", "label": "Stone & sand", "sector": "Basic Materials", "industry": "Construction Materials",
-     "inputs": {}, "effects": {"shelter": 0.3}, "shelf_life": 0, "stock": 0, "shares": 0.02, "plan": 0},
+     "inputs": {}, "effects": {"shelter": 0.3}, "shelf_life": 0, "stock": 0, "shares": 0.05, "plan": 0},
     {"id": "herbs", "label": "Medicinal herbs", "sector": "Healthcare", "industry": "Fishing & Farming (botanicals)",
-     "inputs": {}, "effects": {"health": 0.6, "hunger": 0.1}, "shelf_life": 100, "stock": 5, "shares": 0.1, "plan": 0.3},
+     "inputs": {}, "effects": {"health": 0.6, "hunger": 0.1}, "shelf_life": 100, "stock": 5, "shares": 0.12, "plan": 0.3},
 
     # ---------------- Layer 2: first processing ----------------
     {"id": "food", "label": "Food", "sector": "Consumer Non-Cyclicals", "industry": "Food Processing",
-     "inputs": {"grain": 1.0}, "effects": {"hunger": 1.0, "health": 0.1}, "shelf_life": 200, "stock": 30, "shares": 0.08, "plan": 0.5},
+     "inputs": {"grain": 1.0}, "effects": {"hunger": 1.0, "health": 0.1}, "shelf_life": 200, "stock": 30, "shares": 0.1, "plan": 0.5},
     {"id": "meat", "label": "Meat", "sector": "Consumer Non-Cyclicals", "industry": "Food Processing (meat)",
-     "inputs": {"livestock": 1.0}, "effects": {"hunger": 1.0, "boredom": 0.1}, "shelf_life": 50, "stock": 0, "shares": 0.04, "plan": 0.15},
+     "inputs": {"livestock": 1.0}, "effects": {"hunger": 1.0, "boredom": 0.1}, "shelf_life": 50, "stock": 0, "shares": 0.05, "plan": 0.15},
     {"id": "beverages", "label": "Beverages", "sector": "Consumer Non-Cyclicals", "industry": "Beverages",
      "inputs": {"water": 1.0, "grain": 0.2}, "effects": {"thirst": 1.0, "boredom": 0.2, "health": -0.1}, "shelf_life": 600, "stock": 0, "shares": 0.06, "plan": 0.3},
     {"id": "electricity", "label": "Electricity", "sector": "Utilities", "industry": "Electric Utilities",
-     "inputs": {"coal": 0.5, "natural_gas": 0.5}, "effects": {"energy": 1.0, "boredom": 0.1, "shelter": 0.1}, "shelf_life": 20, "stock": 0, "shares": 0.04, "plan": 0.5},
+     "inputs": {"coal": 0.5, "natural_gas": 0.5}, "effects": {"energy": 1.0, "boredom": 0.1, "shelter": 0.1}, "shelf_life": 20, "stock": 0, "shares": 0.07, "plan": 0.5},
     {"id": "fuel", "label": "Fuel", "sector": "Energy", "industry": "Oil & Gas Refining and Marketing",
      "inputs": {"crude_oil": 1.0}, "effects": {"energy": 0.7, "health": -0.1}, "shelf_life": 1500, "stock": 20, "shares": 0.03, "plan": 0.4},
     {"id": "steel", "label": "Steel", "sector": "Basic Materials", "industry": "Iron & Steel",
      "inputs": {"ore": 1.0, "coal": 0.5}, "effects": {}, "shelf_life": 0, "stock": 0, "shares": 0.02, "plan": 0},
     {"id": "chemicals", "label": "Chemicals", "sector": "Basic Materials", "industry": "Chemicals",
      "inputs": {"crude_oil": 0.5, "natural_gas": 0.5}, "effects": {"health": 0.2}, "shelf_life": 2000, "stock": 0,
-     "shares": 0.02, "plan": 0},
+     "shares": 0.03, "plan": 0},
     {"id": "lumber", "label": "Lumber", "sector": "Basic Materials", "industry": "Paper & Forest Products",
      "inputs": {"wood": 1.0}, "effects": {"shelter": 0.5, "energy": 0.2}, "shelf_life": 0, "stock": 0, "shares": 0.02, "plan": 0.2},
     {"id": "cement", "label": "Cement", "sector": "Basic Materials", "industry": "Construction Materials (cement)",

@@ -20,6 +20,9 @@ from .rules import NEEDS, SPREADS, Rules
 AGENT_COLORS = ["#6c72f0", "#f08a6c", "#4fbf96", "#e9b949", "#a77de0", "#4aa3df", "#e77fa9", "#8cbf5f"]
 
 
+# Games up to this many agents send every agent in full to the UI (bigger ones: only those asked for).
+FULL_DETAIL_AGENTS = 100
+
 class World:
     # After two agents meet they walk apart for rules.depart_steps and ignore
     # each other for rules.cooldown_steps, so they don't instantly re-meet.
@@ -67,10 +70,17 @@ class World:
         self.concentration = {r: 0.0 for r in economy.RESOURCES}
         self.price_history = {r: deque(maxlen=self.PRICE_HISTORY) for r in economy.PRICED}
         self.next_id = 1
+        self.alive = set()          # the agents list as a set, for fast "still alive?" checks
+        # Per-step caches (set at the start of step(), cleared at its end): one price list for the
+        # whole step, asset prices, owners short of cash, and who is seeking whom.
+        self._step_cache = None
+        self.grid = {}              # spatial grid for contact checks: cell -> set of agents
+        self._cell = {}             # agent -> its cell
         # {good: {agent: units it can spare}}, worked out once per step in update_demand and used
         # to pick sellers to walk to (the trade itself re-checks what the seller can spare).
         self.spare_table = {}
         self.buyer_sets = {}   # {good: agents that want it this step}
+        self.surplus_table = None   # {agent: {good: surplus}} at the start of this step (update_demand)
         self.profitable = {}   # {good: its industry pays the wage at current prices} (update_profitability)
         self.step_prices = None
 
@@ -87,6 +97,7 @@ class World:
         if agent.color is None:
             agent.color = AGENT_COLORS[(agent.id - 1) % len(AGENT_COLORS)]
         self.agents.append(agent)
+        self.alive.add(agent)
         return agent
 
     def create_agent(self, *, inventory=None, money=None, labor_capacity=None,
@@ -187,6 +198,8 @@ class World:
 
     def remove_agent(self, agent):
         self.agents.remove(agent)
+        self.alive.discard(agent)
+        self._grid_remove(agent)
         for other in self.agents:
             if other.target_id == agent.id:
                 other.target_id = None
@@ -211,10 +224,54 @@ class World:
     def agent_by_id(self, agent_id):
         return next((a for a in self.agents if a.id == agent_id), None)
 
+    def owners_of(self, good):
+        """Agents holding asset shares of ``good`` (once per step; fresh outside a step)."""
+        cache = self._step_cache
+        if cache is None:
+            return [a for a in self.agents if a.assets.get(good, 0) > 0]
+        owners = cache.get("owners")
+        if owners is None:
+            owners = cache["owners"] = {}
+            for a in self.agents:
+                for g, shares in a.assets.items():
+                    if shares > 0:
+                        owners.setdefault(g, []).append(a)
+        return [a for a in owners.get(good, ()) if a in self.alive and a.assets.get(good, 0) > 0]
+
+    def spare_total(self, good):
+        """Units of ``good`` all agents together can spare this step (from spare_table)."""
+        cache = self._step_cache
+        if cache is None:
+            return sum(self.spare_table.get(good, {}).values())
+        totals = cache.setdefault("spare_total", {})
+        if good not in totals:
+            totals[good] = sum(self.spare_table.get(good, {}).values())
+        return totals[good]
+
+    def surpluses_of(self, agent):
+        """{good: units above what the agent keeps}, from this step's table (fresh if there's none)."""
+        if self.surplus_table is not None and self._step_cache is not None:
+            return self.surplus_table.get(agent, {})
+        out = {}
+        for r in self.rules.active_goods:
+            n = economy.surplus(agent, r, self.rules, self.scarcity)
+            if n:
+                out[r] = n
+        return out
+
+    def note_target(self, agent, partner):
+        """Keep the step's index of who is heading for whom up to date (see seekers_of)."""
+        if self._step_cache:
+            self._step_cache["seekers"].setdefault(partner.id, []).append(agent)
+
     def seekers_of(self, agent):
-        """Agents currently seeking ``agent`` (and allowed to meet it)."""
-        return [o for o in self.agents
-                if o.activity == "seeking" and o.target_id == agent.id and not self.in_cooldown(agent, o)]
+        """Agents currently seeking ``agent`` (and allowed to meet it). During a step, candidates come
+        from an index of targets built at its start (so this doesn't scan every agent)."""
+        cache = self._step_cache
+        candidates = cache["seekers"].get(agent.id, ()) if cache else self.agents
+        return list({o: None for o in candidates
+                     if o.activity == "seeking" and o.target_id == agent.id and o in self.alive
+                     and not self.in_cooldown(agent, o)})
 
     def nearest_seller(self, agent, stockpile=False):
         """Closest agent with spare of what ``agent`` needs: (seller, resource) or (None, None).
@@ -238,18 +295,23 @@ class World:
                 goods = [g for g in rules.goods_for(need) if economy.demand(agent, g, rules) > 0]
                 if not goods:
                     continue
-                best = None
-                for o in self.agents:
-                    if o is agent or self.in_cooldown(agent, o):
+                # Only agents with spare of one of these goods (spare_table) are candidates.
+                candidates = {}
+                for g in reversed(goods):            # the most effective good each seller has wins
+                    for o in self.spare_table.get(g, {}):
+                        candidates[o] = g
+                best, best_d = None, math.inf
+                for o, have in candidates.items():
+                    if o is agent or o not in self.alive or self.in_cooldown(agent, o):
                         continue
-                    have = next((g for g in goods if self.spare_table.get(g, {}).get(o, 0) > 0), None)
-                    if have and (best is None or agent.distance_to(o) < agent.distance_to(best[0])):
-                        best = (o, have)
+                    d = agent.distance_to(o)
+                    if d < best_d:
+                        best, best_d = (o, have), d
                 if best:
                     return best
             return None, None
         for resource in wanted:
-            sellers = [o for o in self.spare_table.get(resource, {}) if o is not agent and o in self.agents
+            sellers = [o for o in self.spare_table.get(resource, {}) if o is not agent and o in self.alive
                        and not self.in_cooldown(agent, o)]
             if sellers:
                 return min(sellers, key=agent.distance_to), resource
@@ -269,14 +331,28 @@ class World:
         supply is, and move its price multiplier toward demand pressure x concentration
         (a fraction price_adjust_speed of the way per step)."""
         rules = self.rules
+        self.surplus_table = {}
+        # What each agent wants, worked out need by need (one pass per agent, not per agent x good).
+        wanted = [economy.wanted_goods(a, rules, self.scarcity) for a in self.agents]
+        # Spare and surplus of every good each agent holds (one pass over its inventory).
+        spare_by_good = {r: {} for r in rules.active_goods}
+        for a in self.agents:
+            for r in [r for r in rules.active_goods if a.inventory.count(r)]:
+                spare, surplus = economy.spare_and_surplus(a, r, rules, self.scarcity)
+                if spare > 0:
+                    spare_by_good[r][a] = spare
+                if surplus:
+                    self.surplus_table.setdefault(a, {})[r] = surplus
+        n_agents = len(self.agents)
         for r in rules.active_goods:
-            self.buyer_agents[r] = [a for a in self.agents if economy.wants_to_buy(a, r, rules, self.scarcity)]
+            self.buyer_agents[r] = [a for a, w in zip(self.agents, wanted) if r in w]
             self.buyer_sets[r] = set(self.buyer_agents[r])
             self.buyers[r] = len(self.buyer_agents[r])
-            spares = [economy.spare(a, r, rules, self.scarcity) for a in self.agents]
-            self.spare_table[r] = {a: n for a, n in zip(self.agents, spares) if n > 0}
-            self.sellers[r] = sum(1 for s in spares if s > 0)
-            self.concentration[r] = economy.concentration(spares)
+            self.spare_table[r] = spare_by_good[r]
+            self.sellers[r] = len(spare_by_good[r])
+            # Agents with none to spare count as zeros.
+            spares = list(spare_by_good[r].values())
+            self.concentration[r] = economy.concentration(spares + [0] * (n_agents - len(spares)))
             if rules.demand_pricing_enabled:
                 target = economy.demand_multiplier_target(self.buyers[r], self.sellers[r], r, rules,
                                                           self.concentration[r])
@@ -383,6 +459,15 @@ class World:
         used = jobs if labor is None else min(labor, jobs)
         return used * self.productivity_now[good]
 
+    def step_asset_prices(self):
+        """asset_prices at this step's prices, worked out once per step (fresh outside a step)."""
+        cache = self._step_cache
+        if not cache:
+            return self.asset_prices()
+        if "asset_prices" not in cache:
+            cache["asset_prices"] = self.asset_prices(self.current_prices())
+        return cache["asset_prices"]
+
     def asset_prices(self, prices=None):
         """Price of one whole asset: profit per step at full capacity / effective return.
 
@@ -402,15 +487,34 @@ class World:
         Candidates come from this step's buyer list (update_demand) and are re-checked,
         so the search doesn't scan every agent for every seller.
         """
-        buyers = [o for o in self.buyer_agents[resource] if o is not agent and o in self.agents
-                  and not self.in_cooldown(agent, o) and o.money > 0
-                  and economy.wants_to_buy(o, resource, self.rules, self.scarcity)]
-        return min(buyers, key=agent.distance_to, default=None)
+        candidates = [o for o in self.buyer_agents[resource] if o is not agent and o in self.alive
+                      and o.money > 0 and not self.in_cooldown(agent, o)]
+        # Closest first; the (costlier) re-check stops at the first that still wants it.
+        for o in sorted(candidates, key=agent.distance_to):
+            if economy.wants_to_buy(o, resource, self.rules, self.scarcity):
+                return o
+        return None
 
     def current_prices(self, include_labor=True):
         """Goods: base price (scarcity formula or fixed) x demand-pressure multiplier.
         With rules.cost_floor, a secondary good never costs less than the inputs it is made
-        from (see input_cost). Labour: the labour market's wage."""
+        from (see input_cost). Labour: the labour market's wage.
+
+        During a step the goods prices are worked out once (after the labour market) and reused:
+        trades only move goods and money between agents, so the totals behind them barely change
+        within a step. Outside a step they are always worked out fresh."""
+        cache = self._step_cache
+        if cache and "prices" in cache:
+            # The same dict for every caller while the wage is unchanged (callers never modify
+            # it), so per-price memos such as economy.liquidity_cost hit.
+            key = ("prices_with", self.labor.wage) if include_labor else ("prices_without",)
+            prices = cache.get(key)
+            if prices is None:
+                prices = dict(cache["prices"])
+                if include_labor:
+                    prices[economy.LABOR] = self.labor.wage
+                cache[key] = prices
+            return prices
         base = economy.market_prices(self.agents, self.rules)
         prices = {r: base[r] * self.price_multiplier[r] for r in economy.RESOURCES}
         if self.rules.cost_floor and self.rules.price_mode != "fixed":
@@ -430,11 +534,21 @@ class World:
 
     def contacts(self):
         """All pairs of agents currently close enough to interact."""
+        # Bucket agents into cells as wide as the touch distance, then only compare agents in
+        # neighbouring cells: O(n) instead of comparing all n^2 / 2 pairs. Same pairs, same order.
+        size = max(self.contact_distance, 1e-9)
+        order = {a: i for i, a in enumerate(self.agents)}
+        cells = {}
+        for a in self.agents:
+            cells.setdefault((int(a.x // size), int(a.y // size)), []).append(a)
         pairs = []
-        for i, a in enumerate(self.agents):
-            for b in self.agents[i + 1:]:
-                if a.distance_to(b) <= self.contact_distance:
-                    pairs.append((a, b))
+        for a in self.agents:
+            cx, cy = int(a.x // size), int(a.y // size)
+            i = order[a]
+            near = [b for dx in (-1, 0, 1) for dy in (-1, 0, 1) for b in cells.get((cx + dx, cy + dy), ())
+                    if order[b] > i and a.distance_to(b) <= self.contact_distance]
+            near.sort(key=order.get)
+            pairs.extend((a, b) for b in near)
         return pairs
 
     def step(self):
@@ -453,20 +567,67 @@ class World:
         self.update_demand()
         self.update_profitability()
         self.labor.clear(self)
+        seekers = {}
         for agent in self.agents:
             agent.inventory.now = self.tick
             self.discard_expired(agent)
-        for agent in list(self.agents):
-            if agent not in self.agents:
-                continue
-            agent.step(self)
-            if self.check_death(agent):
-                continue
-            for other in self.agents:
-                if (other is not agent and agent.distance_to(other) <= self.contact_distance
-                        and not self.in_cooldown(agent, other)):
-                    self.interact(agent, other)
+            if agent.target_id is not None:
+                seekers.setdefault(agent.target_id, []).append(agent)
+        self._step_cache = {"seekers": seekers}
+        self._step_cache["prices"] = self.current_prices(include_labor=False)
+        self._rebuild_grid()
+        try:
+            for agent in list(self.agents):
+                if agent not in self.alive:
+                    continue
+                agent.step(self)
+                if self.check_death(agent):
+                    continue
+                self._grid_move(agent)
+                for other in self._neighbours(agent):
+                    if (other is not agent and agent.distance_to(other) <= self.contact_distance
+                            and not self.in_cooldown(agent, other)):
+                        self.interact(agent, other)
+        finally:
+            self._step_cache = None
         self.recorder.end_step(self, self._dead_flows)
+
+    # ---- spatial grid: contacts are only looked for in the 3 x 3 cells around an agent ----
+
+    def _cell_size(self):
+        return max(self.contact_distance, 16.0)
+
+    def _cell_of(self, agent):
+        size = self._cell_size()
+        return int(agent.x // size), int(agent.y // size)
+
+    def _rebuild_grid(self):
+        self.grid, self._cell = {}, {}
+        for agent in self.agents:
+            cell = self._cell_of(agent)
+            self.grid.setdefault(cell, set()).add(agent)
+            self._cell[agent] = cell
+
+    def _grid_remove(self, agent):
+        cell = self._cell.pop(agent, None)
+        if cell is not None:
+            self.grid.get(cell, set()).discard(agent)
+
+    def _grid_move(self, agent):
+        cell = self._cell_of(agent)
+        if self._cell.get(agent) != cell:
+            self._grid_remove(agent)
+            self.grid.setdefault(cell, set()).add(agent)
+            self._cell[agent] = cell
+
+    def _neighbours(self, agent):
+        """Agents in the 3 x 3 grid cells around ``agent`` (a cell is at least the touch distance)."""
+        cx, cy = self._cell.get(agent) or self._cell_of(agent)
+        found = []
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                found.extend(self.grid.get((cx + dx, cy + dy), ()))
+        return found
 
     # Expiries smaller than this (per agent and good, in one step) aren't written to the event log.
     LOG_EXPIRED_FROM = 5
@@ -595,7 +756,21 @@ class World:
         self.events.append({"tick": self.tick, "message": message})
         del self.events[:-200]
 
-    def to_dict(self):
+    def reserve_of(self, agent):
+        """{good: units} the agent wants in reserve because the good is becoming scarce."""
+        if not self.rules.stockpiling_enabled:
+            return {}
+        scarce = [r for r, d in self.scarcity.items() if d >= self.rules.scarcity_trigger and self.rules.is_active(r)]
+        return {r: n for r in scarce if (n := economy.stockpile_target(agent, r, self.rules, self.scarcity))}
+
+    def to_dict(self, detail=None):
+        """The whole state for the UI. ``detail``: ids of agents to describe in full ("all" for
+        everyone); the rest get a compact entry (position, needs, goods, activity). By default
+        everyone is in full in games of up to FULL_DETAIL_AGENTS agents."""
+        if detail is None:
+            detail = "all" if len(self.agents) <= FULL_DETAIL_AGENTS else ()
+        if detail != "all":
+            detail = set(detail)
         return {
             "tick": self.tick,
             "width": self.width,
@@ -610,6 +785,8 @@ class World:
                                "effects": self.rules.effects_of(g)}
                            for g in economy.GOODS},
             "consumer_needs": list(self.rules.consumer_needs),
+            # Industries left out because their recipe needs a good that isn't in this game.
+            "auto_excluded": list(self.rules.auto_excluded),
             "government": self.government.to_dict(),
             "market": {
                 "prices": self.current_prices(),
@@ -649,9 +826,8 @@ class World:
                 "money": sum(a.money for a in self.agents),
                 "units": {r: sum(a.inventory.count(r) for a in self.agents) for r in economy.RESOURCES},
             },
-            "agents": [dict(a.to_dict(self.rules), reserve={
-                r: n for r in self.rules.active_goods if (n := economy.stockpile_target(a, r, self.rules, self.scarcity))})
-                for a in self.agents],
+            "agents": [dict(a.to_dict(self.rules, full=detail == "all" or a.id in detail), reserve=self.reserve_of(a))
+                       for a in self.agents],
             # Only pairs that can interact; pairs in cooldown just overlap.
             "contacts": [[a.id, b.id] for a, b in self.contacts() if not self.in_cooldown(a, b)],
             "events": self.events[-50:],

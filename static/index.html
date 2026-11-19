@@ -34,6 +34,16 @@
         <input id="interval" type="range" min="16" max="1000" value="200">
         <span id="interval-label" class="mono">200 ms</span>
       </label>
+      <label class="speed" title="Steps run per tick while playing: more steps per tick = a faster game (the map updates less often)">
+        <span>×</span>
+        <select id="steps-per-tick">
+          <option value="1">1 step</option>
+          <option value="2">2 steps</option>
+          <option value="5">5 steps</option>
+          <option value="10">10 steps</option>
+          <option value="25">25 steps</option>
+        </select>
+      </label>
     </div>
 
     <div class="topbar-right">

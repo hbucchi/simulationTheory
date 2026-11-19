@@ -22,6 +22,7 @@ class Inventory:
         self.items = {}
         self.batches = {item: deque() for item in self.perishable}  # item -> deque of [expires, qty], oldest first
         self.totals = {item: 0.0 for item in self.perishable}       # item -> sum of its batches (kept in step)
+        self.version = 0   # bumped on every change, so callers can cache what they work out from it
         for item, quantity in (items or {}).items():
             if item in self.perishable:
                 if quantity:
@@ -30,6 +31,7 @@ class Inventory:
                 self.items[item] = quantity
 
     def add(self, item, quantity=1, expires=None):
+        self.version += 1
         if quantity <= 0:
             raise ValueError("quantity must be positive")
         if item not in self.perishable:
@@ -50,6 +52,7 @@ class Inventory:
 
     def take(self, item, quantity):
         """Remove ``quantity`` of a perishable item, oldest first. Returns [(expires, qty), ...]."""
+        self.version += 1
         taken = []
         batches = self.batches[item]
         while quantity > 1e-9 and batches:
@@ -66,6 +69,7 @@ class Inventory:
 
     def remove(self, item, quantity=1):
         """Remove ``quantity`` of ``item``. Returns False if there isn't enough."""
+        self.version += 1
         if self.amount(item) + 1e-9 < quantity:
             return False
         if item in self.perishable:
@@ -77,6 +81,7 @@ class Inventory:
         return True
 
     def set(self, item, quantity):
+        self.version += 1
         if quantity < 0:
             raise ValueError("quantity must be >= 0")
         if item in self.perishable:
@@ -89,6 +94,7 @@ class Inventory:
 
     def expire(self):
         """Throw away perishable batches past their date. Returns {item: quantity expired}."""
+        self.version += 1
         expired = {}
         for item, batches in self.batches.items():
             while batches and batches[0][0] <= self.now:
@@ -104,10 +110,11 @@ class Inventory:
         return self.items.get(item, 0)
 
     def count(self, item):
-        """Whole units held."""
-        if item in self.perishable:
-            return int(self.amount(item) + 1e-9)
-        return self.items.get(item, 0)
+        """Whole units held. (Hot path: one lookup instead of going through amount.)"""
+        total = self.totals.get(item)
+        if total is None:
+            return self.items.get(item, 0)
+        return int(total + 1e-9) if total > 0 else 0
 
     def to_dict(self):
         return {**self.items, **{item: self.count(item) for item in self.perishable}}

@@ -194,6 +194,20 @@ an industry that uses layer-n goods is layer n + 1. Up to 10 layers are allowed.
 **`industry_layers`** (1–10, chosen on the setup screen before a game starts)
 removes every industry deeper than that: nobody owns, holds or makes its goods.
 
+**Choosing the industries (a modular game).** On the setup screen, *Game size:
+layers and industries* has quick starts (*Simple · layer 1*, *Basic · layers 1–2*,
+*Standard · layers 1–3*, *Full*) and a checkbox per industry, grouped by layer.
+Unticked industries go into **`excluded_industries`** and don't exist in the game.
+An industry still needs every input of its recipe, so leaving one out also leaves
+out everything made from it, all the way down (no grain → no food, beverages,
+packaged meals or fast food); the picker greys those out and says which input is
+missing, and the state reports them as `auto_excluded`. With *Size starting
+industries to this game* ticked (the default), the server sizes the starting
+industries for exactly the industries that are left, and stock of a missing good
+becomes the same relief in the best remaining good for that need. The preview
+warns when a need has nothing left to relieve it; for hunger or thirst that means
+everyone dies, and the game asks before starting.
+
 **Effects: one good, several needs.** Every good has an effect profile
 (`effects`: {need: fit}, fit from −1 to +1): what consuming one unit does to each
 need. Almost all goods can be consumed; a few are pure inputs (ore, steel, cement,
@@ -291,10 +305,15 @@ healthcare services 6 (8). The average still falls with every layer.
 **Default calibration.** Default industry sizes are
 sized to demand: each need is split over its goods (e.g. thirst 70% water, 30%
 beverages), the inputs are added down the layers, and each industry gets twice the
-capacity that takes. For a game with fewer layers both the sizes and the starting
-stock are worked out for the industries that exist (stock of missing goods becomes
-the same relief in the best remaining good). With these defaults, games of 3, 10 and
-30 agents and 1 to 6 layers run 1,500 steps without anyone starving.
+capacity that takes. An input people also consume (grain, livestock, water,
+electricity, ...) is counted twice over for the industries it feeds: some of it gets
+eaten directly instead of milled, and without that margin the industries made from
+it starve. For a game with fewer layers or left-out industries both the sizes and the
+starting stock are worked out for the industries that exist (stock of missing goods
+becomes the same relief in the best remaining good). With these defaults, games of 3,
+10, 30 and 200 agents with 1 to 6 layers run 1,500 steps without anyone starving,
+and so do games without grain, electricity or capital goods. Leaving out several staples
+at once (say livestock and crude oil) makes a tighter economy that can lose agents.
 
 ### Investment
 
@@ -433,6 +452,42 @@ python3 server.py --agents 10 --seed 42 --port 9000
 python3 server.py --lan              # also reachable from a phone on the same Wi-Fi
 ```
 
+### Big games (100–5000 agents)
+
+The simulation is plain Python, so each step costs about *agents × industries*
+checks (every agent asks, for every good, "do I want it, can I spare it?"). Measured
+on one core:
+
+| agents | layer 1 (10 industries) | layers 1–2 (22) | all layers (36) |
+|---|---|---|---|
+| 100 | 20 ms/step | 29 ms/step | 47 ms/step |
+| 300 | 61 ms/step | 93 ms/step | 127 ms/step |
+| 1000 | 260 ms/step | 420 ms/step | 560 ms/step |
+
+What keeps it that fast:
+
+- **Nothing compares every pair of agents.** Agents are bucketed into a grid of cells
+  as wide as the touch distance (spatial hashing), so contacts and "who is near me"
+  only look at the 9 cells around an agent: O(n) instead of O(n²).
+- **Per-step tables.** Who wants which good, who can spare it and how much, who owns
+  which asset, prices, the best assets to buy or build: worked out once per step and
+  shared by every agent, instead of each agent recomputing them.
+- **Need by need, not good by good.** Whether an agent wants a good is decided per
+  need (one check covers every good for hunger) and cached until its inventory changes.
+- **A light state.** With more than 100 agents the browser gets every agent's position,
+  needs, goods and activity, but full details (labour, modules, input buffers) only for
+  the agent cards on screen (at most 40, plus the selected one); search, filter or sort
+  to see others, or tap a dot. 1000 agents: about 0.7 MB per update.
+
+To play bigger games faster:
+
+- **Steps per tick** (next to *Speed*): run 2, 5, 10 or 25 steps per update. The map
+  redraws less often, but the game moves that many times faster.
+- **Fewer industries**: layer 1 runs about twice as fast as the full catalog.
+- **PyPy**: the code is standard-library only, so it also runs on
+  [PyPy](https://pypy.org), a Python with a just-in-time compiler that is typically
+  several times faster on loop-heavy code like this: `pypy3 server.py --agents 1000`.
+
 ### Playing on a phone (e.g. Samsung Galaxy S23)
 
 1. On your computer run `python3 server.py --lan`. It prints the address to open,
@@ -448,8 +503,8 @@ labels grow so they stay readable and tappable, and the rules screen, tabs and
 report collapse to one column.
 
 In the page: **Step** (or →) for turn-based, **Play/Pause** (or Space) for
-timed steps at the chosen interval, **+100** to fast-forward, **Reset** to
-respawn agents at random positions.
+timed steps at the chosen interval (and *steps per tick*), **+100** to fast-forward,
+**Reset** to respawn agents at random positions.
 
 The sidebar has two tabs:
 

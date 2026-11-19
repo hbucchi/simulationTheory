@@ -371,6 +371,21 @@ body.setup-open { overflow: hidden; }
   background: var(--panel); border: 1px solid var(--border); box-shadow: var(--shadow);
 }
 
+/* Industry picker: which industries are in the game */
+.industry-picker { grid-column: 1 / -1; display: grid; gap: 8px; }
+.industry-picker .section-hint { margin: 0; }
+.game-sizes { display: flex; flex-wrap: wrap; gap: 6px; }
+.industry-layer summary { display: flex; align-items: center; gap: 8px; }
+.layer-count { color: var(--muted); font-weight: 400; }
+.link-btn { padding: 0 6px; font-size: 11.5px; background: none; border: none; color: var(--accent); cursor: pointer; }
+.industry-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 10px; padding: 6px 0; }
+.setup-fields .industry-item { justify-content: flex-start; gap: 6px; font-size: 12.5px; }
+.industry-item .why { color: var(--faint); margin-left: auto; font-size: 11px; }
+.industry-item:not(.on) span { color: var(--muted); }
+.industry-item.deep { opacity: .45; }
+.industry-item.auto .why { color: var(--bad); }
+.spread-row.disabled { opacity: .55; }
+
 /* Distribution rows */
 .spread-list { display: grid; gap: 6px; }
 .spread-row {

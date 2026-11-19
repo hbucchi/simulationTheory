@@ -45,7 +45,9 @@ from simulation.economy import GOODS, RESOURCES
 
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_STEPS_PER_REQUEST = 1000
-MAX_AGENTS = 500
+# Most agents the UI can ask to see in full at once (cards on screen + the one being edited).
+MAX_DETAIL = 200
+MAX_AGENTS = 5000
 MAX_MOVEMENT = 200
 AGENT_PATH = re.compile(r"/api/agents/(\d+)")
 
@@ -56,6 +58,7 @@ class Simulation:
     def __init__(self, agents, seed):
         self.lock = threading.Lock()
         self.world = None
+        self.detail = None   # agent ids the UI shows in full (None: World's default; "all": everyone)
         self.reset(Rules.from_dict({"agents": agents}), seed)
 
     def reset(self, rules, seed):
@@ -63,25 +66,25 @@ class Simulation:
         world.spawn_random_agents()
         with self.lock:
             self.world = world
-            return world.to_dict()
+            return world.to_dict(self.detail)
 
     def step(self, steps):
         with self.lock:
             for _ in range(steps):
                 self.world.step()
-            return self.world.to_dict()
+            return self.world.to_dict(self.detail)
 
     def add_agent(self, config):
         with self.lock:
             if len(self.world.agents) >= MAX_AGENTS:
                 raise ValueError(f"at most {MAX_AGENTS} agents")
             self.world.create_agent(**config)
-            return self.world.to_dict()
+            return self.world.to_dict(self.detail)
 
     def update_agent(self, agent_id, config):
         with self.lock:
             self.world.update_agent(self._get(agent_id), **config)
-            return self.world.to_dict()
+            return self.world.to_dict(self.detail)
 
     def set_policy(self, min_rate, labor_purchase):
         with self.lock:
@@ -92,12 +95,12 @@ class Simulation:
                 gov.labor_purchase = labor_purchase
             self.world.log(f"Government policy: minimum rate {gov.min_rate:.2%}, "
                            f"buying {gov.labor_purchase:g} labour per step")
-            return self.world.to_dict()
+            return self.world.to_dict(self.detail)
 
     def remove_agent(self, agent_id):
         with self.lock:
             self.world.remove_agent(self._get(agent_id))
-            return self.world.to_dict()
+            return self.world.to_dict(self.detail)
 
     def _get(self, agent_id):
         agent = self.world.agent_by_id(agent_id)
@@ -115,7 +118,20 @@ class Simulation:
 
     def state(self):
         with self.lock:
-            return self.world.to_dict()
+            return self.world.to_dict(self.detail)
+
+
+def parse_detail(value):
+    """Agents the UI wants in full: "all", or a list of ids (at most MAX_DETAIL)."""
+    if value == "all" or value is None:
+        return value
+    if not isinstance(value, list):
+        raise ValueError("detail must be \"all\" or a list of agent ids")
+    ids = set()
+    for v in value[:MAX_DETAIL]:
+        if str(v).strip().lstrip("-").isdigit():
+            ids.add(int(v))
+    return ids
 
 
 def _number(value, field, low, high, whole=False):
@@ -179,7 +195,10 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/catalog.js":
             return self._script(catalog_script())
-        if self.path == "/api/state":
+        if self.path.partition("?")[0] == "/api/state":
+            query = dict(p.split("=", 1) for p in self.path.partition("?")[2].split("&") if "=" in p)
+            if "detail" in query:
+                self.sim.detail = parse_detail(query["detail"].split(",") if query["detail"] != "all" else "all")
             return self._json(self.sim.state())
         if self.path.startswith("/api/report"):
             query = dict(p.split("=", 1) for p in self.path.partition("?")[2].split("&") if "=" in p)
@@ -191,6 +210,8 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         def route(body):
+            if "detail" in body:
+                self.sim.detail = parse_detail(body["detail"])
             if self.path == "/api/step":
                 steps = _number(body.get("steps", 1), "steps", 1, MAX_STEPS_PER_REQUEST, whole=True)
                 return self.sim.step(steps)
@@ -201,6 +222,12 @@ class Handler(SimpleHTTPRequestHandler):
                     rules.agents = _number(body["agents"], "agents", 1, MAX_AGENTS, whole=True)
                 seed = body.get("seed")
                 return self.sim.reset(rules, None if seed in (None, "") else int(seed))
+            if self.path == "/api/rules/resolve":
+                # What the rules become once the server fills them in (industries sized for this game's
+                # layers and exclusions, stock of missing goods converted): for the setup preview.
+                rules = Rules.from_dict(body.get("rules") or {})
+                return {"rules": rules.to_dict(), "active": list(rules.active_goods),
+                        "auto_excluded": list(rules.auto_excluded), "consumer_needs": list(rules.consumer_needs)}
             if self.path == "/api/agents":
                 return self.sim.add_agent(parse_agent_config(body))
             if self.path == "/api/government":
@@ -248,7 +275,7 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(data)
 
     def _json(self, payload, status=200):
-        data = json.dumps(payload).encode()
+        data = json.dumps(payload, separators=(",", ":")).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))

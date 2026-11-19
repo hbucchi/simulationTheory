@@ -7,6 +7,7 @@ const ui = {
   play: $("play"),
   run100: $("run100"),
   interval: $("interval"),
+  stepsPerTick: $("steps-per-tick"),
   intervalLabel: $("interval-label"),
   agentCount: $("agent-count"),
   seed: $("seed"),
@@ -150,7 +151,30 @@ let playing = false;
 let busy = false;     // a request is in flight; skip timer ticks instead of queueing them
 let timer = null;
 
+// Big games: the server describes in full only the agents the UI shows (cards on screen, the
+// selected one, the one being edited); the rest come as a compact entry (position, needs, goods,
+// activity). This keeps each frame's download small, so the game stays quick with 1000+ agents.
+const FULL_DETAIL_AGENTS = 100;   // up to this many agents everyone is sent in full (server default)
+const CARD_LIMIT = 40;            // most agent cards / chips drawn at once (search or sort to find others)
+
+function detailIds() {
+  if (!state || state.agents.length <= FULL_DETAIL_AGENTS) return null;
+  const ids = new Set(visibleAgents().slice(0, CARD_LIMIT).map(a => a.id));
+  for (const id of [selectedId, editingId]) if (id !== null) ids.add(id);
+  return [...ids];
+}
+
+// The selected / edited agent may only have its compact entry: fetch it in full.
+async function ensureDetail() {
+  const ids = detailIds();
+  const need = [selectedId, editingId].some(id => id !== null && agentById(id) && !agentById(id).full);
+  if (!ids || !need || busy) return;
+  render(await api(`/api/state?detail=${ids.join(",")}`));
+}
+
 async function api(path, body, method = body === undefined ? "GET" : "POST") {
+  const ids = detailIds();
+  if (body !== undefined && ids) body = { ...body, detail: ids };
   const res = await fetch(path, {
     method,
     headers: body === undefined ? {} : { "Content-Type": "application/json" },
@@ -177,7 +201,7 @@ async function step(steps = 1) {
 function setPlaying(on) {
   playing = on;
   clearInterval(timer);
-  if (on) timer = setInterval(() => step(1), Number(ui.interval.value));
+  if (on) timer = setInterval(() => step(Number(ui.stepsPerTick.value) || 1), Number(ui.interval.value));
   ui.play.textContent = on ? "Pause" : "Play";
   ui.play.classList.toggle("active", on);
   ui.step.disabled = on;
@@ -510,9 +534,13 @@ function sparkline(values) {
 
 function renderAgents() {
   ui.agents.innerHTML = "";
-  const shown = visibleAgents();
-  ui.agentShown.textContent = shown.length === state.agents.length
-    ? `(${shown.length})` : `(${shown.length} of ${state.agents.length})`;
+  const matching = visibleAgents();
+  ui.agentShown.textContent = matching.length === state.agents.length
+    ? `(${matching.length})` : `(${matching.length} of ${state.agents.length})`;
+  // Only the first CARD_LIMIT cards (plus the selected agent) are drawn.
+  const shown = matching.slice(0, CARD_LIMIT);
+  const selected = selectedId !== null && agentById(selectedId);
+  if (selected && !shown.includes(selected)) shown.unshift(selected);
   if (!shown.length) {
     const empty = document.createElement("p");
     empty.className = "empty-list";
@@ -559,7 +587,7 @@ function renderAgents() {
       stats.append(label, bar, val);
     }
 
-    const lab = a.labor;
+    const lab = a.full ? a.labor : null;   // compact entries carry only a few labour figures
     const meta = document.createElement("div");
     meta.className = "meta";
     const held = RESOURCES.filter(r => a.inventory[r]);
@@ -609,8 +637,8 @@ function renderAgents() {
       : a.activity === "searching" ? `searching: nobody sells anything for ${a.wants.join(" or ")}`
       : a.activity;
     const owned = GOODS.filter(g => a.assets[g]);
-    const worked = Object.entries(lab.employers).map(([who, u]) => `${u.toFixed(2)} for ${who}`).join(", ");
-    const prod = `labour ${lab.capacity_now.toFixed(2)}/step (capacity ${lab.capacity.toFixed(2)} × efficiency ` +
+    const worked = !lab ? "" : Object.entries(lab.employers).map(([who, u]) => `${u.toFixed(2)} for ${who}`).join(", ");
+    const prod = !lab ? "details load when shown" : `labour ${lab.capacity_now.toFixed(2)}/step (capacity ${lab.capacity.toFixed(2)} × efficiency ` +
       `${lab.efficiency.toFixed(2)}) · wellbeing ${lab.wellbeing.toFixed(2)} · need for a job ${lab.job_need.toFixed(2)}` +
       (lab.offered ? ` · offers ${lab.offered.toFixed(2)} at ${usd(lab.asking_wage)}` : "") +
       (worked ? ` · worked ${worked}` : "") +
@@ -627,6 +655,13 @@ function renderAgents() {
 
     card.append(head, stats, meta, activity);
     ui.agents.append(card);
+  }
+  if (matching.length > CARD_LIMIT) {
+    const more = document.createElement("p");
+    more.className = "empty-list";
+    more.textContent = `Showing ${CARD_LIMIT} of ${matching.length}. Search, filter or sort to see others, ` +
+      "or tap an agent on the map.";
+    ui.agents.append(more);
   }
 }
 
@@ -760,7 +795,10 @@ const input = (path) => ui.form.elements[path];
 function renderChips() {
   ui.chips.innerHTML = "";
   ui.newAgent.classList.toggle("active", editingId === null);
-  for (const a of state.agents) {
+  const editing = editingId !== null && agentById(editingId);
+  let list = state.agents.slice(0, CARD_LIMIT);
+  if (editing && !list.includes(editing)) list = [editing, ...list];
+  for (const a of list) {
     const chip = document.createElement("button");
     chip.className = "chip" + (a.id === editingId ? " active" : "");
     const dot = document.createElement("span");
@@ -770,11 +808,18 @@ function renderChips() {
     chip.onclick = () => openEditor(a.id);
     ui.chips.append(chip);
   }
+  if (state.agents.length > list.length) {
+    const more = document.createElement("span");
+    more.className = "count";
+    more.textContent = `+${state.agents.length - list.length} more: tap one on the map or use Edit on its card`;
+    ui.chips.append(more);
+  }
 }
 
 // Fill the form. Untouched ("clean") fields follow the live state; edited ones are left alone.
 function refreshForm(force = false) {
   const agent = editingId === null ? null : agentById(editingId);
+  if (agent && !agent.full) { ensureDetail(); return; }   // its full details are on the way
   ui.formTitle.textContent = agent ? `Edit ${agent.name}` : "New agent";
   ui.formSubmit.textContent = agent ? "Save changes" : "Create agent";
   ui.formRemove.hidden = !agent;
@@ -922,11 +967,13 @@ canvas.addEventListener("click", (e) => {
   if (best && activeTab === "manage") return openEditor(best.id);
   selectedId = best ? best.id : null;
   render(state);
+  ensureDetail();
 });
 
 ui.step.onclick = () => step(1);
 ui.run100.onclick = () => step(100);
 ui.play.onclick = () => setPlaying(!playing);
+ui.stepsPerTick.onchange = () => { if (playing) setPlaying(true); };
 ui.interval.oninput = () => {
   ui.intervalLabel.textContent = `${ui.interval.value} ms`;
   if (playing) setPlaying(true);

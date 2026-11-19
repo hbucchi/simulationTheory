@@ -85,10 +85,8 @@ class Navigate(Module):
             return
 
         if not needy:
-            for resource in sorted(world.rules.active_goods, reverse=True,
-                                   key=lambda r: economy.surplus(agent, r, world.rules, world.scarcity)):
-                if not economy.surplus(agent, resource, world.rules, world.scarcity):
-                    break
+            surpluses = world.surpluses_of(agent)
+            for resource in sorted(surpluses, key=surpluses.get, reverse=True):
                 buyer = world.nearest_buyer(agent, resource)
                 if buyer is not None:
                     agent.seeking_for = resource
@@ -105,4 +103,5 @@ class Navigate(Module):
     def _go_to(agent, activity, partner, world):
         agent.activity = activity
         agent.target_id = partner.id
+        world.note_target(agent, partner)
         agent.move_towards(partner.x, partner.y, world)  # partner's position right now

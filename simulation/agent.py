@@ -134,7 +134,27 @@ class Agent:
         """Pixels this agent can actually move per step: movement, reduced while depressed."""
         return max(1, int(self.movement * self.depression_factor)) if self.depressed else self.movement
 
-    def to_dict(self, rules=DEFAULT_RULES):
+    def _held(self):
+        """{good: whole units} of the goods it holds (none of the zeros)."""
+        return {g: n for g, n in self.inventory.to_dict().items() if n}
+
+    def to_dict(self, rules=DEFAULT_RULES, full=True):
+        """Everything about the agent; full=False leaves out the costly details (labour, modules,
+        industry buffers) that only its card and editor show, for big games."""
+        if not full:
+            return {
+                "id": self.id, "name": self.name, "x": round(self.x, 2), "y": round(self.y, 2),
+                "needs": {k: round(v, 2) for k, v in self.needs.items()},
+                "money": round(self.money, 2), "movement": self.movement, "speed": self.speed,
+                "assets": dict(self.assets), "depressed": self.depressed,
+                "inventory": self._held(), "color": self.color, "activity": self.activity,
+                "target_id": self.target_id, "project": self.project, "seeking_for": self.seeking_for,
+                "wants": [n for n in rules.consumer_needs if getattr(self, n) > rules.seek_threshold],
+                # The labour figures the overview averages / sorts by.
+                "labor": {"efficiency": round(self.efficiency, 3), "wellbeing": round(self.wellbeing, 3),
+                          "job_need": round(self.job_need, 3), "sold": round(self.labor_sold, 4)},
+                "full": False,
+            }
         return {
             "id": self.id,
             "name": self.name,
@@ -152,7 +172,7 @@ class Agent:
                       "asking_wage": round(self.asking_wage, 2), "sold": round(self.labor_sold, 4),
                       "bought": round(self.labor_bought, 4), "employers": {k: round(v, 3) for k, v in self.employers.items()}},
             "depressed": self.depressed,
-            "inventory": self.inventory.to_dict(),
+            "inventory": self._held(),
             "output_capacity": {g: round(v, 4) for g, v in self.output_capacity.items()},
             "input_target": {r: economy.input_target(self, r, rules) for r in rules.active_goods
                              if economy.input_target(self, r, rules)},
@@ -164,4 +184,5 @@ class Agent:
             # Needs above the seek threshold that goods can relieve.
             "wants": [n for n in rules.consumer_needs if getattr(self, n) > rules.seek_threshold],
             "modules": {type(m).__name__: m.to_dict() for m in self.modules},
+            "full": True,
         }

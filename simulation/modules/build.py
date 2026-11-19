@@ -10,6 +10,41 @@ MIN_PROJECT_SHARES = 0.05
 MAX_PROJECT_SHARES = 1.0
 
 
+def claimed_capital_goods(world):
+    """{capital good: units projects still need to buy}, worked out once per step."""
+    cache = world._step_cache
+    if cache and "claimed" in cache:
+        return cache["claimed"]
+    claimed = {}
+    for o in world.agents:
+        if o.project:
+            for k, units in o.project["need"].items():
+                claimed[k] = claimed.get(k, 0) + max(0, units - o.inventory.count(k))
+    if cache is not None:
+        cache["claimed"] = claimed
+    return claimed
+
+
+def ranked_builds(world, prices, asset_prices):
+    """[(good, q, cost of one share)] for goods worth building (q >= build_min_q), best q first.
+    Worked out once per step (fresh outside a step)."""
+    cache = world._step_cache
+    if cache and "builds" in cache:
+        return cache["builds"]
+    out = []
+    for good in world.rules.active_goods:
+        cost = world.build_cost_money(good, prices)
+        if not cost or cost <= 0:
+            continue
+        q = asset_prices[good] / cost
+        if q >= world.rules.build_min_q and q > 0:
+            out.append((good, q, cost))
+    out.sort(key=lambda t: t[1], reverse=True)
+    if cache is not None:
+        cache["builds"] = out
+    return out
+
+
 class Build(Module):
     """Builds new asset shares (industry capacity) out of capital goods.
 
@@ -44,17 +79,15 @@ class Build(Module):
         spare = agent.money - cash_needed(agent, prices, rules)
         if spare < rules.min_investment:
             return
-        asset_prices = world.asset_prices(prices)
+        asset_prices = world.step_asset_prices()
         budget = min(spare, purchase_limit(agent, asset_prices, rules.capital_cash_ratio))
-        best, best_q, best_cost = None, 0.0, 0.0
-        for good in rules.active_goods:
-            cost = world.build_cost_money(good, prices)
-            if not cost or cost <= 0 or not self.available(good, world, agent):
-                continue
-            q = asset_prices[good] / cost
-            if q > best_q:
-                best, best_q, best_cost = good, q, cost
-        if best is None or best_q < rules.build_min_q:
+        # Best q first (the same for every agent this step); build the best one it can get.
+        best = None
+        for good, best_q, best_cost in ranked_builds(world, prices, asset_prices):
+            if self.available(good, world, agent):
+                best = good
+                break
+        if best is None:
             return
         shares = min(MAX_PROJECT_SHARES, budget / best_cost)
         if shares < MIN_PROJECT_SHARES:
@@ -70,13 +103,9 @@ class Build(Module):
         """Can the capital goods for one share of ``good`` be bought now? Other agents together
         have at least that much to spare (spare_table: worked out once per step) and no other
         project already claims it. Capital goods are slow to make, so this paces building."""
-        claimed = {}
-        for o in world.agents:
-            if o.project:
-                for k, units in o.project["need"].items():
-                    claimed[k] = claimed.get(k, 0) + max(0, units - o.inventory.count(k))
+        claimed = claimed_capital_goods(world)
         for k, units in world.rules.build_cost[good].items():
-            on_offer = sum(n for o, n in world.spare_table.get(k, {}).items() if o is not agent)
+            on_offer = world.spare_total(k) - world.spare_table.get(k, {}).get(agent, 0)
             if on_offer + agent.inventory.count(k) - claimed.get(k, 0) < units:
                 return False
         return True
