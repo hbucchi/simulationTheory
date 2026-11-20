@@ -137,10 +137,11 @@ All of it is set in the *Market dynamics* section of the setup screen.
 
     price = base price × multiplier
     base price = total money / total units × (1 − share of the resource)
-    multiplier → demand pressure × concentration   (closing 20% of the gap each step,
-                                                    kept within base × [0.25, 4])
+    multiplier → demand pressure × concentration × buying power   (closing 20% of the gap
+                                                    each step, kept within base × [0.25, 4])
     demand pressure = ((buyers + 1) / (sellers + 1)) ^ elasticity[resource]
     concentration   = 1 + weight[resource] × C
+    buying power    = 1 / (1 + buyer_power_weight[resource] × B)
 
 - **Base price**: how much of the resource exists compared with money and the
   other commodities.
@@ -152,6 +153,9 @@ All of it is set in the *Market dynamics* section of the setup screen.
   0 when it is spread evenly over the agents, 1 when one agent holds all of it
   (a normalised Herfindahl index). With weight 1 (per resource) a monopoly
   doubles the price.
+- **Buying power** (monopsony): B measures how concentrated the money of the agents who want
+  the resource is: 0 when spread evenly, 1 when one buyer has it all. A few big buyers push the
+  price down, because many sellers compete for them: with weight 1 a single buyer halves it.
 - When buyers outnumber sellers, each extra unit in the same deal costs 5% more
   than the one before, and the event log shows the rise.
 
@@ -421,6 +425,31 @@ the economy together with the dead agent's own money.
 
 ### Central government and central bank
 
+**Taxes and spending.** Taxes go into the treasury:
+
+- **production tax** (`tax_production`, default 5%): a share of the money of every sale of
+  goods, paid by the seller;
+- **salary tax** (`tax_wage`, 10%): withheld from every wage, private or public;
+- **profit tax** (`tax_profit`, 15%): on every company's profit (goods sold − wages) before the
+  dividend / reinvestment split, and on banks' profit.
+
+Each step the treasury pays, in order: public works (*labour bought*), the **unemployment
+benefit** (`benefit_rate`, 40% of the wage for every unit of labour offered that nobody hired),
+then, with **balanced budget** on, more public works with what is left and finally an equal
+transfer to everyone, so taxes return to the economy instead of piling up. Only public works
+the treasury can't pay are paid with new money.
+
+**Central bank.**
+
+- **Reserve requirement** (`reserve_ratio`, 10%): commercial banks hold this share of their
+  deposits in an account at the central bank (it can pay interest on it, `reserve_rate`). The
+  bank's own vault cash (`bank_liquidity`, 5% of deposits) is separate. A bank that falls short
+  tops its account up from its vault and stops lending until it meets the requirement.
+- **Lender of last resort** (on by default): when a *solvent* bank (equity > 0) runs out of cash
+  to pay depositors or meet the requirement, the central bank lends it new money at the policy
+  rate + `llr_penalty` (0.2% a step). The bank lends nothing while it owes the central bank, and
+  repays as soon as it has cash beyond its vault buffer; the money then disappears again. A
+  failed bank repays the central bank before its depositors.
 - **Capital ratio (Basel)**, set by the central bank (default 12%): a commercial bank's equity
   (its owners' own money) must be at least this share of its risk-weighted assets, its loans
   (cash reserves carry no risk, weight 0). Loans are made from third parties' money
@@ -435,10 +464,30 @@ the economy together with the dead agent's own money.
   (in random order), paying with **newly created money**. The labour is used up
   in public works. This is how money is injected into the economy.
 
-All three start from the setup screen (*Central government*) and can be changed while the
+Everything here starts from the setup screen (*Central government*) and can be changed while the
 game runs in the **Government** tab, which also shows money created, labour bought and the
 effect on prices. The government can be switched off there too (no policy rate, no labour
 bought, no capital rule: banks are then limited only by their reserves and services).
+
+### National accounts: GDP and price indexes
+
+Each step the report works out, over the last year (12 × `month_steps` = 360 steps):
+
+- **nominal GDP** = Σ goods produced in the last year × today's prices;
+- **real GDP** = the same goods × the prices of a year ago, so it only moves when quantities do;
+- **GDP deflator** = 100 × nominal ÷ real;
+- **CPI** = 100 × (last year's consumption basket at today's prices) ÷ (at year-ago prices), and
+  **inflation** = CPI ÷ 100 − 1.
+
+Before a full year has passed, "a year ago" means the first step. They are in the Report
+(*National accounts*, *GDP*, *Price indexes*) and the Government tab.
+
+### Depreciation
+
+Plants wear out: every industry's asset shares shrink by `depreciation[g]` a year (compounded
+daily), so capacity has to be replaced by building. Defaults: housing 1%, banking 2%, extraction
+3%, manufacturing 4%, machinery, construction, electronics and technology services 5%. Each can
+be set per industry.
 
 ### Banks
 
@@ -470,7 +519,7 @@ How a bank works (rates per step):
   `loan_income_share` (default 40%) of its monthly income, i.e. income per step ×
   `month_steps` (30), whatever the loan is for. This can be changed during the game. Loans are repaid over `loan_steps` steps:
   each step interest on the balance + balance ÷ steps left.
-- **Limits on lending.** A bank keeps `reserve_ratio` of deposits as cash, and its equity
+- **Limits on lending.** A bank keeps `bank_liquidity` of deposits as vault cash and the central bank's required reserves in its account there, and its equity
   must stay at least the central bank's capital ratio × its loans (Basel, default 12%) and
   at least the minimum capital. So $5,000 of capital supports up to $5,000 ÷ 0.12 = $41,667
   of loans.
