@@ -240,7 +240,8 @@ class Banking:
             return 0.0
         by_reserves = bank.reserves - self.reserve_ratio * bank.deposit_total
         by_capital = (bank.equity / self.capital_ratio - bank.loan_total if self.capital_ratio > 0 else math.inf)
-        if bank.equity < self.min_capital:
+        # (A cent of slack: dividends leave equity at exactly the minimum, give or take float noise.)
+        if bank.equity < self.min_capital - 0.01:
             by_capital = 0.0
         by_services = owner.inventory.count("banking") * world.rules.loan_per_service
         return max(0.0, min(by_reserves, by_capital, by_services))

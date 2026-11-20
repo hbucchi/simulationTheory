@@ -232,5 +232,13 @@ class BudgetAndConsumerCreditTests(unittest.TestCase):
         self.assertEqual(bank.loans[0].balance, balance)
 
 
+class RoundingTests(unittest.TestCase):
+    def test_a_bank_at_exactly_its_minimum_capital_can_still_lend(self):
+        w = bank_world(bank_min_capital=5000)
+        owner, bank = open_bank(w, money=5000, services=10)
+        bank.reserves -= 1e-9           # equity 4999.999999999: float noise, not a shortfall
+        self.assertGreater(w.banking.lendable(w, bank), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
