@@ -13,6 +13,32 @@ Agents are dots living in a 1024×1024 box. Each one has:
 | `movement` | int | Max pixels the agent can travel in one step. |
 | `x`, `y` | float | Position inside the box (0–1024). |
 
+### Modules: build your own economy
+
+The setup screen starts with **Modules**: switch whole parts of the economy on or off.
+
+| Module | What it does | Needs |
+|---|---|---|
+| Commerce | agents trade goods (money or barter) | – |
+| Industries & labour | asset shares make goods with labour; the labour market | – |
+| Selling surplus | stock band: agents sell what is above it | Commerce |
+| Supply & demand pricing | prices follow buyers vs sellers and concentration | Commerce |
+| Stockpiling | hoarding goods that are becoming scarce | Commerce |
+| Investing | buying and selling asset shares | Industries |
+| Building new capacity | new asset shares from capital goods | Industries, Investing |
+| Commercial banks | deposits and loans (banking is an industry) | Industries, Commerce |
+| Consumer credit | borrowing for what agents need now | Commercial banks |
+| Government & central bank | policy rate, Basel rule, buying labour | – |
+| Expiry, Death, Depression | goods go off; hunger/thirst kill; boredom depresses | – |
+
+A module whose needs are off doesn't work: the server switches it off and the setup screen
+greys it out and says why. Quick starts set a whole combination: **Survival: no
+production** (trade only; nothing is made, so the starting stock runs out: in a 1000-agent
+test everyone was gone by day 500), **Market of producers** (industries + trade),
+**Capitalism without banks** (+ investing and building) and **Full economy**. In 1000-agent
+tests (600 days, seed 1) the last three had no deaths. The industry picker (below) is the other
+half: which industries exist.
+
 ### Game rules (setup screen)
 
 The page opens on a **Game rules** screen (reopen it any time with *Game rules /
@@ -393,8 +419,13 @@ above what they want on hand (the same cash rule as investing), so a poor
 neighbour can't buy. What nobody can afford is lost, and the sale price leaves
 the economy together with the dead agent's own money.
 
-### Central government
+### Central government and central bank
 
+- **Capital ratio (Basel)**, set by the central bank (default 12%): a commercial bank's equity
+  (its owners' own money) must be at least this share of its risk-weighted assets, its loans
+  (cash reserves carry no risk, weight 0). Loans are made from third parties' money
+  (deposits), so this caps how much of other people's money a bank may lend against its own:
+  at 12%, $1 of equity backs at most $1 ÷ 0.12 = $8.33 of loans.
 - **Minimum interest rate**: no asset is valued at a return below it. The
   effective return of an asset is max(its own return, the policy rate), so
   raising the rate makes every asset cheaper (price = output × good price ÷
@@ -404,9 +435,10 @@ the economy together with the dead agent's own money.
   (in random order), paying with **newly created money**. The labour is used up
   in public works. This is how money is injected into the economy.
 
-Both start from the setup screen (*Central government*) and can be changed
-while the game runs in the **Government & banks** tab, which also shows money created,
-labour bought and the effect on prices.
+All three start from the setup screen (*Central government*) and can be changed while the
+game runs in the **Government** tab, which also shows money created, labour bought and the
+effect on prices. The government can be switched off there too (no policy rate, no labour
+bought, no capital rule: banks are then limited only by their reserves and services).
 
 ### Banks
 
@@ -439,8 +471,8 @@ How a bank works (rates per step):
   `month_steps` (30), whatever the loan is for. This can be changed during the game. Loans are repaid over `loan_steps` steps:
   each step interest on the balance + balance ÷ steps left.
 - **Limits on lending.** A bank keeps `reserve_ratio` of deposits as cash, and its equity
-  must stay at least `capital_ratio` × its loans (Basel capital adequacy, default 8%) and at
-  least the minimum capital. So $5,000 of capital supports up to $5,000 ÷ 0.08 = $62,500
+  must stay at least the central bank's capital ratio × its loans (Basel, default 12%) and
+  at least the minimum capital. So $5,000 of capital supports up to $5,000 ÷ 0.12 = $41,667
   of loans.
 - **Money creation.** Lent money is spent, the seller deposits it, and the bank lends part of
   it again. With reserve ratio *ρ*, deposits can grow to 1 + (1 − *ρ*) + (1 − *ρ*)² + … = 1/*ρ*
@@ -451,8 +483,8 @@ How a bank works (rates per step):
   written off.
 - **Profit and failure.** Profit = interest received − interest paid. Each step the owner
   takes its *payout ratio* of the profit as a dividend and the bank keeps the rest as
-  equity, so a bank whose owner reinvests can lend more over time (8% capital ratio:
-  every $1 retained supports $12.50 more of loans). A bank whose equity falls below zero
+  equity, so a bank whose owner reinvests can lend more over time (12% capital ratio:
+  every $1 retained supports $8.33 more of loans). A bank whose equity falls below zero
   fails: it stops lending and pays depositors back pro rata from what comes in.
 
 **Turning banking on and off.** On the setup screen (*Banking*: on/off, number of starting
@@ -608,8 +640,14 @@ The sidebar has two tabs:
 ### Tests
 
 ```bash
-python3 -m unittest discover -s tests
+python3 -m unittest discover -s tests          # unit tests (small, fast)
+python3 tools/scenario.py                      # a 1000-agent game, 1500 steps (~10-15 min)
+python3 tools/scenario.py --steps 600 --rules '{"banking_enabled": false}'
 ```
+
+Changes are checked on **1000-agent games** with `tools/scenario.py`: it prints population,
+deaths, unemployment, prices, the wage, money, loans, industry capacity and wealth inequality
+every 100 steps.
 
 ### Layout
 

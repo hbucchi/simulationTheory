@@ -466,7 +466,8 @@ function buildSetupForm() {
 // ---------- modules: quick starts ----------
 // Combinations of modules for different kinds of economy.
 const GAME_TYPES = [
-  ["Barter village", "Agents only trade what they start with: no industries, banks or government.",
+  ["Survival: no production", "Nobody makes anything: agents trade what they start with until it runs out " +
+   "(in a 1000-agent test everyone was gone by day 500). A challenge, not a working economy.",
    { commerce: true, industries: false, government: false }],
   ["Market of producers", "Industries and trade, no investing, banks or government.",
    { commerce: true, industries: true, investing: false, building: false, banking: false, government: false }],
