@@ -13,6 +13,32 @@ Agents are dots living in a 1024×1024 box. Each one has:
 | `movement` | int | Max pixels the agent can travel in one step. |
 | `x`, `y` | float | Position inside the box (0–1024). |
 
+### The screen
+
+A navigation bar on the left opens one page at a time:
+
+| Page | What it shows |
+|---|---|
+| **Dashboard** | key figures with their change over the last month (population, real GDP, inflation, unemployment, wage, inequality, bank loans, taxes), trend charts, plain-language alerts, the biggest price moves and the latest events |
+| **Map & people** | the world map and every agent: activity, money and needs at a glance, details one click away |
+| **Products** | every product's price, change, output, consumption, inputs, producers and market; tap a row for details and a price chart |
+| **Banks** | banks' figures and each bank's balance sheet; settings folded underneath |
+| **Government** | taxes, spending, treasury, central bank and national accounts; policy settings folded underneath |
+| **Reports** | charts and tables over the last month, quarter, year or the whole game |
+| **Edit agents** | create, edit and remove agents |
+
+The top bar shows the date and the playback controls: **Next day**, **Play/Pause**, **+1 month**,
+the pace (1 day, 1 week or 1 month per tick while playing) and the speed.
+
+**Time.** One step of the simulation is **one day**; a month is 30 days (`month_steps`) and a year
+12 months. Everything on screen is in days, weeks, months and years (the calendar reads *Year 1 ·
+Month 4 · Day 15*), and interest rates are shown and entered **per year**: the simulation turns a
+yearly rate r into a daily one, (1 + r)^(1/360) − 1, so 5% a year is about 0.0136% a day. (Rule
+names in the JSON keep their `_steps` suffix: a step is a day.)
+
+**New game & rules** opens the setup screen: World, Modules and Game size are open; every other
+section is folded under its title.
+
 ### Modules: build your own economy
 
 The setup screen starts with **Modules**: switch whole parts of the economy on or off.

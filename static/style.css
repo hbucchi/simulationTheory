@@ -752,3 +752,9 @@ button { border-radius: var(--radius-sm); }
 .fold.settings > summary { padding: 4px 0; }
 .fold.settings[open] > summary { margin-bottom: 12px; }
 .fold.settings .panel { border: none; padding: 0; background: none; }
+/* Setup: essentials open, advanced sections folded */
+.setup-section-title { cursor: pointer; font-size: 15px; font-weight: 600; list-style-position: inside; }
+.setup-section[open] > .setup-section-title { margin-bottom: 4px; }
+.setup-section:not([open]) { padding-top: 12px; padding-bottom: 12px; }
+.setup-divider { grid-column: 1 / -1; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin: 10px 0 0; }
+.setup { background: var(--bg); backdrop-filter: none; }

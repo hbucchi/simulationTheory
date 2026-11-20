@@ -52,6 +52,10 @@ const SETUP_SECTIONS = [
     { path: "cooldown_steps", label: "Ignore each other after a deal (days)", kind: "int", min: 0, max: 10000 },
     { path: "retry_steps", label: "… after no deal (days)", kind: "int", min: 0, max: 10000 },
   ]},
+  { title: "Modules: what this economy has", wide: true, hint: "Switch whole parts of the economy on or off. A module " +
+      "only works with the modules it needs (greyed out otherwise). Quick starts below set a whole combination.",
+    fields: [{ path: "#game-types", kind: "game-types" },
+             ...window.CATALOG.modules.map(m => ({ path: m.rule, label: m.label, kind: "bool", module: m, full: true }))] },
   { title: "Game size: layers and industries", wide: true, fields: [
     { path: "industry_layers", label: "Industry layers in this game (1–10)", kind: "int", min: 1, max: 10, full: true },
     { path: "#autosize", label: "Size starting industries to this game (recommended when you change layers or industries)",
@@ -60,10 +64,6 @@ const SETUP_SECTIONS = [
   ], hint: "Pick a smaller economy for a simpler (and faster) game: fewer layers, or leave out single industries. " +
       "Every industry the game keeps still needs all the inputs of its recipe, so leaving one out also leaves out what " +
       "is made from it. Each good is checked against every agent each day, so fewer industries also run faster." },
-  { title: "Modules: what this economy has", wide: true, hint: "Switch whole parts of the economy on or off. A module " +
-      "only works with the modules it needs (greyed out otherwise). Quick starts below set a whole combination.",
-    fields: [{ path: "#game-types", kind: "game-types" },
-             ...window.CATALOG.modules.map(m => ({ path: m.rule, label: m.label, kind: "bool", module: m, full: true }))] },
   { title: "Prices", hint: "Scarcity: total money ÷ total units × (1 − share of that resource). Fixed: the prices below.", fields: [
     { path: "price_mode", label: "Price rule", kind: "choice", full: true,
       options: [["scarcity", "Scarcity (changes with supply)"], ["fixed", "Fixed prices"]] },
@@ -413,11 +413,23 @@ function buildSpreadRow(f) {
   return row;
 }
 
+// The setup screen opens on the essentials; every other section is folded under its title.
+const SETUP_ESSENTIALS = ["World", "Modules: what this economy has", "Game size: layers and industries"];
+
 function buildSetupForm() {
+  let advanced = false;
   for (const section of SETUP_SECTIONS) {
-    const box = document.createElement("fieldset");
-    box.className = "setup-section" + (section.wide ? " wide" : "");
-    const h = document.createElement("h3");
+    const essential = SETUP_ESSENTIALS.includes(section.title);
+    if (!essential && !advanced) {
+      advanced = true;
+      setupUi.sections.append(Object.assign(document.createElement("h2"), { className: "setup-divider",
+        textContent: "Advanced settings (open any section to adjust it)" }));
+    }
+    const box = document.createElement("details");
+    box.open = essential;
+    box.className = "setup-section" + (section.wide || !essential ? " wide" : "");
+    const h = document.createElement("summary");
+    h.className = "setup-section-title";
     h.textContent = section.title;
     const hint = document.createElement("p");
     hint.className = "section-hint";
