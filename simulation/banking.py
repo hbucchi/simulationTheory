@@ -26,7 +26,7 @@ How a bank works (all per step, rates per step):
   than loan_income_share (default 40%) of its monthly income (income per step x
   month_steps), whatever the loan is for. The bank lends only when:
     1. reserves stay at least reserve_ratio x deposits (cash kept for withdrawals);
-    2. equity stays at least capital_ratio x loans (Basel capital adequacy) and at
+    2. equity stays at least the central bank's capital ratio x loans (Basel) and at
        least bank_min_capital;
     3. it has the banking services to handle it (loan / loan_per_service units);
     4. the borrower can carry it (collateral or income, above).
@@ -137,7 +137,6 @@ class Banking:
         self.deposit_rate = rules.deposit_rate
         self.loan_spread = rules.loan_spread
         self.reserve_ratio = rules.reserve_ratio
-        self.capital_ratio = rules.capital_ratio
         self.min_capital = rules.bank_min_capital
         self.loan_income_share = rules.loan_income_share
         self.banks = []
@@ -244,7 +243,8 @@ class Banking:
         if owner is None or bank.status != "open":
             return 0.0
         by_reserves = bank.reserves - self.reserve_ratio * bank.deposit_total
-        by_capital = (bank.equity / self.capital_ratio - bank.loan_total if self.capital_ratio > 0 else math.inf)
+        basel = world.government.capital_ratio    # set by the central bank
+        by_capital = (bank.equity / basel - bank.loan_total if basel > 0 else math.inf)
         # (A cent of slack: dividends leave equity at exactly the minimum, give or take float noise.)
         if bank.equity < self.min_capital - 0.01:
             by_capital = 0.0
@@ -417,7 +417,7 @@ class Banking:
         profit = bank.equity - bank.last_equity
         dividend = 0.0
         if profit > 0:
-            keep = max(self.min_capital, self.capital_ratio * bank.loan_total)
+            keep = max(self.min_capital, world.government.capital_ratio * bank.loan_total)
             cash = bank.reserves - self.reserve_ratio * bank.deposit_total
             dividend = min(owner.personality["payout_ratio"] * profit, bank.equity - keep, cash)
             if dividend > 0.01:
@@ -504,7 +504,7 @@ class Banking:
             "enabled": self.enabled, "available": self.available(world),
             "industry_active": world.rules.is_active("banking"),
             "deposit_rate": self.deposit_rate, "loan_spread": self.loan_spread,
-            "reserve_ratio": self.reserve_ratio, "capital_ratio": self.capital_ratio,
+            "reserve_ratio": self.reserve_ratio, "capital_ratio": world.government.capital_ratio,
             "min_capital": self.min_capital, "loan_income_share": self.loan_income_share,
             "month_steps": world.rules.month_steps,
             "deposit_rate_now": self.deposit_rate_now(world), "loan_rate_now": self.loan_rate_now(world),

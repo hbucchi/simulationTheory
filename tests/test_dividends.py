@@ -104,10 +104,10 @@ class BankDividendTests(unittest.TestCase):
     def test_retained_equity_lets_a_bank_lend_more(self):
         w, owner, bank = self.make_bank(payout=0.0)
         owner.inventory.set("banking", 1000)
-        before = bank.equity / w.banking.capital_ratio
+        before = bank.equity / w.government.capital_ratio
         bank.reserves += 1000
         w.banking.step(w)
-        self.assertAlmostEqual(bank.equity / w.banking.capital_ratio, before * 2)
+        self.assertAlmostEqual(bank.equity / w.government.capital_ratio, before * 2)
 
 
 class LoanIncomeShareTests(unittest.TestCase):

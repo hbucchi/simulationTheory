@@ -612,3 +612,10 @@ input.recipe-input { width: 190px; }
 .bank-card.winding-down .bank-status { color: var(--muted); }
 .bank-line { color: var(--muted); font-variant-numeric: tabular-nums; }
 .bank-fields label > span { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 190px; color: var(--muted); }
+
+/* Modules (setup) */
+.setup-fields label.module-item { justify-content: flex-start; align-items: flex-start; gap: 10px; }
+.module-text { display: grid; gap: 1px; }
+.module-text small { color: var(--muted); font-size: 11.5px; }
+.module-text .module-needs { color: var(--faint); }
+.setup-fields label.module-item.disabled .module-needs { color: var(--bad); }

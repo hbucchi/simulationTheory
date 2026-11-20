@@ -14,9 +14,10 @@ API
     POST   /api/agents      {...}     create an agent (any field omitted = default)
     POST   /api/agents/<id> {...}     edit an agent (only the fields sent change)
     DELETE /api/agents/<id>           remove an agent
-    POST   /api/government {"min_rate": r, "labor_purchase": n}
+    POST   /api/government {"enabled": bool, "min_rate": r, "labor_purchase": n, "capital_ratio": r}
+                           (central bank: capital_ratio is the Basel rule for banks)
     POST   /api/banking    {"enabled": bool, "deposit_rate": r, "loan_spread": r, "reserve_ratio": r,
-                            "capital_ratio": r, "min_capital": m, "loan_income_share": s}
+                            "min_capital": m, "loan_income_share": s}
                            (any subset; changes live)
                                       change government policy while the game runs
 
@@ -40,7 +41,7 @@ from pathlib import Path
 
 from simulation import World
 from simulation.report import build_report
-from simulation.rules import Rules
+from simulation.rules import Rules, MODULES
 from simulation.agent import NEED_NAMES
 from simulation.catalog import CATALOG, SECTORS
 from simulation.rules import MAX_LAYERS, NEEDS
@@ -89,15 +90,21 @@ class Simulation:
             self.world.update_agent(self._get(agent_id), **config)
             return self.world.to_dict(self.detail)
 
-    def set_policy(self, min_rate, labor_purchase):
+    def set_policy(self, min_rate=None, labor_purchase=None, capital_ratio=None, enabled=None):
         with self.lock:
             gov = self.world.government
+            if enabled is not None:
+                gov.enabled = enabled
             if min_rate is not None:
                 gov.min_rate = min_rate
             if labor_purchase is not None:
                 gov.labor_purchase = labor_purchase
-            self.world.log(f"Government policy: minimum rate {gov.min_rate:.2%}, "
-                           f"buying {gov.labor_purchase:g} labour per step")
+            if capital_ratio is not None:
+                gov.capital_ratio = capital_ratio
+            self.world.log("Government switched off: no policy rate, no labour bought, no capital rule for banks"
+                           if not gov.enabled else
+                           f"Government policy: minimum rate {gov.min_rate:.2%}, buying {gov.labor_purchase:g} "
+                           f"labour per step; central bank capital ratio (Basel) {gov.capital_ratio:.1%}")
             return self.world.to_dict(self.detail)
 
     def set_banking(self, changes):
@@ -108,7 +115,7 @@ class Simulation:
                 setattr(bank, key, value)
             self.world.log("Banking " + ("on" if bank.enabled else "off (banks wind down)") +
                            f": deposit rate {bank.deposit_rate:.2%}, loan spread {bank.loan_spread:.2%}, "
-                           f"reserve ratio {bank.reserve_ratio:.0%}, capital ratio {bank.capital_ratio:.0%}, "
+                           f"reserve ratio {bank.reserve_ratio:.0%}, "
                            f"minimum capital {bank.min_capital:,.0f}, lends up to "
                            f"{bank.loan_income_share:.0%} of a month's income")
             return self.world.to_dict(self.detail)
@@ -244,12 +251,13 @@ class Handler(SimpleHTTPRequestHandler):
                 # layers and exclusions, stock of missing goods converted): for the setup preview.
                 rules = Rules.from_dict(body.get("rules") or {})
                 return {"rules": rules.to_dict(), "active": list(rules.active_goods),
-                        "auto_excluded": list(rules.auto_excluded), "consumer_needs": list(rules.consumer_needs)}
+                        "auto_excluded": list(rules.auto_excluded), "consumer_needs": list(rules.consumer_needs),
+                        "module_notes": rules.module_notes}
             if self.path == "/api/agents":
                 return self.sim.add_agent(parse_agent_config(body))
             if self.path == "/api/banking":
                 limits = {"deposit_rate": (0, 1), "loan_spread": (0, 1), "reserve_ratio": (0, 1),
-                          "capital_ratio": (0, 1), "min_capital": (0, 1e12), "loan_income_share": (0, 100)}
+                          "min_capital": (0, 1e12), "loan_income_share": (0, 100)}
                 changes = {}
                 for key, value in body.items():
                     if key == "detail":
@@ -264,10 +272,12 @@ class Handler(SimpleHTTPRequestHandler):
                         raise ValueError(f"unknown banking setting: {key}")
                 return self.sim.set_banking(changes)
             if self.path == "/api/government":
-                rate = body.get("min_rate")
-                buy = body.get("labor_purchase")
+                rate, buy, basel, on = (body.get(k) for k in ("min_rate", "labor_purchase", "capital_ratio", "enabled"))
+                if on is not None and not isinstance(on, bool):
+                    raise ValueError("enabled must be true or false")
                 return self.sim.set_policy(None if rate is None else _number(rate, "min_rate", 0, 10),
-                                           None if buy is None else _number(buy, "labor_purchase", 0, 1e6))
+                                           None if buy is None else _number(buy, "labor_purchase", 0, 1e6),
+                                           None if basel is None else _number(basel, "capital_ratio", 0, 1), on)
             match = AGENT_PATH.fullmatch(self.path)
             if match:
                 return self.sim.update_agent(int(match[1]), parse_agent_config(body))
@@ -322,7 +332,9 @@ class Handler(SimpleHTTPRequestHandler):
 
 def catalog_script():
     """The industry catalog and needs for the browser, as window.CATALOG (loaded before app.js)."""
-    data = {"goods": CATALOG, "needs": list(NEEDS), "sectors": list(SECTORS), "max_layers": MAX_LAYERS}
+    data = {"goods": CATALOG, "needs": list(NEEDS), "sectors": list(SECTORS), "max_layers": MAX_LAYERS,
+            "modules": [{"key": k, "rule": rule, "label": label, "needs": list(needs), "about": about}
+                        for k, (rule, label, needs, about) in MODULES.items()]}
     return f"window.CATALOG = {json.dumps(data)};\n"
 
 

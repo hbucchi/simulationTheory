@@ -246,5 +246,24 @@ class RoundingTests(unittest.TestCase):
         self.assertGreater(w.banking.lendable(w, bank), 0)
 
 
+class CentralBankTests(unittest.TestCase):
+    def test_the_central_bank_sets_the_basel_ratio(self):
+        import threading
+        w = bank_world(bank_min_capital=1200, capital_ratio=0.12, reserve_ratio=0.0)
+        owner, bank = open_bank(w, money=1200, services=10**6)
+        bank.reserves += 10**6
+        bank.deposits[owner.id] = 10**6
+        self.assertAlmostEqual(w.banking.lendable(w, bank), 1200 / 0.12)       # 12%: $10,000 of loans
+        sim = server.Simulation.__new__(server.Simulation)
+        sim.lock, sim.world, sim.detail = threading.Lock(), w, None
+        sim.set_policy(capital_ratio=0.24)
+        self.assertAlmostEqual(w.banking.lendable(w, bank), 1200 / 0.24)
+        sim.set_policy(enabled=False)                                            # no regulator
+        self.assertEqual(w.government.capital_ratio, 0)
+        self.assertGreater(w.banking.lendable(w, bank), 1200 / 0.12)
+        sim.set_policy(enabled=True)
+        self.assertAlmostEqual(w.government.capital_ratio, 0.24)                 # remembered
+
+
 if __name__ == "__main__":
     unittest.main()

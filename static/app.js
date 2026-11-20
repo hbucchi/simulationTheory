@@ -43,7 +43,8 @@ const ui = {
   govStatus: $("gov-status"),
   govStats: $("gov-stats"),
   bankForm: $("bank-form"), bankEnabled: $("bank-enabled"), bankDeposit: $("bank-deposit"),
-  bankSpread: $("bank-spread"), bankReserve: $("bank-reserve"), bankCapital: $("bank-capital"),
+  bankSpread: $("bank-spread"), bankReserve: $("bank-reserve"),
+  govEnabled: $("gov-enabled"), govBasel: $("gov-basel"),
   bankMinCapital: $("bank-min-capital"), bankIncomeShare: $("bank-income-share"), bankRevert: $("bank-revert"), bankStatus: $("bank-status"),
   bankStats: $("bank-stats"), bankList: $("bank-list"),
 };
@@ -720,6 +721,8 @@ function fillGovernment(force = false) {
   govDirty = false;
   const g = state.government;
   setGovInputs(g.min_rate * 100, g.labor_purchase);
+  ui.govEnabled.checked = g.enabled;
+  ui.govBasel.value = +(g.capital_ratio * 100).toFixed(2);
 }
 
 function setGovInputs(ratePct, buy) {
@@ -760,13 +763,17 @@ ui.govRate.oninput = () => { govDirty = true; ui.govRateLabel.textContent = `${N
   ui.govRateRange.value = ui.govRate.value; };
 ui.govBuyRange.oninput = () => { govDirty = true; setGovInputs(Number(ui.govRate.value), Number(ui.govBuyRange.value)); };
 ui.govBuy.oninput = () => { govDirty = true; ui.govBuyLabel.textContent = ui.govBuy.value; ui.govBuyRange.value = ui.govBuy.value; };
+ui.govEnabled.onchange = () => { govDirty = true; };
+ui.govBasel.oninput = () => { govDirty = true; };
 ui.govRevert.onclick = () => { ui.govStatus.hidden = true; fillGovernment(true); };
 ui.govForm.onsubmit = async (e) => {
   e.preventDefault();
   try {
     const next = await api("/api/government", {
+      enabled: ui.govEnabled.checked,
       min_rate: Number(ui.govRate.value) / 100,
       labor_purchase: Number(ui.govBuy.value),
+      capital_ratio: Number(ui.govBasel.value) / 100,
     });
     govDirty = false;
     render(next);
@@ -791,7 +798,6 @@ function fillBanking(force = false) {
   ui.bankDeposit.value = +(b.deposit_rate * 100).toFixed(4);
   ui.bankSpread.value = +(b.loan_spread * 100).toFixed(4);
   ui.bankReserve.value = +(b.reserve_ratio * 100).toFixed(2);
-  ui.bankCapital.value = +(b.capital_ratio * 100).toFixed(2);
   ui.bankMinCapital.value = b.min_capital;
   ui.bankIncomeShare.value = +(b.loan_income_share * 100).toFixed(2);
 }
@@ -808,6 +814,8 @@ function renderBanking() {
     ["Money supply", usd(b.money_supply), "cash (people + companies) + deposits"],
     ["Money multiplier", `×${b.multiplier.toFixed(2)}`, "money supply ÷ (cash + reserves)"],
     ["Credit limit", `${(b.loan_income_share * 100).toFixed(0)}% of a month`, `of each borrower's income (${b.month_steps} days)`],
+    ["Basel (central bank)", b.capital_ratio ? `${(b.capital_ratio * 100).toFixed(1)}% of loans` : "none",
+      b.capital_ratio ? "equity a bank must hold; set in the Government tab" : "government off: no capital rule"],
     ["Kept by companies", usd(state.market.company_cash), `${usd(state.market.retained_total)} of profits retained so far`],
   ] : [["Banking", "not in this game", "the banking industry was left out (setup screen)"]];
   ui.bankStats.innerHTML = "";
@@ -848,7 +856,6 @@ ui.bankForm.onsubmit = async (e) => {
       deposit_rate: Number(ui.bankDeposit.value) / 100,
       loan_spread: Number(ui.bankSpread.value) / 100,
       reserve_ratio: Number(ui.bankReserve.value) / 100,
-      capital_ratio: Number(ui.bankCapital.value) / 100,
       min_capital: Number(ui.bankMinCapital.value),
       loan_income_share: Number(ui.bankIncomeShare.value) / 100,
     });

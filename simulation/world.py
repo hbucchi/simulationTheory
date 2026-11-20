@@ -49,7 +49,8 @@ class World:
         self.events = []  # newest last; trimmed to keep the payload small
         self.cooldowns = {}  # frozenset({id_a, id_b}) -> tick until which they ignore each other
         self.labor = LaborMarket()
-        self.government = Government(self.rules.gov_min_rate, self.rules.gov_labor_purchase)
+        self.government = Government(self.rules.gov_min_rate, self.rules.gov_labor_purchase,
+                                     self.rules.capital_ratio, self.rules.government_enabled)
         self.banking = Banking(self.rules)
         self.retained_total = 0.0   # company profits kept in companies so far
         self._by_id = {}
@@ -299,11 +300,14 @@ class World:
 
     def nearest_seller(self, agent, stockpile=False):
         """Closest agent with spare of what ``agent`` needs: (seller, resource) or (None, None).
+        Nobody, when commerce is off.
 
         Needs are tried most urgent first, so a thirsty and slightly hungry agent
         looks for water before food. With ``stockpile`` it looks instead for
         resources it is short of in its reserve. Agents it has just met are skipped.
         """
+        if not self.rules.commerce_enabled:
+            return None, None
         if stockpile:
             wanted = [r for r in self.rules.active_goods
                       if economy.stockpile_shortfall(agent, r, self.rules, self.scarcity) > 0
@@ -411,8 +415,8 @@ class World:
         - it doesn't pay: value added per unit of labour is below the wage (self.profitable);
         - unsold output is piling up: the owner holds rules.max_output_stock units, or more than
           rules.output_buffer_steps steps of this industry's output beyond its own input buffer."""
-        if not self.profitable.get(good, True):
-            return 0.0
+        if not self.rules.industries_enabled or not self.profitable.get(good, True):
+            return 0.0   # (no industries module: nothing is made)
         rules = self.rules
         shares = agent.assets.get(good, 0)
         held = agent.inventory.count(good)
@@ -507,10 +511,13 @@ class World:
 
     def nearest_buyer(self, agent, resource):
         """Closest agent (not just met) that wants ``resource`` and has money, or None.
+        Nobody, when commerce is off.
 
         Candidates come from this step's buyer list (update_demand) and are re-checked,
         so the search doesn't scan every agent for every seller.
         """
+        if not self.rules.commerce_enabled:
+            return None
         candidates = [o for o in self.buyer_agents[resource] if o is not agent and o in self.alive
                       and economy.money_of(o) > 0 and not self.in_cooldown(agent, o)]
         # Closest first; the (costlier) re-check stops at the first that still wants it.
@@ -744,6 +751,8 @@ class World:
         """
         rules = self.rules
         scarcity = self.scarcity
+        if not rules.commerce_enabled:
+            return  # no commerce: agents don't trade
         if not (economy.wants_anything(a, rules, scarcity) or economy.wants_anything(b, rules, scarcity)):
             return  # a casual bump: nobody needs anything
         prices = self.current_prices()

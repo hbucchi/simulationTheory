@@ -134,9 +134,11 @@
       </section>
 
       <section id="tab-government" role="tabpanel" hidden>
-        <p class="hint">The central government sets a minimum interest rate for every asset and can inject money by
-          buying labour each step. Changes apply from the next step.</p>
+        <p class="hint">The central government and its central bank set a minimum interest rate for every asset,
+          the capital rule commercial banks must meet (Basel), and can inject money by buying labour each step.
+          Changes apply from the next step.</p>
         <form id="gov-form" class="panel" novalidate>
+          <label class="bank-toggle"><input id="gov-enabled" type="checkbox"> Government and central bank on</label>
           <div class="field">
             <div class="field-head">
               <label for="gov-rate">Minimum interest rate</label>
@@ -161,6 +163,16 @@
             <p class="field-help">Bought at the market price from agents with labour to spare, paid with newly created
               money. The labour is used up in public works.</p>
           </div>
+          <div class="field">
+            <div class="field-head">
+              <label for="gov-basel">Capital ratio for banks (Basel)</label>
+            </div>
+            <div class="field-row">
+              <input id="gov-basel" type="number" min="0" max="100" step="0.5"> <span class="unit">% of loans</span>
+            </div>
+            <p class="field-help">Central bank rule: a bank's equity (its owners' money) must be at least this share of its
+              loans, which are lent from third parties' deposits. At 12%, $1 of equity backs at most $8.33 of loans.</p>
+          </div>
           <div class="form-actions">
             <button type="button" id="gov-revert" class="ghost">Revert</button>
             <span class="spacer"></span>
@@ -182,7 +194,6 @@
             <label>Deposit rate <span><input id="bank-deposit" type="number" min="0" max="100" step="0.01"> % / step</span></label>
             <label>Loan spread <span><input id="bank-spread" type="number" min="0" max="100" step="0.01"> % / step</span></label>
             <label>Reserve ratio <span><input id="bank-reserve" type="number" min="0" max="100" step="1"> % of deposits</span></label>
-            <label>Capital ratio (Basel) <span><input id="bank-capital" type="number" min="0" max="100" step="1"> % of loans</span></label>
             <label>Minimum capital <span>$ <input id="bank-min-capital" type="number" min="0" step="500"></span></label>
             <label>Lend each agent up to <span><input id="bank-income-share" type="number" min="0" max="10000" step="5"> % of a month's income</span></label>
           </div>

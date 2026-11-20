@@ -136,6 +136,9 @@ class Rules:
     # of stockpile_steps steps of their own net use (more the faster it falls, up to 3x),
     # buy it with money only, spending at most stockpile_budget of their money per trade,
     # and don't sell into their reserve.
+    # Modules (see MODULES below): switch whole parts of the economy on or off.
+    commerce_enabled: bool = True      # agents trade goods with each other
+    industries_enabled: bool = True    # assets make goods with labour (and the labour market)
     stockpiling_enabled: bool = True
     scarcity_window: int = 100
     scarcity_trigger: float = 0.1
@@ -233,8 +236,12 @@ class Rules:
 
     # Central government (see government.py): a minimum interest rate that no asset's return
     # may fall below, and units of labour bought every step with newly created money.
+    # The central bank's Basel rule: a bank's equity >= capital_ratio x its loans (risk-weighted
+    # assets). Off with the government.
+    government_enabled: bool = True
     gov_min_rate: float = 0.0
     gov_labor_purchase: float = 0.0
+    capital_ratio: float = 0.12
 
     # Banking (see banking.py). Banks are an industry ("banking"): its plant is built from capital
     # goods, runs on labour and electricity and makes the banking services that loans use up
@@ -245,7 +252,6 @@ class Rules:
     starting_banks: int = 3            # agents that start with a banking plant (and open a bank)
     starting_bank_shares: float = 1.0  # banking shares each of them starts with
     bank_min_capital: float = 5000.0   # founder's own money a bank needs to open (and to lend)
-    capital_ratio: float = 0.08        # equity >= this x loans (Basel capital adequacy)
     reserve_ratio: float = 0.1         # reserves >= this x deposits
     deposit_rate: float = 0.001
     loan_spread: float = 0.003         # loan rate = deposit rate + this
@@ -481,7 +487,57 @@ class Rules:
             raise ValueError("target_level must be below seek_threshold")
         if rules.purchase_min > rules.purchase_max:
             raise ValueError("purchase_min can't be larger than purchase_max")
+        rules.module_notes = apply_module_dependencies(rules)
         return rules
+
+
+# Modules: the parts of the economy a game can switch on or off. Each is a boolean rule;
+# a module only works when the modules it needs are on too (switching one off switches off
+# what depends on it, and the setup screen says so).
+#   key: (rule, label, needs, what it does)
+MODULES = {
+    "commerce": ("commerce_enabled", "Commerce", (),
+                 "Agents trade goods with each other (money or barter). Off: they live on what they own and make."),
+    "industries": ("industries_enabled", "Industries & labour", (),
+                   "Asset shares make goods with labour, bought in the labour market. Off: no production, no jobs."),
+    "selling": ("selling_enabled", "Selling surplus", ("commerce",),
+                "Agents keep a stock band and go out to sell what is above it."),
+    "pricing": ("demand_pricing_enabled", "Supply & demand pricing", ("commerce",),
+                "Prices move with buyers vs sellers and how concentrated supply is."),
+    "stockpiling": ("stockpiling_enabled", "Stockpiling", ("commerce",),
+                    "Agents hoard goods that are becoming scarce."),
+    "investing": ("investing_enabled", "Investing", ("industries",),
+                  "Agents buy and sell asset shares with spare money."),
+    "building": ("building_enabled", "Building new capacity", ("industries", "investing"),
+                 "Investors and companies build new asset shares from capital goods."),
+    "banking": ("banking_enabled", "Commercial banks", ("industries", "commerce"),
+                "Banks take deposits and lend (banking is an industry)."),
+    "consumer_credit": ("consumer_credit", "Consumer credit", ("banking",),
+                        "Agents may borrow for what they need now."),
+    "government": ("government_enabled", "Government & central bank", (),
+                   "Policy rate, Basel capital rule for banks, buying labour with new money."),
+    "expiry": ("expiry_enabled", "Expiry", (), "Goods go off after their shelf life."),
+    "death": ("death_enabled", "Death", (), "Hunger or thirst at 1.00 kills."),
+    "depression": ("depression_enabled", "Depression", (), "Boredom at 1.00 depresses (slower, less efficient)."),
+}
+
+
+def apply_module_dependencies(rules):
+    """Switch off modules whose required modules are off. Returns notes saying what was switched
+    off and why (for the setup screen)."""
+    notes = []
+    changed = True
+    while changed:
+        changed = False
+        for key, (rule, label, needs, _) in MODULES.items():
+            if not getattr(rules, rule):
+                continue
+            missing = [MODULES[n][1] for n in needs if not getattr(rules, MODULES[n][0])]
+            if missing:
+                setattr(rules, rule, False)
+                notes.append(f"{label} is off because it needs {' and '.join(missing)}.")
+                changed = True
+    return notes
 
 
 # Per-agent values ("spreads"): key -> (sub-keys or None, low, high, whole number, tiered allowed).
@@ -546,6 +602,9 @@ LIMITS = {
     "starting_bank_shares": (0.05, 1000, "float"),
     "bank_min_capital": (0, 1e12, "float"),
     "capital_ratio": (0, 1, "float"),
+    "government_enabled": (None, None, "bool"),
+    "commerce_enabled": (None, None, "bool"),
+    "industries_enabled": (None, None, "bool"),
     "reserve_ratio": (0, 1, "float"),
     "deposit_rate": (0, 1, "float"),
     "loan_spread": (0, 1, "float"),

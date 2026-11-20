@@ -60,6 +60,10 @@ const SETUP_SECTIONS = [
   ], hint: "Pick a smaller economy for a simpler (and faster) game: fewer layers, or leave out single industries. " +
       "Every industry the game keeps still needs all the inputs of its recipe, so leaving one out also leaves out what " +
       "is made from it. Each good is checked against every agent each step, so fewer industries also run faster." },
+  { title: "Modules: what this economy has", wide: true, hint: "Switch whole parts of the economy on or off. A module " +
+      "only works with the modules it needs (greyed out otherwise). Quick starts below set a whole combination.",
+    fields: [{ path: "#game-types", kind: "game-types" },
+             ...window.CATALOG.modules.map(m => ({ path: m.rule, label: m.label, kind: "bool", module: m, full: true }))] },
   { title: "Prices", hint: "Scarcity: total money ÷ total units × (1 − share of that resource). Fixed: the prices below.", fields: [
     { path: "price_mode", label: "Price rule", kind: "choice", full: true,
       options: [["scarcity", "Scarcity (changes with supply)"], ["fixed", "Fixed prices"]] },
@@ -107,14 +111,12 @@ const SETUP_SECTIONS = [
   ]},
   { title: "Stock band", hint: "Agents keep between the floor and the cap of each resource: above the cap they go " +
       "out to sell the surplus (to make money for assets); below the floor they go out to buy back up to the cap.", fields: [
-    { path: "selling_enabled", label: "Agents sell surplus and restock", kind: "bool", full: true },
     { path: "stock_steps", label: "Cap (steps of each need)", kind: "int", min: 1, enabledWhen: v => v.selling_enabled },
     { path: "restock_below", label: "Floor (0.5 = half the cap)", kind: "float", min: 0, max: 1, step: 0.05,
       enabledWhen: v => v.selling_enabled },
   ]},
   { title: "Market dynamics: stockpiling", hint: "When a resource's average per agent falls by the trigger " +
       "within the window, agents hoard it: they buy a reserve (paid in money, within a budget) and stop selling into it.", fields: [
-    { path: "stockpiling_enabled", label: "Agents stockpile scarce resources", kind: "bool", full: true },
     { path: "scarcity_window", label: "Watch the last (steps)", kind: "int", min: 10, max: 500,
       enabledWhen: v => v.stockpiling_enabled },
     { path: "scarcity_trigger", label: "Scarce after a fall of (0.1 = 10%)", kind: "float", min: 0.01, max: 0.9, step: 0.01,
@@ -127,7 +129,6 @@ const SETUP_SECTIONS = [
   { title: "Market dynamics: demand and concentration", hint: "Price = money ÷ units × (1 − share) × demand pressure × " +
       "concentration. Pressure = ((buyers+1) ÷ (sellers+1)) ^ elasticity. Concentration = 1 + weight × C, where C is 0 when the " +
       "sellable supply is spread evenly and 1 when one agent holds it all. Under pressure, each extra unit in a deal costs more.", fields: [
-    { path: "demand_pricing_enabled", label: "Prices react to demand and concentration", kind: "bool", full: true },
     { path: "price_elasticity.labor", label: "Labour elasticity (0 = none)", kind: "float", min: 0, max: 3, step: 0.1,
       enabledWhen: v => v.demand_pricing_enabled },
     { path: "concentration_weight.labor", label: "Labour concentration weight", kind: "float", min: 0, max: 10, step: 0.1,
@@ -147,13 +148,11 @@ const SETUP_SECTIONS = [
       "A unit relieves its need by base relief × fit × (1 + layer bonus × (layer − 1)), so deeper layers address needs " +
       "better. Every unit is thrown away once it is older than its shelf life. New industry capacity is built from capital " +
       "goods (machinery, construction), which are made very slowly, so building takes time.", fields: [
-    { path: "building_enabled", label: "Investors build new assets from capital goods", kind: "bool", full: true },
     { path: "build_min_q", label: "Build when an asset is worth ≥ (× its cost)", kind: "float", min: 0, step: 0.1,
       enabledWhen: v => v.building_enabled },
     { path: "project_steps", label: "Drop unfinished projects after (steps)", kind: "int", min: 1,
       enabledWhen: v => v.building_enabled },
     { path: "layer_bonus", label: "Extra relief per layer (0.5 = +50%)", kind: "float", min: 0, max: 10, step: 0.1 },
-    { path: "expiry_enabled", label: "Goods expire after their shelf life", kind: "bool" },
     { path: "input_buffer_steps", label: "Owners keep inputs for (steps)", kind: "int", min: 1, max: 10000 },
     { path: "input_reorder", label: "… and reorder below (share)", kind: "float", min: 0, max: 1, step: 0.05 },
     { path: "output_buffer_steps", label: "Stop producing above (steps of output held)", kind: "int", min: 0 },
@@ -197,7 +196,6 @@ const SETUP_SECTIONS = [
       "per asset). The only assets are the starting ones; they " +
       "change hands between agents. Asset price = output per step × good price ÷ return. Agents invest spare cash in assets " +
       "of what they lack, buying from owners short of cash or holding more than the stock cap of that good.", fields: [
-    { path: "investing_enabled", label: "Agents buy and sell assets", kind: "bool", full: true },
     { path: "productivity_growth_steps", label: "Productivity grows every (steps)", kind: "int", min: 1, max: 100000 },
     { path: "liquidity_units", label: "Keep cash for (units of each)", kind: "float", min: 0, step: 1,
       enabledWhen: v => v.investing_enabled },
@@ -215,14 +213,11 @@ const SETUP_SECTIONS = [
       "in cash and equity of at least the capital ratio of its loans (Basel). Each step the owner takes its payout share " +
       "(personality) of the bank's profit as dividends and the rest stays as equity, so the bank can lend more. " +
       "Rates are per step.", fields: [
-    { path: "banking_enabled", label: "Banking on (can be switched during the game)", kind: "bool", full: true },
     { path: "starting_banks", label: "Banks at the start", kind: "int", min: 0, max: 1000,
       enabledWhen: v => v.banking_enabled },
     { path: "starting_bank_shares", label: "… each with a plant of (shares)", kind: "float", min: 0.05, step: 0.1,
       enabledWhen: v => v.banking_enabled },
     { path: "bank_min_capital", label: "Minimum capital to open a bank ($)", kind: "float", min: 0, step: 500,
-      enabledWhen: v => v.banking_enabled },
-    { path: "capital_ratio", label: "Capital ratio: equity ≥ (× loans)", kind: "float", min: 0, max: 1, step: 0.01,
       enabledWhen: v => v.banking_enabled },
     { path: "reserve_ratio", label: "Reserve ratio: cash ≥ (× deposits)", kind: "float", min: 0, max: 1, step: 0.01,
       enabledWhen: v => v.banking_enabled },
@@ -238,8 +233,6 @@ const SETUP_SECTIONS = [
     { path: "default_steps", label: "Default after unpaid (steps)", kind: "int", min: 1, enabledWhen: v => v.banking_enabled },
     { path: "deposit_share", label: "Share of spare cash deposited", kind: "float", min: 0, max: 1, step: 0.05,
       enabledWhen: v => v.banking_enabled },
-    { path: "consumer_credit", label: "Agents may borrow to pay for what they need now", kind: "bool", full: true,
-      enabledWhen: v => v.banking_enabled },
     { path: "month_steps", label: "Days (steps) in a month", kind: "int", min: 1, enabledWhen: v => v.banking_enabled },
     { path: "loan_income_share", label: "Lend each agent up to (× its monthly income)", kind: "float", min: 0, max: 100,
       step: 0.05, enabledWhen: v => v.banking_enabled },
@@ -253,8 +246,12 @@ const SETUP_SECTIONS = [
   { title: "Central government", hint: "A minimum interest rate that no asset's return can fall below (higher rates " +
       "make assets cheaper), and labour bought every step with newly created money. Both can be changed during the game " +
       "in the Government tab.", fields: [
-    { path: "gov_min_rate", label: "Minimum rate (0.01 = 1%)", kind: "float", min: 0, max: 10, step: 0.005 },
-    { path: "gov_labor_purchase", label: "Labour bought per step", kind: "float", min: 0, step: 0.5 },
+    { path: "gov_min_rate", label: "Minimum rate (0.01 = 1%)", kind: "float", min: 0, max: 10, step: 0.005,
+      enabledWhen: v => v.government_enabled },
+    { path: "capital_ratio", label: "Central bank: bank equity ≥ (× loans, Basel)", kind: "float", min: 0, max: 1,
+      step: 0.01, enabledWhen: v => v.government_enabled },
+    { path: "gov_labor_purchase", label: "Labour bought per step", kind: "float", min: 0, step: 0.5,
+      enabledWhen: v => v.government_enabled },
   ]},
   { title: "Need thresholds", hint: "When agents act on a need, and what consuming does.", fields: [
     { path: "seek_threshold", label: "Act above", kind: "float", min: 0, max: 1, step: 0.05 },
@@ -262,8 +259,6 @@ const SETUP_SECTIONS = [
     { path: "relief_per_unit", label: "1 unit relieves", kind: "float", min: 0.001, max: 1, step: 0.01, full: true },
   ]},
   { title: "Life and death", hint: "What happens when a need reaches 1.00.", fields: [
-    { path: "death_enabled", label: "Hunger or thirst at 1.00 kills", kind: "bool", full: true },
-    { path: "depression_enabled", label: "Boredom at 1.00 depresses", kind: "bool", full: true },
     { path: "depression_factor", label: "Depressed speed & sleep recovery ×", kind: "float", min: 0, max: 1, step: 0.05,
       full: true, enabledWhen: v => v.depression_enabled },
   ]},
@@ -429,6 +424,7 @@ function buildSetupForm() {
       f.section = section;
       if (f.kind === "spread") { gridFor(f).append(buildSpreadRow(f)); continue; }
       if (f.kind === "industries") { gridFor(f).append(buildIndustryPicker(f)); continue; }
+      if (f.kind === "game-types") { gridFor(f).append(buildGameTypes()); continue; }
       const label = document.createElement("label");
       if (f.full) label.classList.add("full");
       let el;
@@ -447,6 +443,17 @@ function buildSetupForm() {
         el = numberInput(f.path, { min: f.min, max: f.max, step: f.kind === "int" ? 1 : f.step, placeholder: f.placeholder });
       }
       el.name = f.path;
+      if (f.module) {
+        // A module: its name, what it does, and (filled in by updateSetup) what it needs.
+        label.classList.add("module-item");
+        const text = Object.assign(document.createElement("span"), { className: "module-text" });
+        text.append(Object.assign(document.createElement("b"), { textContent: f.label }),
+                    Object.assign(document.createElement("small"), { textContent: f.module.about }),
+                    Object.assign(document.createElement("small"), { className: "module-needs" }));
+        label.append(el, text);
+        gridFor(f).append(label);
+        continue;
+      }
       label.append(f.label, el);
       gridFor(f).append(label);
     }
@@ -454,6 +461,48 @@ function buildSetupForm() {
     setupUi.sections.append(box);
   }
   for (const [id, name] of PRESETS) setupUi.preset.add(new Option(name, id));
+}
+
+// ---------- modules: quick starts ----------
+// Combinations of modules for different kinds of economy.
+const GAME_TYPES = [
+  ["Barter village", "Agents only trade what they start with: no industries, banks or government.",
+   { commerce: true, industries: false, government: false }],
+  ["Market of producers", "Industries and trade, no investing, banks or government.",
+   { commerce: true, industries: true, investing: false, building: false, banking: false, government: false }],
+  ["Capitalism without banks", "Industries, trade, investing and building; no banks.",
+   { commerce: true, industries: true, investing: true, building: true, banking: false, government: false }],
+  ["Full economy", "Everything on: banks, credit, government and central bank.",
+   Object.fromEntries(window.CATALOG.modules.map(m => [m.key, true]))],
+];
+
+function buildGameTypes() {
+  const box = Object.assign(document.createElement("div"), { className: "game-sizes full" });
+  for (const [name, about, on] of GAME_TYPES) {
+    const b = Object.assign(document.createElement("button"), { type: "button", className: "chip", textContent: name, title: about });
+    b.onclick = () => {
+      for (const m of window.CATALOG.modules) if (m.key in on) setupInput(m.rule).checked = on[m.key];
+      updateSetup();
+    };
+    box.append(b);
+  }
+  return box;
+}
+
+// Grey out modules whose required modules are off, and say what they need.
+function updateModules() {
+  const on = Object.fromEntries(window.CATALOG.modules.map(m => [m.key, setupInput(m.rule).checked]));
+  // Effective: a module works only when everything it needs works (needs come first in the list).
+  const works = {};
+  for (const m of window.CATALOG.modules) works[m.key] = on[m.key] && m.needs.every(n => works[n]);
+  for (const m of window.CATALOG.modules) {
+    const label = setupInput(m.rule).closest("label");
+    const missing = m.needs.filter(n => !works[n]).map(n => window.CATALOG.modules.find(x => x.key === n).label);
+    label.classList.toggle("disabled", missing.length > 0);
+    label.querySelector(".module-needs").textContent = m.needs.length
+      ? (missing.length ? `Needs ${missing.join(" and ")}: off in this game` : `Needs ${m.needs.map(n =>
+          window.CATALOG.modules.find(x => x.key === n).label).join(", ")}`) : "";
+  }
 }
 
 // ---------- industry picker ----------
@@ -727,6 +776,7 @@ function fillSetup(rules, seed = "") {
   for (const f of SETUP_FIELDS) {
     if (f.kind === "spread") { fillSpread(f, getPath(rules, f.path)); continue; }
     if (f.kind === "industries") { fillIndustryPicker(rules.excluded_industries); continue; }
+    if (f.kind === "game-types") continue;
     if (f.path === "#autosize") { setupInput(f.path).checked = true; continue; }
     const el = setupInput(f.path);
     const value = f.path === "seed" ? seed : getPath(rules, f.path);
@@ -744,7 +794,7 @@ function readSetup() {
   const autosize = setupInput("#autosize").checked;
   for (const f of SETUP_FIELDS) {
     let value;
-    if (f.local) continue;
+    if (f.local || f.kind === "game-types") continue;
     // Auto-sized: the server sizes the starting industries for this game's layers and industries.
     if (autosize && f.path.startsWith("assets.")) continue;
     if (f.kind === "industries") value = readIndustryPicker();
@@ -804,7 +854,7 @@ function updateSetup() {
   const autosize = setupInput("#autosize").checked;
   for (const f of SETUP_FIELDS) {
     const factory = f.path === "seed" || f.local ? undefined : getPath(rulesInfo.factory, f.path);
-    if (f.kind === "industries") continue;
+    if (f.kind === "industries" || f.kind === "game-types") continue;
     if (f.kind === "spread") {
       if (f.path.startsWith("assets.")) {
         // While auto-sized these rows show what the server will use (read-only).
@@ -837,6 +887,7 @@ function updateSetup() {
     const now = f.kind === "bool" ? el.checked : f.kind === "choice" ? el.value : Number(el.value);
     el.classList.toggle("changed", factory !== undefined && el.value !== "" && now !== factory);
   }
+  updateModules();   // after the loop above, which resets every label's disabled look
   if (!values) return renderPreview(null, error);
   resolvePreview(values);
 }
@@ -854,7 +905,8 @@ function resolvePreview(values) {
       if (setupInput("#autosize").checked) {
         for (const f of SETUP_FIELDS) if (f.path.startsWith("assets.")) fillSpread(f, getPath(resolved.rules, f.path));
       }
-      renderPreview({ ...values, assets: resolved.rules.assets, inventory: resolved.rules.inventory }, null);
+      renderPreview({ ...values, ...Object.fromEntries(window.CATALOG.modules.map(m => [m.rule, resolved.rules[m.rule]])),
+                      assets: resolved.rules.assets, inventory: resolved.rules.inventory }, null, resolved.module_notes);
     } catch (err) {
       if (seq === resolveSeq) renderPreview(null, err.message);
     }
@@ -867,7 +919,7 @@ function setStatusSetup(message) {
 }
 
 // Plain-language consequences of the rules for an average agent.
-function renderPreview(r, error) {
+function renderPreview(r, error, moduleNotes = []) {
   setupUi.preview.innerHTML = "";
   const line = (text, cls = "") => {
     const el = document.createElement("span");
@@ -876,6 +928,11 @@ function renderPreview(r, error) {
     setupUi.preview.append(el);
   };
   if (!r) return line(error || "Fill in every field to see the preview.", "short");
+  const on = window.CATALOG.modules.filter(m => r[m.rule]).map(m => m.label);
+  line(`Modules on: ${on.join(", ") || "none"}.`);
+  for (const note of moduleNotes) line(note, "short");
+  if (!r.industries_enabled) line("No industries: nothing is made, so agents live off their starting stock until it runs out.", "short");
+  if (!r.commerce_enabled) line("No commerce: agents can't trade, so each lives on what it owns and makes.", "short");
   const avg = (spec) => spreadMean(spec);
   const varies = (spec) => typeof spec !== "number";
 
@@ -993,7 +1050,7 @@ function renderPreview(r, error) {
       ? `Banking: ${r.starting_banks} bank${r.starting_banks === 1 ? "" : "s"} at the start, each needing ${usd(r.bank_min_capital)} ` +
         `of its founder's money; deposits ${(r.deposit_rate * 100).toFixed(2)}%, loans ` +
         `${((r.deposit_rate + r.loan_spread) * 100).toFixed(2)}% per step. Each bank can lend up to ` +
-        `${usd(r.capital_ratio > 0 ? r.bank_min_capital / r.capital_ratio : Infinity)} on its minimum capital, and deposits can ` +
+        `${r.government_enabled && r.capital_ratio > 0 ? usd(r.bank_min_capital / r.capital_ratio) : "any amount (no central bank rule)"} on its minimum capital, and deposits can ` +
         `grow to about ${multiplier}× the cash put in (money multiplier).`
       : "Banking is on, but the banking industry isn't in this game (it needs electricity, layer 3).", game.active.has("banking") ? "" : "short");
   }
