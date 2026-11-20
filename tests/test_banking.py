@@ -92,6 +92,7 @@ class DepositAndLoanTests(unittest.TestCase):
         owner.inventory.set("banking", 20)          # services: 20 x 100
         self.assertAlmostEqual(w.banking.lendable(w, bank), 2000)
         borrower = w.create_agent(needs=CALM, money=0)
+        borrower.income_avg = 1e6        # (income limit not binding here)
         self.assertEqual(w.banking.borrow(w, borrower, 500, "test"), 0)   # no collateral
         lent = w.banking.borrow(w, borrower, 5000, "test", extra_collateral=1500)
         self.assertAlmostEqual(lent, 1500)          # loan-to-value 1.0 x 1500
@@ -103,6 +104,7 @@ class DepositAndLoanTests(unittest.TestCase):
         w = bank_world(bank_min_capital=1000, loan_steps=10, deposit_rate=0.01, loan_spread=0.01)
         owner, bank = open_bank(w, money=1000)
         borrower = w.create_agent(needs=CALM, money=0)
+        borrower.income_avg = 1e6
         w.banking.borrow(w, borrower, 500, "test", extra_collateral=10000)
         borrower.money += 1000
         for _ in range(10):
@@ -118,6 +120,7 @@ class DepositAndLoanTests(unittest.TestCase):
         w = bank_world(bank_min_capital=1000, default_steps=3, max_loan_to_value=1.0)
         owner, bank = open_bank(w, money=1000 + 5000)
         borrower = w.create_agent(needs=CALM, money=0, assets={"water": 2})
+        borrower.income_avg = 1e6
         w._step_cache = None
         lent = w.banking.borrow(w, borrower, 900, "test", extra_collateral=1000)
         self.assertGreater(lent, 0)
@@ -135,7 +138,7 @@ class DepositAndLoanTests(unittest.TestCase):
         for _ in range(200):
             w.step()
         if len(w.agents) == 20:
-            base = sum(a.money for a in w.agents) + sum(b.reserves for b in w.banking.banks)
+            base = w.base_money()
             self.assertAlmostEqual(base, start, places=5)
             self.assertGreater(w.banking.to_dict(w)["deposits"], 0)
 
@@ -206,23 +209,26 @@ class BudgetAndConsumerCreditTests(unittest.TestCase):
         Invest().on_step(investor, w)
         self.assertEqual(investor.assets, {})
 
-    def test_consumer_loans_are_limited_by_income(self):
-        w = bank_world(bank_min_capital=1000, max_payment_to_income=0.5, loan_steps=100,
-                       deposit_rate=0.0, loan_spread=0.0)
+    def test_loans_are_limited_to_a_share_of_monthly_income(self):
+        w = bank_world(bank_min_capital=1000, loan_income_share=0.4, month_steps=30)
         open_bank(w, money=1000, services=100)
         w.banking.banks[0].reserves += 100000
         broke = w.create_agent(needs=CALM, money=0)
         self.assertEqual(w.banking.borrow(w, broke, 500, "consumption", unsecured=True), 0)   # no income
         worker = w.create_agent(needs=CALM, money=0)
-        worker.income_avg = 2.0          # payments <= 1/step; at 0% over 100 steps: up to 100
-        self.assertAlmostEqual(w.banking.borrow(w, worker, 500, "consumption", unsecured=True), 100)
+        worker.income_avg = 10.0         # $300 a month: it may owe at most 40% of it, $120
+        self.assertAlmostEqual(w.banking.borrow(w, worker, 500, "consumption", unsecured=True), 120)
         self.assertEqual(w.banking.borrow(w, worker, 500, "consumption", unsecured=True), 0)
+        # The share can be changed during the game.
+        w.banking.loan_income_share = 1.0
+        self.assertAlmostEqual(w.banking.borrow(w, worker, 500, "consumption", unsecured=True), 180)
 
     def test_needs_come_before_loan_payments(self):
         w = bank_world(bank_min_capital=1000)
         owner, bank = open_bank(w, money=1000)
         w.create_agent(needs=CALM, money=50000, inventory={"water": 20, "food": 20})   # gives goods a price
         borrower = w.create_agent(needs={**CALM, "thirst": 0.9}, money=0, inventory={g: 0 for g in GOODS})
+        borrower.income_avg = 1e6
         w.banking.borrow(w, borrower, 200, "test", extra_collateral=1000)
         from simulation import economy
         self.assertGreater(economy.shopping_cost(borrower, w.current_prices(), w.rules), 200)

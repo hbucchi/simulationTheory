@@ -96,6 +96,10 @@ class Agent:
         self.consumption_avg = 0.0
         self.project = None      # building project (Build): {"good", "shares", "need", "started"}
         self.deposits = {}       # bank id -> balance (kept in step by banking.py)
+        # Personality traits (more to come): payout_ratio = share of company profits paid out
+        # as dividends; the rest stays in the company (company_cash) to pay wages and reinvest.
+        self.personality = {"payout_ratio": 0.5}
+        self.company_cash = 0.0  # retained earnings of the companies it owns
         self.debt = 0.0          # what it owes the banks
         self.target_id = None
         self.seeking_for = None  # resource it is going to buy from target_id (Navigate)
@@ -149,6 +153,7 @@ class Agent:
                 "needs": {k: round(v, 2) for k, v in self.needs.items()},
                 "money": round(self.money, 2), "movement": self.movement, "speed": self.speed,
                 "deposits": round(sum(self.deposits.values()), 2), "debt": round(self.debt, 2),
+                "company_cash": round(self.company_cash, 2), "personality": dict(self.personality),
                 "assets": dict(self.assets), "depressed": self.depressed,
                 "inventory": self._held(), "color": self.color, "activity": self.activity,
                 "target_id": self.target_id, "project": self.project, "seeking_for": self.seeking_for,
@@ -166,6 +171,7 @@ class Agent:
             "needs": {k: round(v, 2) for k, v in self.needs.items()},
             "money": round(self.money, 2),
             "deposits": round(sum(self.deposits.values()), 2), "debt": round(self.debt, 2),
+            "company_cash": round(self.company_cash, 2), "personality": dict(self.personality),
             "movement": self.movement,
             "speed": self.speed,
             "assets": dict(self.assets),

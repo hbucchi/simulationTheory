@@ -52,7 +52,7 @@ class LabourPurchaseTests(unittest.TestCase):
         self.assertGreater(world.government.money_created, 0)
         if len(world.agents) == 10:
             # Base money: agents' cash plus the cash banks hold (deposits and loans only move it).
-            base = sum(a.money for a in world.agents) + sum(b.reserves for b in world.banking.banks)
+            base = world.base_money()
             self.assertAlmostEqual(base, start + world.government.money_created, places=6)
 
     def test_off_by_default(self):

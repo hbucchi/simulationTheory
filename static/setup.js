@@ -74,6 +74,7 @@ const SETUP_SECTIONS = [
     { path: "money", label: "Money", kind: "spread", tiered: true, min: 0, step: 0.01 },
     { path: "movement", label: "Movement (px)", kind: "spread", whole: true, min: 1, max: 200 },
     { path: "start_needs", label: "Starting needs", kind: "spread", min: 0, max: 1, step: 0.05 },
+    { path: "payout_ratio", label: "Personality: pays out (share of profits)", kind: "spread", min: 0, max: 1, step: 0.05 },
   ]},
   { title: "Labour capacity", wide: true, hint: "Labour is the only thing agents make themselves, and it is never stored: " +
       "each step agents can work up to their capacity (scaled by efficiency) and sell it in the labour market. Anything " +
@@ -209,8 +210,11 @@ const SETUP_SECTIONS = [
       "machinery and construction like any industry, run with labour and electricity) and its founder's own money: at least " +
       "the minimum capital goes in as the bank's equity. The plant makes banking services, and every loan uses them up " +
       "(one unit per “money lent per service unit”). Agents deposit spare cash; investors borrow to build when the asset " +
-      "earns more than the loan costs. A bank lends only while it keeps the reserve ratio of deposits in cash and equity " +
-      "of at least the capital ratio of its loans (Basel). Rates are per step.", fields: [
+      "earns more than the loan costs, and agents short of cash borrow for what they need now. Steps are days: nobody may " +
+      "owe more than the chosen share of a month's income. A bank lends only while it keeps the reserve ratio of deposits " +
+      "in cash and equity of at least the capital ratio of its loans (Basel). Each step the owner takes its payout share " +
+      "(personality) of the bank's profit as dividends and the rest stays as equity, so the bank can lend more. " +
+      "Rates are per step.", fields: [
     { path: "banking_enabled", label: "Banking on (can be switched during the game)", kind: "bool", full: true },
     { path: "starting_banks", label: "Banks at the start", kind: "int", min: 0, max: 1000,
       enabledWhen: v => v.banking_enabled },
@@ -236,8 +240,9 @@ const SETUP_SECTIONS = [
       enabledWhen: v => v.banking_enabled },
     { path: "consumer_credit", label: "Agents may borrow to pay for what they need now", kind: "bool", full: true,
       enabledWhen: v => v.banking_enabled },
-    { path: "max_payment_to_income", label: "Loan payments ≤ (× income)", kind: "float", min: 0, max: 10, step: 0.05,
-      enabledWhen: v => v.banking_enabled && v.consumer_credit },
+    { path: "month_steps", label: "Days (steps) in a month", kind: "int", min: 1, enabledWhen: v => v.banking_enabled },
+    { path: "loan_income_share", label: "Lend each agent up to (× its monthly income)", kind: "float", min: 0, max: 100,
+      step: 0.05, enabledWhen: v => v.banking_enabled },
   ]},
   { title: "Budget", hint: "Every agent knows its budget: what living costs it per step (the cheapest goods for each " +
       "need, housing included, net of what its own industries make) plus its loan payments. It keeps that many steps of " +

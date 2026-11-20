@@ -42,6 +42,8 @@ class World:
         self.contact_distance = self.rules.contact_distance
         self.seed = seed
         self.rng = random.Random(seed)
+        # Personality traits come from their own stream, so adding traits doesn't change the rest.
+        self.personality_rng = random.Random(f"personality-{seed}")
         self.agents = []
         self.tick = 0
         self.events = []  # newest last; trimmed to keep the payload small
@@ -49,6 +51,7 @@ class World:
         self.labor = LaborMarket()
         self.government = Government(self.rules.gov_min_rate, self.rules.gov_labor_purchase)
         self.banking = Banking(self.rules)
+        self.retained_total = 0.0   # company profits kept in companies so far
         self._by_id = {}
         self.recorder = Recorder()  # per-step snapshots for the Report view
         self._dead_flows = []       # flows of agents that died this step (still counted)
@@ -106,7 +109,7 @@ class World:
 
     def create_agent(self, *, inventory=None, money=None, labor_capacity=None,
                      rates=None, sleep_recovery=None, movement=None, needs=None, name=None,
-                     x=None, y=None, assets=None):
+                     x=None, y=None, assets=None, payout_ratio=None):
         """Create an agent with the standard modules. Anything omitted comes from the rules.
 
         ``inventory`` overrides per good; ``labor_capacity`` is the most labour it can give per step;
@@ -148,6 +151,8 @@ class World:
         agent.labor_capacity = draw(r.labor_capacity, field="labor_capacity") if labor_capacity is None else labor_capacity
         drawn = {k: draw(v, False, "assets") for k, v in r.assets.items()}
         agent.assets = {k: v for k, v in {**drawn, **(assets or {})}.items() if v and r.is_active(k)}
+        agent.personality["payout_ratio"] = round(distributions.sample(
+            r.payout_ratio, self.personality_rng, False, 0, 1), 3) if payout_ratio is None else payout_ratio
         return self.add_agent(agent)
 
     # A starting stock is spread over this many batches of different ages, so it doesn't all
@@ -176,8 +181,10 @@ class World:
 
     def update_agent(self, agent, *, name=None, x=None, y=None, needs=None, inventory=None,
                      money=None, movement=None, labor_capacity=None, rates=None, sleep_recovery=None,
-                     assets=None):
+                     assets=None, payout_ratio=None):
         """Change any of an existing agent's settings; omitted fields stay as they are."""
+        if payout_ratio is not None:
+            agent.personality["payout_ratio"] = payout_ratio
         for resource, count in (assets or {}).items():
             agent.assets[resource] = count
         if name:
@@ -607,6 +614,7 @@ class World:
                         self.interact(agent, other)
         finally:
             self._step_cache = None
+        self.retain_earnings()
         self.banking.step(self)
         self.recorder.end_step(self, self._dead_flows)
 
@@ -787,6 +795,55 @@ class World:
         scarce = [r for r, d in self.scarcity.items() if d >= self.rules.scarcity_trigger and self.rules.is_active(r)]
         return {r: n for r in scarce if (n := economy.stockpile_target(agent, r, self.rules, self.scarcity))}
 
+    def base_money(self):
+        """All the money there is: agents' cash, their companies' cash and the banks' cash.
+        Trades, wages, deposits, loans and dividends only move it; the government creates it."""
+        return (sum(a.money + a.company_cash for a in self.agents)
+                + sum(b.reserves for b in self.banking.banks))
+
+    def retain_earnings(self):
+        """Each owner's companies keep part of this step's profit (goods sold minus wages paid) as
+        company cash and pay the rest out to the owner as dividends: the owner's payout_ratio
+        (a personality trait) decides the split. Company cash pays wages and builds new capacity
+        in the owner's own industries (Build). Two limits, as for real companies:
+        - the owner always takes enough to cover its own budget (it has to live);
+        - a company keeps only what it can use (company_cash_cap: a month of wages plus one new
+          asset share); the rest is paid out.
+        An agent that no longer owns any company gets its company cash back."""
+        from .modules.invest import budget_needed
+        prices = self.current_prices()
+        for a in self.agents:
+            wages = a.flow.get("wages_paid", 0.0)
+            a.wage_avg = 0.95 * getattr(a, "wage_avg", 0.0) + 0.05 * wages
+            if not a.assets:
+                if a.company_cash:
+                    a.money += a.company_cash
+                    a.company_cash = 0.0
+                continue
+            profit = a.flow["sources"].get("goods", 0.0) - wages
+            if profit > 0:
+                keep = min(a.money, profit * (1 - a.personality["payout_ratio"]))
+                if keep > 0:
+                    a.money -= keep
+                    a.company_cash += keep
+                    self.retained_total += keep
+            if a.company_cash <= 0:
+                continue
+            # The owner's own budget comes first, then nothing idle above what the company can use.
+            short = budget_needed(a, prices, self) - economy.money_of(a)
+            excess = a.company_cash - self.company_cash_cap(a, prices)
+            payout = min(a.company_cash, max(short, excess, 0.0))
+            if payout > 0:
+                a.company_cash -= payout
+                a.money += payout
+                self.retained_total -= payout
+
+    def company_cash_cap(self, agent, prices):
+        """Most company cash an owner's companies keep: a month of its wage bill plus what one new
+        asset share of its most expensive industry costs to build."""
+        build = max((c for g in agent.assets if (c := self.build_cost_money(g, prices))), default=0.0)
+        return self.rules.month_steps * getattr(agent, "wage_avg", 0.0) + build
+
     def _agent_entry(self, agent, full, prices):
         entry = dict(agent.to_dict(self.rules, full=full), reserve=self.reserve_of(agent))
         if full:
@@ -860,6 +917,8 @@ class World:
                 "stockpiling": {r: self.rules.stockpiling_enabled and d >= self.rules.scarcity_trigger
                                 for r, d in self.scarcity.items()},
                 "money": sum(a.money for a in self.agents),
+                "company_cash": round(sum(a.company_cash for a in self.agents), 2),
+                "retained_total": round(self.retained_total, 2),
                 "units": {r: sum(a.inventory.count(r) for a in self.agents) for r in economy.RESOURCES},
             },
             "agents": [self._agent_entry(a, detail == "all" or a.id in detail, prices) for a in self.agents],

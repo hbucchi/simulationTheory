@@ -22,8 +22,9 @@ How a bank works (all per step, rates per step):
 - Loans. Investors starting a building project can borrow what their own money doesn't
   cover, when the asset's yield beats the loan rate (deposit rate + loan_spread), up to
   max_loan_to_value of their assets. Agents that can't pay for what they need right now
-  (consumer_credit) can borrow the gap, unsecured, as long as all their loan payments
-  stay within max_payment_to_income of their income. The bank lends only when:
+  (consumer_credit) can borrow the gap, unsecured. Steps are days: nobody may owe more
+  than loan_income_share (default 40%) of its monthly income (income per step x
+  month_steps), whatever the loan is for. The bank lends only when:
     1. reserves stay at least reserve_ratio x deposits (cash kept for withdrawals);
     2. equity stays at least capital_ratio x loans (Basel capital adequacy) and at
        least bank_min_capital;
@@ -35,8 +36,9 @@ How a bank works (all per step, rates per step):
   value, as far as it can) and the rest is written off.
 - Money creation. Lent money is spent and deposited again, so deposits can grow to
   about 1 / reserve_ratio times the cash put in (the money multiplier).
-- Profit. Interest received minus interest paid. Equity above the capital it must
-  keep is paid to the owner as a dividend.
+- Profit. Interest received minus interest paid. Each step the owner takes its
+  payout_ratio (a personality trait) of the step's profit as a dividend; the rest is
+  retained as equity, which raises how much the bank may lend (capital ratio).
 - Failure. A bank whose equity (reserves + loans - deposits) falls below 0 fails: it
   stops lending and taking deposits and pays depositors back, pro rata, from whatever
   comes in. A bank also winds down when banking is switched off or its owner dies.
@@ -94,6 +96,8 @@ class Bank:
         self.interest_paid = 0.0
         self.dividends = 0.0
         self.written_off = 0.0
+        self.retained = 0.0              # profits kept as equity (not paid out)
+        self.last_equity = capital       # equity after last step's dividend
 
     @property
     def deposit_total(self):
@@ -119,7 +123,8 @@ class Bank:
                 "shares": round(owner.assets.get("banking", 0), 3) if owner else 0,
                 "interest_received": round(self.interest_received, 2),
                 "interest_paid": round(self.interest_paid, 2), "dividends": round(self.dividends, 2),
-                "written_off": round(self.written_off, 2),
+                "written_off": round(self.written_off, 2), "retained": round(self.retained, 2),
+                "payout_ratio": owner.personality["payout_ratio"] if owner else None,
                 "loan_list": [l.to_dict() for l in self.loans[:20]]}
 
 
@@ -134,6 +139,7 @@ class Banking:
         self.reserve_ratio = rules.reserve_ratio
         self.capital_ratio = rules.capital_ratio
         self.min_capital = rules.bank_min_capital
+        self.loan_income_share = rules.loan_income_share
         self.banks = []
         self.closed = 0
         self.failed = 0
@@ -226,12 +232,11 @@ class Banking:
         held = sum(shares * prices.get(g, 0.0) for g, shares in agent.assets.items())
         return max(0.0, world.rules.max_loan_to_value * (held + extra_collateral) - self.debt_of(agent))
 
-    def affordable_loan(self, world, agent):
-        """Largest new loan whose payment keeps all the agent's loan payments within
-        max_payment_to_income of its income (per step)."""
-        room = world.rules.max_payment_to_income * agent.income_avg - self.payments_of(agent)
-        per_unit = self.loan_rate_now(world) + 1 / world.rules.loan_steps   # first payment per money lent
-        return max(0.0, room / per_unit)
+    def income_limit(self, world, agent):
+        """How much more the agent may borrow on its income: loan_income_share of a month's
+        income (income per step x month_steps) minus what it already owes."""
+        monthly = agent.income_avg * world.rules.month_steps
+        return max(0.0, self.loan_income_share * monthly - self.debt_of(agent))
 
     def lendable(self, world, bank):
         """Most a bank can lend now (reserve ratio, capital ratio, banking services)."""
@@ -252,8 +257,9 @@ class Banking:
         the agent's income can repay."""
         if not self.available(world) or amount <= 0:
             return 0.0
-        limit = (self.affordable_loan(world, agent) if unsecured
-                 else self.credit_limit(world, agent, extra_collateral))
+        limit = self.income_limit(world, agent)
+        if not unsecured:
+            limit = min(limit, self.credit_limit(world, agent, extra_collateral))
         amount = min(amount, limit)
         if amount < MIN_DEPOSIT:
             return 0.0
@@ -405,15 +411,24 @@ class Banking:
                 _sync(agent, self)
 
     def _pay_dividend(self, world, bank, owner):
-        """Equity above the capital it must keep goes to the owner, as far as cash allows."""
-        keep = max(self.min_capital, self.capital_ratio * bank.loan_total)
-        cash = bank.reserves - self.reserve_ratio * bank.deposit_total
-        dividend = min(bank.equity - keep, cash)
-        if dividend > 0.01:
-            bank.reserves -= dividend
-            owner.money += dividend
-            economy.earn(owner, dividend, "banking")
-            bank.dividends += dividend
+        """The owner's payout_ratio (a personality trait) of this step's profit is paid out as a
+        dividend; the rest is retained as equity, which lets the bank lend more (capital ratio).
+        Never below the capital it must keep, and only from cash it can spare."""
+        profit = bank.equity - bank.last_equity
+        dividend = 0.0
+        if profit > 0:
+            keep = max(self.min_capital, self.capital_ratio * bank.loan_total)
+            cash = bank.reserves - self.reserve_ratio * bank.deposit_total
+            dividend = min(owner.personality["payout_ratio"] * profit, bank.equity - keep, cash)
+            if dividend > 0.01:
+                bank.reserves -= dividend
+                owner.money += dividend
+                economy.earn(owner, dividend, "banking")
+                bank.dividends += dividend
+            else:
+                dividend = 0.0
+            bank.retained += profit - dividend
+        bank.last_equity = bank.equity
 
     def _wind_down(self, world, bank, owner):
         """Pay depositors back pro rata from the cash it has; close once nothing is left."""
@@ -482,7 +497,7 @@ class Banking:
 
     def to_dict(self, world):
         open_banks = self.open_banks()
-        cash = sum(a.money for a in world.agents)
+        cash = sum(a.money + a.company_cash for a in world.agents)   # people's and companies' cash
         deposits = sum(b.deposit_total for b in self.banks)
         reserves = sum(b.reserves for b in self.banks)
         return {
@@ -490,7 +505,8 @@ class Banking:
             "industry_active": world.rules.is_active("banking"),
             "deposit_rate": self.deposit_rate, "loan_spread": self.loan_spread,
             "reserve_ratio": self.reserve_ratio, "capital_ratio": self.capital_ratio,
-            "min_capital": self.min_capital,
+            "min_capital": self.min_capital, "loan_income_share": self.loan_income_share,
+            "month_steps": world.rules.month_steps,
             "deposit_rate_now": self.deposit_rate_now(world), "loan_rate_now": self.loan_rate_now(world),
             "banks": [b.to_dict(world) for b in self.banks], "open": len(open_banks),
             "closed": self.closed, "failed": self.failed,

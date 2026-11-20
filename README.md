@@ -434,8 +434,9 @@ How a bank works (rates per step):
 - **Loans.** The loan rate is the deposit rate + `loan_spread`. Investors borrow to build when
   the asset earns more than the loan costs, up to `max_loan_to_value` of their assets (the
   collateral). Agents short of cash for what they need now can borrow the gap
-  (**consumer credit**, unsecured) as long as all their loan payments stay within
-  `max_payment_to_income` of their income. Loans are repaid over `loan_steps` steps:
+  (**consumer credit**, unsecured). **Steps are days**: nobody may owe more than
+  `loan_income_share` (default 40%) of its monthly income, i.e. income per step ×
+  `month_steps` (30), whatever the loan is for. This can be changed during the game. Loans are repaid over `loan_steps` steps:
   each step interest on the balance + balance ÷ steps left.
 - **Limits on lending.** A bank keeps `reserve_ratio` of deposits as cash, and its equity
   must stay at least `capital_ratio` × its loans (Basel capital adequacy, default 8%) and at
@@ -448,16 +449,38 @@ How a bank works (rates per step):
   out of what's left. A loan unpaid for `default_steps` steps in a row defaults: the bank's
   owner takes asset shares worth the debt (paying the bank their value) and the rest is
   written off.
-- **Profit and failure.** Profit = interest received − interest paid. Equity above what the
-  bank must keep is paid to its owner as dividends. A bank whose equity falls below zero
+- **Profit and failure.** Profit = interest received − interest paid. Each step the owner
+  takes its *payout ratio* of the profit as a dividend and the bank keeps the rest as
+  equity, so a bank whose owner reinvests can lend more over time (8% capital ratio:
+  every $1 retained supports $12.50 more of loans). A bank whose equity falls below zero
   fails: it stops lending and pays depositors back pro rata from what comes in.
 
 **Turning banking on and off.** On the setup screen (*Banking*: on/off, number of starting
-banks and their plant size, minimum capital, ratios, rates) and at any time during a game in
-the **Government & banks** tab (on/off, rates, ratios, minimum capital). Switched off,
+banks and their plant size, minimum capital, ratios, rates, days in a month, credit limit) and
+at any time during a game in the **Commercial banks** tab (on/off, rates, ratios, minimum
+capital, lend up to % of a month's income), which also lists every bank. Switched off,
 banks stop lending, pay depositors back, collect their loans and close; switched on again,
 owners with a plant and the capital reopen them. To leave banks out of a game entirely,
 untick *Banking* in the industry picker.
+
+### Dividends or reinvestment (every company)
+
+Each step a company's profit (goods sold − wages paid) is split by its owner's **payout
+ratio**, a personality trait (setup: *Personality: pays out*, default uniform 20%–80% per
+agent; editable per agent in the Agents tab):
+
+- the payout share goes to the owner as **dividends** (its own money);
+- the rest stays in the company as **company cash** (retained earnings). Company cash pays
+  the wages first, and once it reaches `min_investment` it **reinvests**: it builds new asset
+  shares of an industry the owner already owns (the one worth most per unit of cost),
+  so the company's asset base grows.
+
+Two limits, as for real companies: the owner always takes enough to cover its own budget
+(it has to live), and a company keeps only what it can use (a month of wages + one new asset
+share); the rest is paid out. Banks work the same way with equity (above).
+
+In 30-agent test games, companies with the default personalities built 53–100 new asset
+shares in 1,500 steps, against 41–66 when every owner pays everything out.
 
 ### Budget
 

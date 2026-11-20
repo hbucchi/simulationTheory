@@ -73,10 +73,33 @@ class Build(Module):
         elif rules.investing_enabled:
             self.plan(agent, world)
 
+    def reinvest(self, agent, world, prices):
+        """Retained earnings (company cash) build new capacity in an industry the agent already
+        owns, the one worth most per unit of cost first. True if it started a project."""
+        rules = world.rules
+        if agent.company_cash < rules.min_investment:
+            return False
+        for good, q, cost in ranked_builds(world, prices, world.step_asset_prices()):
+            if good not in agent.assets or not self.available(good, world, agent):
+                continue
+            shares = min(MAX_PROJECT_SHARES, agent.company_cash / cost)
+            if shares < MIN_PROJECT_SHARES:
+                return False
+            economy.draw_company_cash(agent, shares * cost)
+            need = {k: math.ceil(round(units * shares, 9)) for k, units in rules.build_cost[good].items()}
+            agent.project = {"good": good, "shares": round(shares, 4), "need": need, "started": world.tick,
+                             "q": round(q, 2), "borrowed": 0.0, "reinvested": round(shares * cost, 2)}
+            world.log(f"{agent.name} reinvested {shares * cost:.2f} of retained earnings: building "
+                      f"{shares:.2f} more {good} asset(s), needs {economy.describe(need)}")
+            return True
+        return False
+
     def plan(self, agent, world):
         rules = world.rules
         banking = world.banking
         prices = world.current_prices()
+        if self.reinvest(agent, world, prices):
+            return
         deposits = sum(agent.deposits.values())
         # Deposits count as its money: it takes them out when it builds.
         # Only what is left after its budget (living costs and loan payments for budget_steps).

@@ -39,7 +39,7 @@ def market_prices(agents, rules=DEFAULT_RULES):
     if rules.price_mode == "fixed":
         return dict(rules.fixed_prices)
     # Money people can spend: cash plus bank deposits.
-    money = sum(a.money + sum(a.deposits.values()) for a in agents)
+    money = sum(a.money + sum(a.deposits.values()) + a.company_cash for a in agents)
     units = dict.fromkeys(RESOURCES, 0)
     for a in agents:   # whole units, as Inventory.count would give, without a call per good
         for r, n in a.inventory.items.items():
@@ -82,6 +82,15 @@ def earn(agent, amount, source):
 def money_of(agent):
     """Money the agent can use: cash plus bank deposits."""
     return agent.money + sum(agent.deposits.values()) if agent.deposits else agent.money
+
+
+def draw_company_cash(agent, amount):
+    """Move up to ``amount`` of the agent's company cash (retained earnings) into its cash, to pay
+    company costs (wages, building). Returns what was moved."""
+    moved = min(max(0.0, amount), agent.company_cash)
+    agent.company_cash -= moved
+    agent.money += moved
+    return moved
 
 
 def pay(payer, payee, amount):

@@ -16,7 +16,8 @@ API
     DELETE /api/agents/<id>           remove an agent
     POST   /api/government {"min_rate": r, "labor_purchase": n}
     POST   /api/banking    {"enabled": bool, "deposit_rate": r, "loan_spread": r, "reserve_ratio": r,
-                            "capital_ratio": r, "min_capital": m}  (any subset; changes live)
+                            "capital_ratio": r, "min_capital": m, "loan_income_share": s}
+                           (any subset; changes live)
                                       change government policy while the game runs
 
 Agent fields: name, x, y, movement, money,
@@ -108,7 +109,8 @@ class Simulation:
             self.world.log("Banking " + ("on" if bank.enabled else "off (banks wind down)") +
                            f": deposit rate {bank.deposit_rate:.2%}, loan spread {bank.loan_spread:.2%}, "
                            f"reserve ratio {bank.reserve_ratio:.0%}, capital ratio {bank.capital_ratio:.0%}, "
-                           f"minimum capital {bank.min_capital:,.0f}")
+                           f"minimum capital {bank.min_capital:,.0f}, lends up to "
+                           f"{bank.loan_income_share:.0%} of a month's income")
             return self.world.to_dict(self.detail)
 
     def remove_agent(self, agent_id):
@@ -187,7 +189,8 @@ def parse_agent_config(body):
         config["name"] = name
     for key, low, high, whole in (("x", 0, world_size, False), ("y", 0, world_size, False),
                                   ("money", 0, 1e12, False), ("movement", 1, MAX_MOVEMENT, True),
-                                  ("sleep_recovery", 0, 1, False), ("labor_capacity", 0, 1e6, False)):
+                                  ("sleep_recovery", 0, 1, False), ("labor_capacity", 0, 1e6, False),
+                                  ("payout_ratio", 0, 1, False)):
         if body.get(key) is not None:
             config[key] = _number(body[key], key, low, high, whole)
     return {k: v for k, v in config.items() if v is not None}
@@ -246,7 +249,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.sim.add_agent(parse_agent_config(body))
             if self.path == "/api/banking":
                 limits = {"deposit_rate": (0, 1), "loan_spread": (0, 1), "reserve_ratio": (0, 1),
-                          "capital_ratio": (0, 1), "min_capital": (0, 1e12)}
+                          "capital_ratio": (0, 1), "min_capital": (0, 1e12), "loan_income_share": (0, 100)}
                 changes = {}
                 for key, value in body.items():
                     if key == "detail":

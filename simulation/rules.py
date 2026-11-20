@@ -121,6 +121,10 @@ class Rules:
     seek_threshold: float = 0.5        # above this: consume / seek a trade / rest
     target_level: float = 0.3          # ... until the need is below this
     sleep_recovery: object = 0.05      # sleep recovered per step while resting (spread)
+    # Personality: the share of its companies' profits an owner takes out as dividends; the rest
+    # is retained by the company (company cash) to pay wages and build new capacity in its own
+    # industries. Banks retain the rest as equity, which lets them lend more. (spread)
+    payout_ratio: object = field(default_factory=lambda: {"dist": "uniform", "min": 0.2, "max": 0.8})
 
     # Trading: a buyer buys a random multiple of what it needs, in [purchase_min, purchase_max]
     purchase_min: float = 1.0
@@ -254,10 +258,13 @@ class Rules:
     # included) plus what its loans cost per step, and keeps budget_steps steps of that (a
     # "month") before it invests or builds with anything left over.
     budget_steps: int = 30
-    # Consumer credit: an agent that can't pay for what it needs now may borrow the gap, as long as
-    # all its loan payments stay within max_payment_to_income of its income.
+    # Consumer credit: an agent that can't pay for what it needs now may borrow the gap.
     consumer_credit: bool = True
-    max_payment_to_income: float = 0.4
+    # Steps are days: a month is month_steps steps. Banks lend an agent at most loan_income_share
+    # of its monthly income (income per step x month_steps) in total, for any purpose; loans for
+    # building also need collateral (max_loan_to_value). Can be changed in the game.
+    month_steps: int = 30
+    loan_income_share: float = 0.4
 
     # Prices
     price_mode: str = "scarcity"       # "scarcity": money/units*(1-share); "fixed": fixed_prices
@@ -488,6 +495,7 @@ SPREADS = {
     "labor_capacity": (None, 0, 1e6, False, False),
     "rates": (NEEDS, 0, 1, False, False),
     "sleep_recovery": (None, 0, 1, False, False),
+    "payout_ratio": (None, 0, 1, False, False),
 }
 
 
@@ -548,7 +556,8 @@ LIMITS = {
     "deposit_share": (0, 1, "float"),
     "budget_steps": (0, 100000, "int"),
     "consumer_credit": (None, None, "bool"),
-    "max_payment_to_income": (0, 10, "float"),
+    "month_steps": (1, 100000, "int"),
+    "loan_income_share": (0, 100, "float"),
     "excluded_industries": (None, None, "goods"),
     "building_enabled": (None, None, "bool"),
     "build_cost": (None, None, "build_cost"),

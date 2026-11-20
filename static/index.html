@@ -80,7 +80,8 @@
     <aside class="card side-card">
       <nav class="tabs" role="tablist">
         <button role="tab" data-tab="overview" class="active">Overview</button>
-        <button role="tab" data-tab="government">Government &amp; banks</button>
+        <button role="tab" data-tab="government">Government</button>
+        <button role="tab" data-tab="banks">Commercial banks</button>
         <button role="tab" data-tab="manage">Agents</button>
       </nav>
 
@@ -169,8 +170,10 @@
         </form>
         <div id="gov-stats" class="stat-grid"></div>
 
-        <h3 class="section-title bank-title">Banking</h3>
-        <p class="hint">Banks are an industry: a bank needs a banking plant (built from machinery and construction,
+      </section>
+
+      <section id="tab-banks" role="tabpanel" hidden>
+                <p class="hint">Banks are an industry: a bank needs a banking plant (built from machinery and construction,
           run with labour and electricity) and its founder's own minimum capital. Its banking services are used up
           by every loan. Switch banking off and banks stop lending, pay depositors back and close.</p>
         <form id="bank-form" class="panel" novalidate>
@@ -181,6 +184,7 @@
             <label>Reserve ratio <span><input id="bank-reserve" type="number" min="0" max="100" step="1"> % of deposits</span></label>
             <label>Capital ratio (Basel) <span><input id="bank-capital" type="number" min="0" max="100" step="1"> % of loans</span></label>
             <label>Minimum capital <span>$ <input id="bank-min-capital" type="number" min="0" step="500"></span></label>
+            <label>Lend each agent up to <span><input id="bank-income-share" type="number" min="0" max="10000" step="5"> % of a month's income</span></label>
           </div>
           <div class="form-actions">
             <button type="button" id="bank-revert" class="ghost">Revert</button>

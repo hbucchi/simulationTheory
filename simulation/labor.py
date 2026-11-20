@@ -162,11 +162,14 @@ class LaborMarket:
         for employer in employers:
             want = employer.labor_need - employer.labor_available
             need = cash_needed(employer, prices, rules)
-            budget = max(0.0, economy.money_of(employer) - need)
+            # Wages come out of company cash (retained earnings) first, then the owner's money.
+            budget = max(0.0, economy.money_of(employer) + employer.company_cash - need)
+            if budget > 0 and employer.company_cash:
+                economy.draw_company_cash(employer, min(budget, want * ref_wage * 2))
             if budget > 0 and employer.deposits:
                 # Wages are paid in cash: take what's needed out of the bank.
                 world.banking.cash_up(employer, need + min(budget, want * ref_wage * 2))
-                budget = min(budget, max(0.0, employer.money - need))
+            budget = min(budget, max(0.0, employer.money - need))
             for worker in offers:
                 if want <= 1e-9 or budget <= 1e-9:
                     break
@@ -213,6 +216,7 @@ class LaborMarket:
     def _hire(employer, worker, units, wage, stats):
         pay = units * wage
         employer.money -= pay
+        employer.flow["wages_paid"] = employer.flow.get("wages_paid", 0.0) + pay
         worker.money += pay
         economy.earn(worker, pay, "wages")
         worker.labor_sold += units

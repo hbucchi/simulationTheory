@@ -44,7 +44,7 @@ const ui = {
   govStats: $("gov-stats"),
   bankForm: $("bank-form"), bankEnabled: $("bank-enabled"), bankDeposit: $("bank-deposit"),
   bankSpread: $("bank-spread"), bankReserve: $("bank-reserve"), bankCapital: $("bank-capital"),
-  bankMinCapital: $("bank-min-capital"), bankRevert: $("bank-revert"), bankStatus: $("bank-status"),
+  bankMinCapital: $("bank-min-capital"), bankIncomeShare: $("bank-income-share"), bankRevert: $("bank-revert"), bankStatus: $("bank-status"),
   bankStats: $("bank-stats"), bankList: $("bank-list"),
 };
 
@@ -142,6 +142,9 @@ const FIELD_GROUPS = [
     { path: `inventory.${r}`, label: label(r), min: 0, step: 1, get: a => a.inventory[r] ?? 0 }))},
   { legend: "Labour", fields: [
     { path: "labor_capacity", label: "Labour capacity per step", min: 0, step: 0.05, get: a => a.labor.capacity }]},
+  { legend: "Personality", fields: [
+    { path: "payout_ratio", label: "Pays out as dividends (share of profits)", min: 0, max: 1, step: 0.05,
+      get: a => a.personality.payout_ratio, placeholder: "from rules" }]},
   { legend: "Industries owned (asset shares; 1 = one whole asset)", collapsed: true, fields: GOODS.map(r => (
     { path: `assets.${r}`, label: label(r), min: 0, step: 0.01, get: a => +(a.assets[r] ?? 0).toFixed(4) }))},
 ];
@@ -223,6 +226,8 @@ function render(next) {
     renderMarket();
     renderAgents();
     renderEvents();
+  } else if (activeTab === "banks") {
+    renderBanking();
   } else if (activeTab === "government") {
     renderGovernment();
   } else {
@@ -600,6 +605,9 @@ function renderAgents() {
       ["money", usd(a.money)],
       ...(a.deposits ? [["in the bank", usd(a.deposits)]] : []),
       ...(a.debt ? [["owes the bank", usd(a.debt)]] : []),
+      ...(a.company_cash ? [["company cash", usd(a.company_cash), "Retained earnings of its companies: pays wages and builds new capacity"]] : []),
+      ...(Object.keys(a.assets).length ? [["pays out", `${Math.round(a.personality.payout_ratio * 100)}% of profits`,
+        "Personality: share of its companies' profits it takes as dividends; the rest is reinvested"]] : []),
       ...(a.budget ? [["monthly budget", usd(a.budget.total),
         `Keeps ${usd(a.budget.total)} before investing: cash for what it needs now + ${a.budget.steps} steps × ` +
         `(living ${usd(a.budget.living)} + loan payments ${usd(a.budget.loans)} per step). ` +
@@ -697,6 +705,7 @@ function showTab(name) {
     $(`tab-${t.dataset.tab}`).hidden = t.dataset.tab !== name;
   }
   if (name === "government") fillGovernment(true);
+  if (name === "banks") fillBanking(true);
   render(state);
 }
 for (const t of ui.tabs) t.onclick = () => showTab(t.dataset.tab);
@@ -744,7 +753,6 @@ function renderGovernment() {
     card.append(l, v, n);
     ui.govStats.append(card);
   }
-  renderBanking();
 }
 
 ui.govRateRange.oninput = () => { govDirty = true; setGovInputs(Number(ui.govRateRange.value), Number(ui.govBuy.value)); };
@@ -785,6 +793,7 @@ function fillBanking(force = false) {
   ui.bankReserve.value = +(b.reserve_ratio * 100).toFixed(2);
   ui.bankCapital.value = +(b.capital_ratio * 100).toFixed(2);
   ui.bankMinCapital.value = b.min_capital;
+  ui.bankIncomeShare.value = +(b.loan_income_share * 100).toFixed(2);
 }
 
 function renderBanking() {
@@ -796,8 +805,10 @@ function renderBanking() {
     ["Rates", `${(b.deposit_rate_now * 100).toFixed(2)}% / ${(b.loan_rate_now * 100).toFixed(2)}%`, "deposits / loans, per step"],
     ["Deposits", usd(b.deposits), `${usd(b.reserves)} held as reserves`],
     ["Loans", usd(b.loans), "outstanding"],
-    ["Money supply", usd(b.money_supply), "cash + deposits"],
+    ["Money supply", usd(b.money_supply), "cash (people + companies) + deposits"],
     ["Money multiplier", `×${b.multiplier.toFixed(2)}`, "money supply ÷ (cash + reserves)"],
+    ["Credit limit", `${(b.loan_income_share * 100).toFixed(0)}% of a month`, `of each borrower's income (${b.month_steps} days)`],
+    ["Kept by companies", usd(state.market.company_cash), `${usd(state.market.retained_total)} of profits retained so far`],
   ] : [["Banking", "not in this game", "the banking industry was left out (setup screen)"]];
   ui.bankStats.innerHTML = "";
   for (const [label, value, note] of stats) {
@@ -819,6 +830,7 @@ function renderBanking() {
       `Deposits ${usd(bank.deposits)} from ${bank.depositors} · reserves ${usd(bank.reserves)}`,
       `Loans ${usd(bank.loans)} to ${bank.borrowers} · banking services ${bank.services} units · plant ${bank.shares} shares`,
       `Interest in ${usd(bank.interest_received)} · out ${usd(bank.interest_paid)} · dividends ${usd(bank.dividends)}` +
+        ` · retained ${usd(bank.retained)} (owner pays out ${Math.round((bank.payout_ratio ?? 0) * 100)}% of profit)` +
         (bank.written_off ? ` · written off ${usd(bank.written_off)}` : ""),
     ];
     card.append(head, ...lines.map(t => Object.assign(document.createElement("div"), { className: "bank-line", textContent: t })));
@@ -838,6 +850,7 @@ ui.bankForm.onsubmit = async (e) => {
       reserve_ratio: Number(ui.bankReserve.value) / 100,
       capital_ratio: Number(ui.bankCapital.value) / 100,
       min_capital: Number(ui.bankMinCapital.value),
+      loan_income_share: Number(ui.bankIncomeShare.value) / 100,
     });
     bankDirty = false;
     render(next);
@@ -926,7 +939,7 @@ function refreshForm(force = false) {
 
 // New agents start from the game's rules (set on the setup screen). A rule that is a
 // distribution shows blank: the server draws a value from it.
-const RULE_BACKED = ["inventory", "assets", "labor_capacity", "rates", "money", "sleep_recovery", "movement"];
+const RULE_BACKED = ["inventory", "assets", "labor_capacity", "rates", "money", "sleep_recovery", "movement", "payout_ratio"];
 function defaultValue(path) {
   if (!RULE_BACKED.includes(path.split(".")[0])) return "";  // name, x, y, needs: server picks
   const spec = getPath(state.rules, path);
