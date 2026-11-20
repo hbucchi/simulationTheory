@@ -82,6 +82,7 @@
         <button role="tab" data-tab="overview" class="active">Overview</button>
         <button role="tab" data-tab="government">Government</button>
         <button role="tab" data-tab="banks">Commercial banks</button>
+        <button role="tab" data-tab="products">Products</button>
         <button role="tab" data-tab="manage">Agents</button>
       </nav>
 
@@ -197,6 +198,26 @@
         </form>
         <div id="gov-stats" class="stat-grid"></div>
 
+      </section>
+
+      <section id="tab-products" role="tabpanel" hidden>
+        <p class="hint">Every product in this game: its price, who makes it, how much is made and used, and its market.
+          Tap a row for details. Flows are averages per step over the last 20 steps.</p>
+        <div class="product-tools">
+          <input id="product-search" type="search" placeholder="Search products">
+          <select id="product-sort">
+            <option value="layer">Sort: layer</option>
+            <option value="price">Sort: price</option>
+            <option value="change">Sort: price change</option>
+            <option value="made">Sort: made per step</option>
+            <option value="consumed">Sort: consumed per step</option>
+            <option value="owners">Sort: producers</option>
+            <option value="held">Sort: units held</option>
+            <option value="pressure">Sort: buyers ÷ sellers</option>
+          </select>
+        </div>
+        <div id="product-summary" class="stat-grid"></div>
+        <div class="table-wrap"><table id="product-table" class="product-table"></table></div>
       </section>
 
       <section id="tab-banks" role="tabpanel" hidden>

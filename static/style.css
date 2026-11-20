@@ -622,3 +622,19 @@ input.recipe-input { width: 190px; }
 
 .gov-sub { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); margin: 14px 0 6px; }
 .bank-fields label.check { justify-content: space-between; }
+
+/* Products tab */
+.product-tools { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.product-tools input { flex: 1 1 160px; min-width: 0; }
+.table-wrap { overflow-x: auto; margin-top: 12px; max-width: 100%; }
+.product-table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.product-table th { text-align: left; font-size: 11px; color: var(--muted); font-weight: 500; padding: 6px; white-space: nowrap; }
+.product-table td { padding: 6px; border-top: 1px solid var(--border); white-space: nowrap; }
+.product-table td small { color: var(--faint); }
+.product-row { cursor: pointer; }
+.product-row:hover, .product-row.open { background: var(--panel-2); }
+.product-table td.up { color: var(--good); }
+.product-table td.down { color: var(--bad); }
+.product-detail td { white-space: normal; color: var(--muted); background: var(--panel-2); line-height: 1.5; }
+.product-spark { width: 100%; height: 80px; display: block; margin-top: 6px; }
+.product-detail td > div, .product-detail td > canvas { position: sticky; left: 6px; max-width: min(360px, 80vw); }

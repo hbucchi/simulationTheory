@@ -971,6 +971,10 @@ class World:
                 "per_agent_history": {r: list(h) for r, h in self.per_agent_history.items()},
                 "scarcity": self.scarcity,
                 "buyer_concentration": {r: round(v, 3) for r, v in self.buyer_concentration.items()},
+                # Per product: agents owning its industry, and those that made some this step.
+                "owners": {g: sum(1 for a in self.agents if a.assets.get(g, 0) > 0) for g in self.rules.active_goods},
+                "producing": {g: sum(1 for a in self.agents if a.flow["produced"].get(g, 0) > 0)
+                              for g in self.rules.active_goods},
                 "stockpiling": {r: self.rules.stockpiling_enabled and d >= self.rules.scarcity_trigger
                                 for r, d in self.scarcity.items()},
                 "money": sum(a.money for a in self.agents),

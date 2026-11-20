@@ -42,6 +42,8 @@ const ui = {
   govRevert: $("gov-revert"),
   govStatus: $("gov-status"),
   govStats: $("gov-stats"),
+  productSearch: $("product-search"), productSort: $("product-sort"),
+  productSummary: $("product-summary"), productTable: $("product-table"),
   bankForm: $("bank-form"), bankEnabled: $("bank-enabled"), bankDeposit: $("bank-deposit"),
   bankSpread: $("bank-spread"), bankReserve: $("bank-reserve"),
   govEnabled: $("gov-enabled"), govBasel: $("gov-basel"),
@@ -227,6 +229,8 @@ function render(next) {
     renderMarket();
     renderAgents();
     renderEvents();
+  } else if (activeTab === "products") {
+    renderProducts();
   } else if (activeTab === "banks") {
     renderBanking();
   } else if (activeTab === "government") {
@@ -803,6 +807,123 @@ ui.govForm.onsubmit = async (e) => {
   }
   ui.govStatus.hidden = false;
 };
+
+// ---------- Products tab: every product's KPIs ----------
+
+const productView = { query: "", sort: "layer", open: null };
+
+function productRows() {
+  const m = state.market;
+  const back = (g) => { const h = m.price_history[g] || []; return h.length > 20 ? h[h.length - 21] : h[0]; };
+  return activeGoods().map(g => {
+    const price = m.prices[g], before = back(g);
+    return {
+      g, info: industry(g), meta: CATALOG_INFO[g], price,
+      change: before ? price / before - 1 : 0,
+      made: m.produced_recent[g] || 0, consumed: m.consumed_recent[g] || 0,
+      used: m.used_recent[g] || 0, expired: m.expired_recent[g] || 0,
+      held: m.units[g] || 0, owners: m.owners?.[g] || 0, producing: m.producing?.[g] || 0,
+      shares: m.assets[g] || 0, capacity: m.asset_output[g] || 0,
+      buyers: m.buyers[g] || 0, sellers: m.sellers[g] || 0,
+      pressure: ((m.buyers[g] || 0) + 1) / ((m.sellers[g] || 0) + 1),
+      concentration: m.concentration[g] || 0, buyerPower: m.buyer_concentration?.[g] || 0,
+      depreciation: state.rules.depreciation?.[g] ?? 0, shelf: state.rules.expiry_enabled ? state.rules.shelf_life[g] : 0,
+    };
+  });
+}
+
+function renderProducts() {
+  let rows = productRows();
+  const all = rows;
+  const q = productView.query;
+  if (q) rows = rows.filter(r => label(r.g).toLowerCase().includes(q) || r.meta.sector.toLowerCase().includes(q));
+  const key = { layer: r => r.info.layer * 1000 - r.price / 1e6, price: r => -r.price, change: r => -r.change,
+                made: r => -r.made, consumed: r => -r.consumed, owners: r => -r.owners, held: r => -r.held,
+                pressure: r => -r.pressure }[productView.sort];
+  rows.sort((a, b) => key(a) - key(b));
+
+  // Summary cards for the whole market.
+  const sum = (f) => all.reduce((a, r) => a + f(r), 0);
+  const cards = [
+    ["Products", `${all.length}`, `${new Set(all.map(r => r.info.layer)).size} layers`],
+    ["Output", usd(sum(r => r.made * r.price)), "value made per step"],
+    ["Consumed", usd(sum(r => r.consumed * r.price)), "value used up by people per step"],
+    ["Rising / falling", `${all.filter(r => r.change > 0.02).length} / ${all.filter(r => r.change < -0.02).length}`,
+      "prices up / down over 20 steps"],
+  ];
+  ui.productSummary.innerHTML = "";
+  for (const [l, v, n] of cards) {
+    const c = Object.assign(document.createElement("div"), { className: "stat" });
+    c.append(Object.assign(document.createElement("div"), { className: "stat-label", textContent: l }),
+             Object.assign(document.createElement("div"), { className: "stat-value", textContent: v }),
+             Object.assign(document.createElement("div"), { className: "stat-note", textContent: n }));
+    ui.productSummary.append(c);
+  }
+
+  const t = ui.productTable;
+  t.innerHTML = "";
+  const head = t.createTHead().insertRow();
+  for (const h of ["Product", "Price", "20-step change", "Made / step", "Consumed / step", "Inputs / step",
+                   "Held", "Producers", "Buyers : sellers"]) {
+    head.append(Object.assign(document.createElement("th"), { textContent: h }));
+  }
+  const body = t.createTBody();
+  const pct = (v) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%`;
+  for (const r of rows) {
+    const tr = body.insertRow();
+    tr.className = "product-row" + (productView.open === r.g ? " open" : "");
+    tr.onclick = () => { productView.open = productView.open === r.g ? null : r.g; renderProducts(); };
+    const name = document.createElement("td");
+    name.append(Object.assign(document.createElement("b"), { textContent: label(r.g) }),
+                Object.assign(document.createElement("small"), { textContent: ` L${r.info.layer} · ${r.meta.sector}` }));
+    const change = Object.assign(document.createElement("td"), { textContent: pct(r.change),
+      className: r.change > 0.02 ? "up" : r.change < -0.02 ? "down" : "" });
+    tr.append(name, Object.assign(document.createElement("td"), { textContent: usd(r.price) }), change,
+      ...[r.made.toFixed(2), r.consumed.toFixed(2), r.used.toFixed(2), Math.round(r.held),
+          `${r.producing} of ${r.owners}`, `${r.buyers} : ${r.sellers}`].map(v => Object.assign(document.createElement("td"), { textContent: v })));
+    if (productView.open === r.g) {
+      const d = body.insertRow();
+      d.className = "product-detail";
+      const cell = d.insertCell();
+      cell.colSpan = 9;
+      const recipe = Object.entries(state.rules.inputs[r.g] || {}).map(([k, n]) => `${n} ${label(k).toLowerCase()}`).join(" + ");
+      const effects = Object.entries(r.info.effects || {}).map(([n, v]) => `${n} ${v > 0 ? "−" : "+"}${Math.abs(v).toFixed(3)}`).join(", ");
+      const lines = [
+        `${r.meta.industry} (${r.meta.sector}) · layer ${r.info.layer} · made from ${recipe || "labour and capital only (primary)"}`,
+        `Effect per unit: ${effects || "none (an input only)"}${r.shelf ? ` · keeps ${r.shelf} steps` : " · never expires"}`,
+        `Industry: ${r.shares.toFixed(2)} asset shares owned by ${r.owners} agents (${r.producing} produced this step) · ` +
+          `can make ${r.capacity.toFixed(2)} / step fully staffed · wears out ${(r.depreciation * 100).toFixed(0)}% a year`,
+        `Market: ${r.buyers} buyers vs ${r.sellers} sellers (pressure ×${Math.pow(r.pressure, state.rules.price_elasticity[r.g]).toFixed(2)}) · ` +
+          `seller concentration ${r.concentration.toFixed(2)} · buyer power ${r.buyerPower.toFixed(2)} · expired ${r.expired.toFixed(2)} / step`,
+      ];
+      for (const text of lines) cell.append(Object.assign(document.createElement("div"), { textContent: text }));
+      const canvas = Object.assign(document.createElement("canvas"), { className: "product-spark", width: 600, height: 80 });
+      cell.append(canvas);
+      drawSpark(canvas, state.market.price_history[r.g] || []);
+    }
+  }
+}
+
+// A small price chart (no axes): the line, its min and max.
+function drawSpark(canvas, values) {
+  const c = canvas.getContext("2d");
+  if (values.length < 2) return;
+  const lo = Math.min(...values), hi = Math.max(...values), span = hi - lo || 1;
+  c.strokeStyle = cssVar("--accent");
+  c.lineWidth = 2;
+  c.beginPath();
+  values.forEach((v, i) => {
+    const x = i / (values.length - 1) * (canvas.width - 4) + 2, y = canvas.height - 14 - (v - lo) / span * (canvas.height - 24);
+    i ? c.lineTo(x, y) : c.moveTo(x, y);
+  });
+  c.stroke();
+  c.fillStyle = cssVar("--muted");
+  c.font = "11px sans-serif";
+  c.fillText(`price: ${usd(lo)} – ${usd(hi)} over the last ${values.length} steps`, 2, canvas.height - 2);
+}
+
+ui.productSearch.oninput = () => { productView.query = ui.productSearch.value.trim().toLowerCase(); renderProducts(); };
+ui.productSort.onchange = () => { productView.sort = ui.productSort.value; renderProducts(); };
 
 // ---------- Banking (in the Government tab) ----------
 
