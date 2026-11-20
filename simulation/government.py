@@ -1,47 +1,145 @@
-"""The central government and its central bank: a policy interest rate, the Basel capital
-ratio banks must meet, and money injected by buying labour.
+"""The central government and its central bank.
 
-- ``min_rate``: no asset may be valued at a return below this rate. The effective
-  return of an asset is max(its own asset_return, min_rate), so raising the rate
-  lowers every asset's price (price = output x good price / return).
-- ``capital_ratio`` (Basel): the central bank's rule for commercial banks. A bank's equity
-  must be at least this share of its risk-weighted assets: its loans (cash reserves carry
-  no risk, weight 0). At 12%, every $1 of equity backs at most $8.33 of loans. Equity is the
-  owners' own money; deposits are third parties' money, so this caps how far a bank may
-  lend other people's money against its own.
-- ``labor_purchase``: units of labour the government hires every step in the
-  labour market (labor.py), from the capacity employers didn't hire, cheapest
-  first, at each worker's asking wage. It pays with newly created money, which is
-  how money is injected into the economy. The labour goes into public works.
+Fiscal policy (the government):
+- Taxes, collected into the treasury:
+    production tax: a share of the money of every sale of goods (paid by the seller);
+    salary tax: a share of every wage (withheld from the worker's pay);
+    profit tax: a share of every company's and bank's profit (goods sold - wages, or interest).
+- Spending, every step, from the treasury:
+    1. public works: ``labor_purchase`` units of labour hired at each worker's asking wage; what
+       the treasury can't pay is paid with newly created money (how money is injected);
+    2. unemployment benefit: ``benefit_rate`` x the market wage for every unit of labour an agent
+       offered and nobody hired (pro rata if the treasury runs short);
+    3. with ``balanced_budget``, whatever is left hires more idle labour for public works, so
+       taxes go back into the economy instead of sitting in the treasury.
+
+Monetary policy (the central bank):
+- ``min_rate``: no asset may be valued at a return below this rate. The effective return of an
+  asset is max(its own asset_return, min_rate), so raising the rate lowers every asset's price
+  (price = output x good price / return). Bank deposit rates never go below it.
+- ``capital_ratio`` (Basel): a commercial bank's equity must be at least this share of its
+  risk-weighted assets: its loans (cash reserves carry no risk, weight 0). At 12%, every $1 of
+  equity backs at most $8.33 of loans. Equity is the owners' own money; deposits are third
+  parties' money, so this caps how far a bank may lend other people's money against its own.
+- ``reserve_requirement``: commercial banks must hold this share of their deposits in an
+  account at the central bank (see banking.py). The central bank pays ``reserve_rate`` on it.
+- ``lender_of_last_resort``: when on, the central bank lends to a solvent bank that runs out
+  of cash (to pay depositors or meet the requirement), at the policy rate + ``llr_penalty``.
+  That money is newly created and disappears again when the bank repays.
 
 The policy starts from the game rules and can be changed while the game runs. With the
-government switched off (``enabled`` False) there is no policy rate, no labour bought and
-no capital rule: banks lend as far as their reserves and services allow.
+government switched off (``enabled`` False) none of this applies: no taxes, no spending, no
+policy rate, no capital or reserve rules and no lender of last resort.
 """
 
+POLICY = ("min_rate", "labor_purchase", "capital_ratio", "tax_production", "tax_wage", "tax_profit",
+          "benefit_rate", "balanced_budget", "reserve_requirement", "reserve_rate", "lender_of_last_resort",
+          "llr_penalty")
+TAXES = ("production", "wage", "profit")
+
+
+def _policy(name):
+    """A policy setting that reads as 0 / False while the government is switched off."""
+    return property(lambda self: self._policy[name] if self.enabled else type(self._policy[name])(),
+                    lambda self, v: self._policy.__setitem__(name, v))
+
+
 class Government:
-    def __init__(self, min_rate=0.0, labor_purchase=0.0, capital_ratio=0.12, enabled=True):
+    def __init__(self, min_rate=0.0, labor_purchase=0.0, capital_ratio=0.12, enabled=True, **policy):
         self.enabled = enabled
-        self._min_rate = min_rate
-        self._labor_purchase = labor_purchase
-        self._capital_ratio = capital_ratio
-        self.money_created = 0.0   # total new money paid out so far
+        self._policy = {"min_rate": min_rate, "labor_purchase": labor_purchase, "capital_ratio": capital_ratio,
+                        "tax_production": 0.0, "tax_wage": 0.0, "tax_profit": 0.0, "benefit_rate": 0.0,
+                        "balanced_budget": False, "reserve_requirement": 0.0, "reserve_rate": 0.0,
+                        "lender_of_last_resort": False, "llr_penalty": 0.0}
+        self._policy.update(policy)
+        self.money_created = 0.0   # total new money paid out so far (public works the treasury couldn't pay)
         self.labor_bought = 0.0    # total labour bought so far
         self.last_spent = 0.0      # money created in the latest step
+        self.treasury = 0.0        # taxes collected and not yet spent
+        self.revenue = {t: 0.0 for t in TAXES}           # taxes collected so far, by tax
+        self.step_revenue = {t: 0.0 for t in TAXES}      # ... in the latest step
+        self.spent = {"public_works": 0.0, "benefits": 0.0, "reserve_interest": 0.0}
+        self.step_spent = {"public_works": 0.0, "benefits": 0.0, "reserve_interest": 0.0}
+        self.llr_outstanding = 0.0   # central bank loans to banks not yet repaid (newly created money)
+        self.llr_lent = 0.0          # all it has lent so far
+        self.cb_income = 0.0         # interest banks paid on those loans (goes to the treasury)
+
+    def receive(self, amount):
+        """Central bank income (interest on its loans): into the treasury."""
+        if amount > 0:
+            self.treasury += amount
+            self.cb_income += amount
+
+    @classmethod
+    def from_rules(cls, rules):
+        return cls(rules.gov_min_rate, rules.gov_labor_purchase, rules.capital_ratio, rules.government_enabled,
+                   tax_production=rules.tax_production, tax_wage=rules.tax_wage, tax_profit=rules.tax_profit,
+                   benefit_rate=rules.benefit_rate, balanced_budget=rules.balanced_budget,
+                   reserve_requirement=rules.reserve_ratio, reserve_rate=rules.reserve_rate,
+                   lender_of_last_resort=rules.lender_of_last_resort, llr_penalty=rules.llr_penalty)
 
     # The policy in force: nothing while the government is switched off.
-    min_rate = property(lambda self: self._min_rate if self.enabled else 0.0,
-                        lambda self, v: setattr(self, "_min_rate", v))
-    labor_purchase = property(lambda self: self._labor_purchase if self.enabled else 0.0,
-                              lambda self, v: setattr(self, "_labor_purchase", v))
-    capital_ratio = property(lambda self: self._capital_ratio if self.enabled else 0.0,
-                             lambda self, v: setattr(self, "_capital_ratio", v))
+    min_rate = _policy("min_rate")
+    labor_purchase = _policy("labor_purchase")
+    capital_ratio = _policy("capital_ratio")
+    tax_production = _policy("tax_production")
+    tax_wage = _policy("tax_wage")
+    tax_profit = _policy("tax_profit")
+    benefit_rate = _policy("benefit_rate")
+    balanced_budget = _policy("balanced_budget")
+    reserve_requirement = _policy("reserve_requirement")
+    reserve_rate = _policy("reserve_rate")
+    lender_of_last_resort = _policy("lender_of_last_resort")
+    llr_penalty = _policy("llr_penalty")
+
+    def set(self, name, value):
+        if name not in POLICY:
+            raise KeyError(name)
+        self._policy[name] = value
 
     def effective_return(self, rules, good):
         return max(rules.asset_return[good], self.min_rate)
 
+    # ---------- taxes ----------
+
+    def begin_step(self):
+        self.step_revenue = {t: 0.0 for t in TAXES}
+        self.step_spent = {"public_works": 0.0, "benefits": 0.0, "reserve_interest": 0.0}
+        self.last_spent = 0.0
+
+    def tax(self, kind, base):
+        """The tax due on ``base`` money of ``kind`` ("production", "wage" or "profit")."""
+        rate = getattr(self, f"tax_{kind}")
+        return base * rate if base > 0 and rate > 0 else 0.0
+
+    def collect(self, kind, amount):
+        if amount > 0:
+            self.treasury += amount
+            self.revenue[kind] += amount
+            self.step_revenue[kind] += amount
+
+    def spend(self, kind, amount):
+        """Pay ``amount`` for ``kind``: from the treasury, the rest with new money. Returns the
+        newly created part."""
+        from_treasury = min(self.treasury, amount)
+        self.treasury -= from_treasury
+        created = amount - from_treasury
+        if created < 1e-9:              # (float noise, not new money)
+            self.treasury = max(0.0, self.treasury - created)
+            created = 0.0
+        self.money_created += created
+        self.last_spent += created
+        self.spent[kind] += amount
+        self.step_spent[kind] += amount
+        return created
+
     def to_dict(self):
-        return {"enabled": self.enabled, "min_rate": self._min_rate, "labor_purchase": self._labor_purchase,
-                "capital_ratio": self._capital_ratio,
+        return {"enabled": self.enabled, **self._policy,
                 "money_created": self.money_created, "labor_bought": self.labor_bought,
-                "last_spent": self.last_spent}
+                "last_spent": self.last_spent, "treasury": round(self.treasury, 2),
+                "revenue": {k: round(v, 2) for k, v in self.revenue.items()},
+                "step_revenue": {k: round(v, 2) for k, v in self.step_revenue.items()},
+                "spent": {k: round(v, 2) for k, v in self.spent.items()},
+                "llr_outstanding": round(self.llr_outstanding, 2), "llr_lent": round(self.llr_lent, 2),
+                "cb_income": round(self.cb_income, 2),
+                "step_spent": {k: round(v, 2) for k, v in self.step_spent.items()}}

@@ -219,7 +219,7 @@ const SETUP_SECTIONS = [
       enabledWhen: v => v.banking_enabled },
     { path: "bank_min_capital", label: "Minimum capital to open a bank ($)", kind: "float", min: 0, step: 500,
       enabledWhen: v => v.banking_enabled },
-    { path: "reserve_ratio", label: "Reserve ratio: cash ≥ (× deposits)", kind: "float", min: 0, max: 1, step: 0.01,
+    { path: "bank_liquidity", label: "Vault cash each bank keeps (× deposits)", kind: "float", min: 0, max: 1, step: 0.01,
       enabledWhen: v => v.banking_enabled },
     { path: "deposit_rate", label: "Deposit rate (per step)", kind: "float", min: 0, max: 1, step: 0.0005,
       enabledWhen: v => v.banking_enabled },
@@ -250,6 +250,24 @@ const SETUP_SECTIONS = [
       enabledWhen: v => v.government_enabled },
     { path: "capital_ratio", label: "Central bank: bank equity ≥ (× loans, Basel)", kind: "float", min: 0, max: 1,
       step: 0.01, enabledWhen: v => v.government_enabled },
+    { path: "reserve_ratio", label: "Central bank: reserves banks hold there (× deposits)", kind: "float", min: 0, max: 1,
+      step: 0.01, enabledWhen: v => v.government_enabled },
+    { path: "reserve_rate", label: "Central bank: interest on reserves (per step)", kind: "float", min: 0, max: 1,
+      step: 0.0005, enabledWhen: v => v.government_enabled },
+    { path: "lender_of_last_resort", label: "Central bank lends to solvent banks short of cash", kind: "bool", full: true,
+      enabledWhen: v => v.government_enabled },
+    { path: "llr_penalty", label: "… at the policy rate + (per step)", kind: "float", min: 0, max: 1, step: 0.0005,
+      enabledWhen: v => v.government_enabled && v.lender_of_last_resort },
+    { path: "tax_production", label: "Production tax (share of every sale)", kind: "float", min: 0, max: 1, step: 0.01,
+      enabledWhen: v => v.government_enabled },
+    { path: "tax_wage", label: "Salary tax (share of wages)", kind: "float", min: 0, max: 1, step: 0.01,
+      enabledWhen: v => v.government_enabled },
+    { path: "tax_profit", label: "Profit tax (share of profits)", kind: "float", min: 0, max: 1, step: 0.01,
+      enabledWhen: v => v.government_enabled },
+    { path: "benefit_rate", label: "Unemployment benefit (× the wage)", kind: "float", min: 0, max: 10, step: 0.05,
+      enabledWhen: v => v.government_enabled },
+    { path: "balanced_budget", label: "Spend all taxes (the rest buys public works)", kind: "bool", full: true,
+      enabledWhen: v => v.government_enabled },
     { path: "gov_labor_purchase", label: "Labour bought per step", kind: "float", min: 0, step: 0.5,
       enabledWhen: v => v.government_enabled },
   ]},
@@ -1046,7 +1064,8 @@ function renderPreview(r, error, moduleNotes = []) {
   }
 
   if (r.banking_enabled) {
-    const multiplier = r.reserve_ratio > 0 ? (1 / r.reserve_ratio).toFixed(0) : "unlimited";
+    const rr = (r.government_enabled ? r.reserve_ratio : 0) + r.bank_liquidity;
+    const multiplier = rr > 0 ? (1 / rr).toFixed(0) : "unlimited";
     line(game.active.has("banking")
       ? `Banking: ${r.starting_banks} bank${r.starting_banks === 1 ? "" : "s"} at the start, each needing ${usd(r.bank_min_capital)} ` +
         `of its founder's money; deposits ${(r.deposit_rate * 100).toFixed(2)}%, loans ` +

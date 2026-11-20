@@ -30,6 +30,8 @@ Market wage
   step, kept within [price_floor, price_cap]; wage = base x multiplier. With fixed
   prices the wage is fixed_prices[labor].
 """
+import math
+
 
 from . import economy
 
@@ -75,7 +77,7 @@ class LaborMarket:
     def _empty_stats():
         return {"capacity": 0.0, "own_use": 0.0, "offered": 0.0, "wanted": 0.0, "hired": 0.0,
                 "wanted_full": 0.0, "job_capacity": 0.0, "jobs_funded": 0.0,
-                "gov_hired": 0.0, "unused": 0.0, "withheld": 0.0, "idle": 0.0, "hires": 0, "workers_hired": 0, "base_wage": 0.0, "pressure": 1.0}
+                "gov_hired": 0.0, "benefits": 0.0, "unused": 0.0, "withheld": 0.0, "idle": 0.0, "hires": 0, "workers_hired": 0, "base_wage": 0.0, "pressure": 1.0}
 
     def base_wage(self, world, prices, jobs):
         """labor_share x value added by one unit of labour (output minus the inputs it used),
@@ -177,32 +179,19 @@ class LaborMarket:
                     continue
                 affordable = budget / worker.asking_wage if worker.asking_wage > 0 else remaining[worker]
                 units = min(remaining[worker], want, affordable)
-                self._hire(employer, worker, units, worker.asking_wage, stats)
+                self._hire(employer, worker, units, worker.asking_wage, stats, world.government)
                 remaining[worker] -= units
                 want -= units
                 budget -= units * worker.asking_wage
 
-        # The government hires from what is left, with new money (public works).
+        # Government spending (public works, then unemployment benefits; see government.py).
         gov = world.government
-        gov.last_spent = 0.0
-        wanted = gov.labor_purchase
-        for worker in offers:
-            if wanted <= 1e-9:
-                break
-            units = min(remaining[worker], wanted)
-            if units <= 1e-9:
-                continue
-            pay = units * worker.asking_wage
-            worker.money += pay
-            economy.earn(worker, pay, "government")
-            worker.labor_sold += units
-            worker.employers["Government"] = worker.employers.get("Government", 0) + units
-            remaining[worker] -= units
-            wanted -= units
-            gov.labor_bought += units
-            gov.money_created += pay
-            gov.last_spent += pay
-            stats["gov_hired"] += units
+        stats["gov_hired"] += self._public_works(world, offers, remaining, gov.labor_purchase, stats)
+        if gov.benefit_rate > 0:
+            self._benefits(world, offers, remaining, stats)
+        if gov.balanced_budget and gov.treasury > 1e-6:
+            # Whatever the treasury has left hires more idle labour: taxes go back into the economy.
+            stats["gov_hired"] += self._public_works(world, offers, remaining, math.inf, stats, budget=gov.treasury)
 
         # Unused capacity = withheld (not offered: the agent didn't need to work) + idle
         # (offered but nobody hired it).
@@ -213,12 +202,63 @@ class LaborMarket:
         self.stats = stats
 
     @staticmethod
-    def _hire(employer, worker, units, wage, stats):
+    def _public_works(world, offers, remaining, wanted, stats, budget=math.inf):
+        """The government hires up to ``wanted`` units of the labour nobody else hired, at each
+        worker's asking wage, spending at most ``budget``: from the treasury, the rest with new
+        money. Returns the units hired."""
+        gov = world.government
+        hired = 0.0
+        for worker in offers:
+            if wanted - hired <= 1e-9 or budget <= 1e-9:
+                break
+            units = min(remaining[worker], wanted - hired)
+            if worker.asking_wage > 0:
+                units = min(units, budget / worker.asking_wage)
+            if units <= 1e-9:
+                continue
+            pay = units * worker.asking_wage
+            gov.spend("public_works", pay)
+            budget -= pay
+            tax = gov.tax("wage", pay)
+            gov.collect("wage", tax)
+            worker.money += pay - tax
+            economy.earn(worker, pay - tax, "government")
+            worker.labor_sold += units
+            worker.employers["Government"] = worker.employers.get("Government", 0) + units
+            remaining[worker] -= units
+            hired += units
+            gov.labor_bought += units
+        return hired
+
+    def _benefits(self, world, offers, remaining, stats):
+        """Unemployment benefit: benefit_rate x the wage for every unit of labour offered and not
+        hired, paid from the treasury (pro rata when it can't pay it all)."""
+        gov = world.government
+        wage = self.wage
+        owed = {w: remaining[w] * wage * gov.benefit_rate for w in offers if remaining[w] > 1e-9}
+        total = sum(owed.values())
+        if total <= 0 or gov.treasury <= 0:
+            return
+        scale = min(1.0, gov.treasury / total)
+        for worker, amount in owed.items():
+            pay = amount * scale
+            gov.treasury -= pay
+            gov.spent["benefits"] += pay
+            gov.step_spent["benefits"] += pay
+            worker.money += pay
+            economy.earn(worker, pay, "benefits")
+        stats["benefits"] = total * scale
+
+    @staticmethod
+    def _hire(employer, worker, units, wage, stats, gov=None):
         pay = units * wage
         employer.money -= pay
         employer.flow["wages_paid"] = employer.flow.get("wages_paid", 0.0) + pay
-        worker.money += pay
-        economy.earn(worker, pay, "wages")
+        tax = gov.tax("wage", pay) if gov else 0.0     # salary tax, withheld from the pay
+        if tax:
+            gov.collect("wage", tax)
+        worker.money += pay - tax
+        economy.earn(worker, pay - tax, "wages")
         worker.labor_sold += units
         worker.employers[employer.name] = worker.employers.get(employer.name, 0) + units
         employer.labor_available += units

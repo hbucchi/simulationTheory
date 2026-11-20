@@ -126,7 +126,8 @@ class DemandPricingTests(unittest.TestCase):
     def make_world(self, thirsty, sellers, **rules):
         # Demand pressure on its own: no concentration factor.
         world = world_with(stockpiling_enabled=False,
-                           concentration_weight={"food": 0, "water": 0, "games": 0}, **rules)
+                           concentration_weight={"food": 0, "water": 0, "games": 0},
+                           buyer_power_weight={"food": 0, "water": 0, "games": 0}, **rules)
         for i in range(thirsty):
             world.create_agent(inventory={"water": 0}, needs={**CALM, "thirst": 0.9}, rates={"thirst": 0}, x=10 * i, y=0)
         for i in range(sellers):
@@ -173,6 +174,15 @@ class DemandPricingTests(unittest.TestCase):
         markups = world.unit_markups()
         self.assertEqual(markups["water"], 0.05)
         self.assertEqual({g for g, m in markups.items() if m}, {"water"})
+
+
+class BuyerPowerTests(unittest.TestCase):
+    def test_concentrated_buying_power_pushes_prices_down(self):
+        rules = Rules.from_dict({"buyer_power_weight": {"water": 1}, "concentration_weight": {"water": 0}})
+        even = economy.demand_multiplier_target(5, 5, "water", rules, 0.0, buyer_level=0.0)
+        one_buyer = economy.demand_multiplier_target(5, 5, "water", rules, 0.0, buyer_level=1.0)
+        self.assertAlmostEqual(even, 1.0)
+        self.assertAlmostEqual(one_buyer, 0.5)        # a monopsony halves the price at weight 1
 
 
 if __name__ == "__main__":

@@ -5,7 +5,8 @@
 
 Every --every steps it prints one line: population, deaths so far, unemployment, the price of
 food and water, the wage, money (cash + deposits), loans, asset shares (industry capacity), and
-wealth inequality (Gini). Ends with a summary. Use it to check a change on a big game.
+wealth inequality (Gini), real GDP over the last year, inflation (CPI over a year) and taxes per
+step. Ends with a summary. Use it to check a change on a big game.
 """
 import argparse
 import json
@@ -32,7 +33,7 @@ def main():
     start_shares = sum(sum(a.assets.values()) for a in w.agents)
     t0 = time.time()
     print(f"{'step':>5} {'alive':>5} {'dead':>5} {'unemp':>6} {'food':>7} {'water':>7} {'wage':>7} "
-          f"{'money':>10} {'loans':>9} {'shares':>7} {'gini_w':>6}", flush=True)
+          f"{'money':>10} {'loans':>9} {'shares':>7} {'gini_w':>6} {'gdp_real':>10} {'infl':>6} {'taxes':>8}", flush=True)
     for step in range(1, args.steps + 1):
         w.step()
         if step % args.every == 0 or step == args.steps:
@@ -43,7 +44,7 @@ def main():
             print(f"{step:>5} {len(w.agents):>5} {sum(x['deaths'] for x in h):>5} {s['unemployment']:>6.2f} "
                   f"{prices['food']:>7.1f} {prices['water']:>7.1f} {w.labor.wage:>7.1f} "
                   f"{b['money_supply']:>10.0f} {b['loans']:>9.0f} {sum(sum(a.assets.values()) for a in w.agents):>7.1f} "
-                  f"{s['gini_wealth']:>6.2f}", flush=True)
+                  f"{s['gini_wealth']:>6.2f} {s['gdp_real']:>10.0f} {s['inflation']:>6.1%} {s['tax_revenue']:>8.0f}", flush=True)
     h = w.recorder.history
     print(json.dumps({
         "agents": args.agents, "steps": args.steps, "seed": args.seed, "rules": json.loads(args.rules),

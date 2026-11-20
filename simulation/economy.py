@@ -645,10 +645,17 @@ def concentration_factor(level, resource, rules=DEFAULT_RULES):
     return 1 + rules.concentration_weight[resource] * level
 
 
-def demand_multiplier_target(buyers, sellers, resource, rules=DEFAULT_RULES, level=0.0):
-    """Where the market pushes a resource's price multiplier: demand pressure x
-    concentration factor, kept within [price_floor, price_cap]."""
-    target = demand_pressure(buyers, sellers, resource, rules) * concentration_factor(level, resource, rules)
+def buyer_power_factor(level, resource, rules=DEFAULT_RULES):
+    """1 / (1 + buyer_power_weight x buyer concentration): x0.5 when one buyer holds all the
+    buying power at weight 1 (monopsony), x1 when buying power is spread evenly."""
+    return 1 / (1 + rules.buyer_power_weight.get(resource, 0.0) * level)
+
+
+def demand_multiplier_target(buyers, sellers, resource, rules=DEFAULT_RULES, level=0.0, buyer_level=0.0):
+    """Where the market pushes a resource's price multiplier: demand pressure x seller
+    concentration factor x buying power factor, kept within [price_floor, price_cap]."""
+    target = (demand_pressure(buyers, sellers, resource, rules) * concentration_factor(level, resource, rules)
+              * buyer_power_factor(buyer_level, resource, rules))
     return min(max(target, rules.price_floor), rules.price_cap)
 
 

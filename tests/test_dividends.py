@@ -13,7 +13,8 @@ NO_ASSETS = {g: 0 for g in GOODS}
 
 def world(**rules):
     return World(seed=1, rules=Rules.from_dict({"assets": NO_ASSETS, "starting_banks": 0, "investing_enabled": False,
-                                                "death_enabled": False, **rules}))
+                                                "death_enabled": False, "reserve_ratio": 0, "bank_liquidity": 0,
+                                                "tax_production": 0, "tax_wage": 0, "tax_profit": 0, "benefit_rate": 0, **rules}))
 
 
 def owner_with_profit(w, payout, sales, wages=0.0, money=1e6):

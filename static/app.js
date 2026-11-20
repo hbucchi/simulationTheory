@@ -722,6 +722,11 @@ function fillGovernment(force = false) {
   const g = state.government;
   setGovInputs(g.min_rate * 100, g.labor_purchase);
   ui.govEnabled.checked = g.enabled;
+  for (const el of ui.govForm.querySelectorAll("[data-policy]")) {
+    const v = g[el.dataset.policy];
+    if (el.type === "checkbox") el.checked = v;
+    else el.value = +(v * Number(el.dataset.scale || 1)).toFixed(4);
+  }
   ui.govBasel.value = +(g.capital_ratio * 100).toFixed(2);
 }
 
@@ -745,6 +750,16 @@ function renderGovernment() {
     ["Labour used up", g.labor_bought.toFixed(1), "in public works so far"],
     ["Money in the economy", usd(m.money), "held by agents"],
     ["Labour price", usd(m.prices.labor), `food ${usd(m.prices.food)} · water ${usd(m.prices.water)}`],
+    ["Taxes last step", usd(Object.values(g.step_revenue).reduce((a, v) => a + v, 0)),
+      `production ${usd(g.step_revenue.production)} · salary ${usd(g.step_revenue.wage)} · profit ${usd(g.step_revenue.profit)}`],
+    ["Spending last step", usd(g.step_spent.benefits + g.step_spent.public_works),
+      `benefits ${usd(g.step_spent.benefits)} · public works ${usd(g.step_spent.public_works)}`],
+    ["Treasury", usd(g.treasury), `${usd(Object.values(g.revenue).reduce((a, v) => a + v, 0))} collected so far`],
+    ["Central bank loans", usd(g.llr_outstanding), `to banks · ${usd(g.llr_lent)} lent so far`],
+    ...(state.macro ? [
+      ["GDP (last year)", usd(state.macro.gdp_nominal), `real ${usd(state.macro.gdp_real)} at year-ago prices`],
+      ["Inflation", `${(state.macro.inflation * 100).toFixed(1)}%`, `CPI ${state.macro.cpi.toFixed(1)} · deflator ${state.macro.deflator.toFixed(1)}`],
+    ] : []),
   ];
   ui.govStats.innerHTML = "";
   for (const [label, value, note] of stats) {
@@ -764,6 +779,7 @@ ui.govRate.oninput = () => { govDirty = true; ui.govRateLabel.textContent = `${N
 ui.govBuyRange.oninput = () => { govDirty = true; setGovInputs(Number(ui.govRate.value), Number(ui.govBuyRange.value)); };
 ui.govBuy.oninput = () => { govDirty = true; ui.govBuyLabel.textContent = ui.govBuy.value; ui.govBuyRange.value = ui.govBuy.value; };
 ui.govEnabled.onchange = () => { govDirty = true; };
+ui.govForm.addEventListener("input", () => { govDirty = true; });
 ui.govBasel.oninput = () => { govDirty = true; };
 ui.govRevert.onclick = () => { ui.govStatus.hidden = true; fillGovernment(true); };
 ui.govForm.onsubmit = async (e) => {
@@ -771,6 +787,8 @@ ui.govForm.onsubmit = async (e) => {
   try {
     const next = await api("/api/government", {
       enabled: ui.govEnabled.checked,
+      ...Object.fromEntries([...ui.govForm.querySelectorAll("[data-policy]")].map(el =>
+        [el.dataset.policy, el.type === "checkbox" ? el.checked : Number(el.value) / Number(el.dataset.scale || 1)])),
       min_rate: Number(ui.govRate.value) / 100,
       labor_purchase: Number(ui.govBuy.value),
       capital_ratio: Number(ui.govBasel.value) / 100,
@@ -797,7 +815,7 @@ function fillBanking(force = false) {
   ui.bankEnabled.checked = b.enabled;
   ui.bankDeposit.value = +(b.deposit_rate * 100).toFixed(4);
   ui.bankSpread.value = +(b.loan_spread * 100).toFixed(4);
-  ui.bankReserve.value = +(b.reserve_ratio * 100).toFixed(2);
+  ui.bankReserve.value = +(b.liquidity * 100).toFixed(2);
   ui.bankMinCapital.value = b.min_capital;
   ui.bankIncomeShare.value = +(b.loan_income_share * 100).toFixed(2);
 }
@@ -814,6 +832,8 @@ function renderBanking() {
     ["Money supply", usd(b.money_supply), "cash (people + companies) + deposits"],
     ["Money multiplier", `×${b.multiplier.toFixed(2)}`, "money supply ÷ (cash + reserves)"],
     ["Credit limit", `${(b.loan_income_share * 100).toFixed(0)}% of a month`, `of each borrower's income (${b.month_steps} days)`],
+    ["Reserves at the central bank", usd(b.cb_reserves), `required: ${(b.reserve_requirement * 100).toFixed(0)}% of deposits` +
+      (b.cb_loans ? ` · owe it ${usd(b.cb_loans)}` : "")],
     ["Basel (central bank)", b.capital_ratio ? `${(b.capital_ratio * 100).toFixed(1)}% of loans` : "none",
       b.capital_ratio ? "equity a bank must hold; set in the Government tab" : "government off: no capital rule"],
     ["Kept by companies", usd(state.market.company_cash), `${usd(state.market.retained_total)} of profits retained so far`],
@@ -855,7 +875,7 @@ ui.bankForm.onsubmit = async (e) => {
       enabled: ui.bankEnabled.checked,
       deposit_rate: Number(ui.bankDeposit.value) / 100,
       loan_spread: Number(ui.bankSpread.value) / 100,
-      reserve_ratio: Number(ui.bankReserve.value) / 100,
+      liquidity: Number(ui.bankReserve.value) / 100,
       min_capital: Number(ui.bankMinCapital.value),
       loan_income_share: Number(ui.bankIncomeShare.value) / 100,
     });

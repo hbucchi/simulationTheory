@@ -55,12 +55,14 @@ class LabourPurchaseTests(unittest.TestCase):
             base = world.base_money()
             self.assertAlmostEqual(base, start + world.government.money_created, places=6)
 
-    def test_off_by_default(self):
+    def test_no_money_is_printed_by_default(self):
+        # Default policy: taxes pay for benefits and public works (balanced budget), no new money.
         world = World(seed=2, rules=Rules.from_dict({"agents": 5}))
         world.spawn_random_agents()
         for _ in range(20):
             world.step()
-        self.assertEqual((world.government.money_created, world.government.labor_bought), (0, 0))
+        self.assertEqual(world.government.money_created, 0)
+        self.assertGreater(sum(world.government.revenue.values()), 0)
 
 
 if __name__ == "__main__":

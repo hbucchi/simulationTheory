@@ -13,7 +13,8 @@ NO_ASSETS = {g: 0 for g in GOODS}
 def bank_world(**rules):
     """No starting agents or assets; tests place their own."""
     return World(seed=1, rules=Rules.from_dict({"assets": NO_ASSETS, "starting_banks": 0, "investing_enabled": False,
-                                                "death_enabled": False, **rules}))
+                                                "death_enabled": False, "reserve_ratio": 0, "bank_liquidity": 0,
+                                                "tax_production": 0, "tax_wage": 0, "tax_profit": 0, "benefit_rate": 0, **rules}))
 
 
 def open_bank(world, money=20000, services=50, shares=1.0):
@@ -81,7 +82,7 @@ class OpeningTests(unittest.TestCase):
 
 class DepositAndLoanTests(unittest.TestCase):
     def test_lending_respects_reserves_capital_services_and_collateral(self):
-        w = bank_world(bank_min_capital=1000, capital_ratio=0.1, reserve_ratio=0.1, loan_per_service=100,
+        w = bank_world(bank_min_capital=1000, capital_ratio=0.1, bank_liquidity=0.1, loan_per_service=100,
                        max_loan_to_value=1.0)
         owner, bank = open_bank(w, money=1000, services=1000)
         saver = w.create_agent(needs=CALM, money=0)
@@ -256,12 +257,12 @@ class CentralBankTests(unittest.TestCase):
         self.assertAlmostEqual(w.banking.lendable(w, bank), 1200 / 0.12)       # 12%: $10,000 of loans
         sim = server.Simulation.__new__(server.Simulation)
         sim.lock, sim.world, sim.detail = threading.Lock(), w, None
-        sim.set_policy(capital_ratio=0.24)
+        sim.set_policy({"capital_ratio": 0.24})
         self.assertAlmostEqual(w.banking.lendable(w, bank), 1200 / 0.24)
-        sim.set_policy(enabled=False)                                            # no regulator
+        sim.set_policy({"enabled": False})                                          # no regulator
         self.assertEqual(w.government.capital_ratio, 0)
         self.assertGreater(w.banking.lendable(w, bank), 1200 / 0.12)
-        sim.set_policy(enabled=True)
+        sim.set_policy({"enabled": True})
         self.assertAlmostEqual(w.government.capital_ratio, 0.24)                 # remembered
 
 

@@ -23,7 +23,7 @@ Definitions
   share whose need for a job is above 0.5.
 """
 
-INCOME_SOURCES = ("wages", "goods", "assets", "government")
+INCOME_SOURCES = ("wages", "goods", "assets", "government", "benefits", "banking")
 SMOOTHING = 0.05   # weight of the latest step in agents' smoothed income / consumption
 
 from collections import deque
@@ -91,12 +91,55 @@ def agent_values(world):
     return rows
 
 
+class NationalAccounts:
+    """GDP and price indexes over the last year (a year = 12 x month_steps steps).
+
+    - nominal GDP = goods produced over the last year x today's prices;
+    - real GDP = the same goods x the prices of a year ago (before a year has passed: of the
+      first step), so it moves only with quantities;
+    - GDP deflator = 100 x nominal / real: how much prices of what is produced changed;
+    - CPI = 100 x (last year's consumption at today's prices) / (at a year-ago prices): how
+      much the cost of what people buy changed; inflation = CPI / 100 - 1 (over a year).
+    Running sums keep this cheap (no re-adding a year of steps)."""
+
+    def __init__(self):
+        self.window = deque()
+        self.made = {g: 0.0 for g in economy.GOODS}
+        self.used = {g: 0.0 for g in economy.GOODS}
+        self.price_log = deque()
+
+    def update(self, produced, consumed, prices, year):
+        self.window.append((produced, consumed))
+        self.price_log.append({g: prices[g] for g in economy.GOODS})
+        for g in economy.GOODS:
+            self.made[g] += produced[g]
+            self.used[g] += consumed[g]
+        while len(self.window) > year:
+            old_p, old_c = self.window.popleft()
+            for g in economy.GOODS:
+                self.made[g] -= old_p[g]
+                self.used[g] -= old_c[g]
+        while len(self.price_log) > year + 1:
+            self.price_log.popleft()
+        then = self.price_log[0]
+        nominal = sum(self.made[g] * prices[g] for g in economy.GOODS)
+        real = sum(self.made[g] * then[g] for g in economy.GOODS)
+        basket_now = sum(self.used[g] * prices[g] for g in economy.GOODS)
+        basket_then = sum(self.used[g] * then[g] for g in economy.GOODS)
+        cpi = 100 * basket_now / basket_then if basket_then > 0 else 100.0
+        return {"gdp_nominal": nominal, "gdp_real": real,
+                "deflator": 100 * nominal / real if real > 0 else 100.0,
+                "cpi": cpi, "inflation": cpi / 100 - 1,
+                "accounts_steps": len(self.window)}
+
+
 class Recorder:
     """Collects per-step flows from the agents and keeps the snapshot history."""
 
     def __init__(self):
         self.history = deque(maxlen=HISTORY_STEPS)
         self.step_counts = {}
+        self.national = NationalAccounts()
 
     def begin_step(self, world):
         for a in world.agents:
@@ -121,9 +164,12 @@ class Recorder:
         produced = {g: sum(f["produced"].get(g, 0) for f in flows) for g in economy.GOODS}
         sources = {k: sum(f["sources"].get(k, 0.0) for f in flows) for k in INCOME_SOURCES}
         output_value = sum(produced[g] * prices[g] for g in economy.GOODS)
+        consumed = {g: sum(f["consumed"].get(g, 0) for f in flows) for g in economy.GOODS}
+        accounts = self.national.update(produced, consumed, prices, world.year_steps())
         worked = sum(1 for a in agents if a.labor_sold > 1e-9 or min(a.capacity_now, a.labor_need) > 1e-9)
         offering = sum(1 for a in agents if a.offered > 1e-9)
         self.history.append({
+            **accounts,
             "tick": world.tick,
             "population": len(world.agents),
             "deaths": sc["deaths"],
@@ -176,6 +222,11 @@ class Recorder:
             "labor_deals": world.labor.stats["hires"],
             "asset_trades": world.asset_trades - sc["asset_trades_before"],
             "gov_money": world.government.last_spent,
+            "tax_revenue": sum(world.government.step_revenue.values()),
+            "taxes": dict(world.government.step_revenue),
+            "benefits_paid": world.government.step_spent["benefits"],
+            "public_works": world.government.step_spent["public_works"],
+            "treasury": world.government.treasury,
         })
 
 

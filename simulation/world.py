@@ -49,10 +49,10 @@ class World:
         self.events = []  # newest last; trimmed to keep the payload small
         self.cooldowns = {}  # frozenset({id_a, id_b}) -> tick until which they ignore each other
         self.labor = LaborMarket()
-        self.government = Government(self.rules.gov_min_rate, self.rules.gov_labor_purchase,
-                                     self.rules.capital_ratio, self.rules.government_enabled)
-        self.banking = Banking(self.rules)
-        self.retained_total = 0.0   # company profits kept in companies so far
+        self.government = Government.from_rules(self.rules)
+        self.banking = Banking(self.rules, self.government)
+        self.retained_total = 0.0
+        self.assets_depreciated = {}   # asset shares worn out so far, by industry   # company profits kept in companies so far
         self._by_id = {}
         self.recorder = Recorder()  # per-step snapshots for the Report view
         self._dead_flows = []       # flows of agents that died this step (still counted)
@@ -75,6 +75,7 @@ class World:
         self.price_multiplier = {r: 1.0 for r in economy.RESOURCES}
         # Concentration of each resource's available (sellable) supply: 0 even, 1 one holder.
         self.concentration = {r: 0.0 for r in economy.RESOURCES}
+        self.buyer_concentration = {r: 0.0 for r in economy.RESOURCES}   # of buying power
         self.price_history = {r: deque(maxlen=self.PRICE_HISTORY) for r in economy.PRICED}
         self.next_id = 1
         self.alive = set()          # the agents list as a set, for fast "still alive?" checks
@@ -372,6 +373,7 @@ class World:
                 if surplus:
                     self.surplus_table.setdefault(a, {})[r] = surplus
         n_agents = len(self.agents)
+        purse = {a: economy.money_of(a) for a in self.agents}   # buying power
         for r in rules.active_goods:
             self.buyer_agents[r] = [a for a, w in zip(self.agents, wanted) if r in w]
             self.buyer_sets[r] = set(self.buyer_agents[r])
@@ -381,9 +383,12 @@ class World:
             # Agents with none to spare count as zeros.
             spares = list(spare_by_good[r].values())
             self.concentration[r] = economy.concentration(spares + [0] * (n_agents - len(spares)))
+            # How concentrated the buying power (money) of those who want it is, over all agents.
+            power = [purse[a] for a in self.buyer_agents[r]]
+            self.buyer_concentration[r] = economy.concentration(power + [0] * (n_agents - len(power)))
             if rules.demand_pricing_enabled:
                 target = economy.demand_multiplier_target(self.buyers[r], self.sellers[r], r, rules,
-                                                          self.concentration[r])
+                                                          self.concentration[r], self.buyer_concentration[r])
                 self.price_multiplier[r] += rules.price_adjust_speed * (target - self.price_multiplier[r])
             else:
                 self.price_multiplier[r] = 1.0
@@ -402,6 +407,26 @@ class World:
         for g in self.productivity_now:
             self.productivity_now[g] *= 1 + self.productivity_growth_per_step(g)
             self.asset_labor_now[g] *= 1 - self.labor_saving_per_step(g)
+        self.depreciate()
+
+    def year_steps(self):
+        return 12 * self.rules.month_steps
+
+    def depreciation_per_step(self, good):
+        """Daily wear such that a share loses depreciation[good] over a year (compounding)."""
+        return 1 - (1 - self.rules.depreciation.get(good, 0.0)) ** (1 / self.year_steps())
+
+    def depreciate(self):
+        """Plants wear out: every asset share shrinks a little each step (see rules.depreciation)."""
+        rates = {g: self.depreciation_per_step(g) for g in self.rules.active_goods}
+        for a in self.agents:
+            for g in list(a.assets):
+                lost = a.assets[g] * rates.get(g, 0.0)
+                if lost:
+                    a.assets[g] -= lost
+                    self.assets_depreciated[g] = self.assets_depreciated.get(g, 0.0) + lost
+                    if a.assets[g] <= 1e-6:
+                        del a.assets[g]
 
     def asset_jobs(self, good, shares):
         """Labour per step ``shares`` of a ``good`` asset can employ right now."""
@@ -591,6 +616,7 @@ class World:
         before the check ran.
         """
         self.tick += 1
+        self.government.begin_step()
         self.recorder.begin_step(self)
         self._dead_flows = []
         self.grow_assets()
@@ -763,6 +789,11 @@ class World:
         deals = economy.trade(a, b, prices, rules, self.rng, scarcity, self.unit_markups())
         for buyer, seller, bought, paid, stocked, unit_prices in deals:
             self.recorder.count("goods_deals")
+            # Production tax: the seller pays its share of the money it got for the goods.
+            tax = min(max(0.0, seller.money), self.government.tax("production", paid.get("money", 0.0)))
+            if tax > 0:
+                seller.money -= tax
+                self.government.collect("production", tax)
             # Units bought beyond its needs: industry inputs or a stockpile.
             inputs = {r: n for r, n in stocked.items() if economy.input_target(buyer, r, rules)}
             hoard = {r: n for r, n in stocked.items() if r not in inputs}
@@ -808,7 +839,12 @@ class World:
         """All the money there is: agents' cash, their companies' cash and the banks' cash.
         Trades, wages, deposits, loans and dividends only move it; the government creates it."""
         return (sum(a.money + a.company_cash for a in self.agents)
-                + sum(b.reserves for b in self.banking.banks))
+                + sum(b.reserves + b.cb_reserves for b in self.banking.banks) + self.government.treasury)
+
+    def money_issued(self):
+        """New money put in so far: by the government (public works, interest on reserves) and the
+        central bank's loans to banks still outstanding. base_money() = starting money + this."""
+        return self.government.money_created + self.government.llr_outstanding
 
     def retain_earnings(self):
         """Each owner's companies keep part of this step's profit (goods sold minus wages paid) as
@@ -831,6 +867,12 @@ class World:
                 continue
             profit = a.flow["sources"].get("goods", 0.0) - wages
             if profit > 0:
+                # Profit tax first, then the split between dividends and retained earnings.
+                tax = min(a.money, self.government.tax("profit", profit))
+                if tax > 0:
+                    a.money -= tax
+                    self.government.collect("profit", tax)
+                    profit -= tax
                 keep = min(a.money, profit * (1 - a.personality["payout_ratio"]))
                 if keep > 0:
                     a.money -= keep
@@ -887,6 +929,10 @@ class World:
                            for g in economy.GOODS},
             "consumer_needs": list(self.rules.consumer_needs),
             "banking": self.banking.to_dict(self),
+            # National accounts of the latest step (GDP over the last year, price indexes).
+            "macro": ({k: round(self.recorder.history[-1][k], 4) for k in
+                       ("gdp_nominal", "gdp_real", "deflator", "cpi", "inflation")}
+                      if self.recorder.history else None),
             # Industries left out because their recipe needs a good that isn't in this game.
             "auto_excluded": list(self.rules.auto_excluded),
             "government": self.government.to_dict(),
@@ -918,11 +964,13 @@ class World:
                 "labor": self.labor.to_dict(),
                 "asset_trades": self.asset_trades,
                 "assets_built": self.assets_built,
+                "assets_depreciated": {g: round(v, 3) for g, v in self.assets_depreciated.items()},
                 "build_cost_money": {g: self.build_cost_money(g) for g in self.rules.active_goods},
                 "asset_trade_money": self.asset_trade_money,
                 # Average units per agent over the scarcity window (oldest first) and how much it fell.
                 "per_agent_history": {r: list(h) for r, h in self.per_agent_history.items()},
                 "scarcity": self.scarcity,
+                "buyer_concentration": {r: round(v, 3) for r, v in self.buyer_concentration.items()},
                 "stockpiling": {r: self.rules.stockpiling_enabled and d >= self.rules.scarcity_trigger
                                 for r, d in self.scarcity.items()},
                 "money": sum(a.money for a in self.agents),

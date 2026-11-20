@@ -173,6 +173,21 @@
             <p class="field-help">Central bank rule: a bank's equity (its owners' money) must be at least this share of its
               loans, which are lent from third parties' deposits. At 12%, $1 of equity backs at most $8.33 of loans.</p>
           </div>
+          <h4 class="gov-sub">Taxes and spending</h4>
+          <div class="bank-fields gov-fields">
+            <label>Production tax <span><input data-policy="tax_production" data-scale="100" type="number" min="0" max="100" step="1"> % of every sale</span></label>
+            <label>Salary tax <span><input data-policy="tax_wage" data-scale="100" type="number" min="0" max="100" step="1"> % of wages</span></label>
+            <label>Profit tax <span><input data-policy="tax_profit" data-scale="100" type="number" min="0" max="100" step="1"> % of profits</span></label>
+            <label>Unemployment benefit <span><input data-policy="benefit_rate" data-scale="100" type="number" min="0" max="1000" step="5"> % of the wage</span></label>
+            <label class="check">Spend all taxes (balanced budget: the rest buys public works) <input data-policy="balanced_budget" type="checkbox"></label>
+          </div>
+          <h4 class="gov-sub">Central bank</h4>
+          <div class="bank-fields gov-fields">
+            <label>Reserve requirement <span><input data-policy="reserve_requirement" data-scale="100" type="number" min="0" max="100" step="1"> % of deposits</span></label>
+            <label>Interest on reserves <span><input data-policy="reserve_rate" data-scale="100" type="number" min="0" max="100" step="0.01"> % / step</span></label>
+            <label class="check">Lender of last resort (lends to solvent banks short of cash) <input data-policy="lender_of_last_resort" type="checkbox"></label>
+            <label>… at the policy rate + <span><input data-policy="llr_penalty" data-scale="100" type="number" min="0" max="100" step="0.05"> % / step</span></label>
+          </div>
           <div class="form-actions">
             <button type="button" id="gov-revert" class="ghost">Revert</button>
             <span class="spacer"></span>
@@ -193,7 +208,7 @@
           <div class="bank-fields">
             <label>Deposit rate <span><input id="bank-deposit" type="number" min="0" max="100" step="0.01"> % / step</span></label>
             <label>Loan spread <span><input id="bank-spread" type="number" min="0" max="100" step="0.01"> % / step</span></label>
-            <label>Reserve ratio <span><input id="bank-reserve" type="number" min="0" max="100" step="1"> % of deposits</span></label>
+            <label>Vault cash kept <span><input id="bank-reserve" type="number" min="0" max="100" step="1"> % of deposits</span></label>
             <label>Minimum capital <span>$ <input id="bank-min-capital" type="number" min="0" step="500"></span></label>
             <label>Lend each agent up to <span><input id="bank-income-share" type="number" min="0" max="10000" step="5"> % of a month's income</span></label>
           </div>
@@ -269,6 +284,18 @@
     <div id="report-kpis"></div>
 
     <div class="report-grid">
+      <section class="card report-card">
+        <h2 class="card-title">GDP</h2>
+        <p class="card-sub">What the economy made over the last year, at today's prices (nominal) and at the prices of a
+          year ago (real: changes only with quantities).</p>
+        <div id="chart-gdp"></div>
+      </section>
+      <section class="card report-card">
+        <h2 class="card-title">Price indexes</h2>
+        <p class="card-sub">CPI: last year's consumption at today's vs a year ago's prices. Deflator: nominal ÷ real GDP.
+          Above 100 = inflation.</p>
+        <div id="chart-cpi"></div>
+      </section>
       <section class="card report-card span-2">
         <h2 class="card-title">Prices</h2>
         <p class="card-sub">Price of one unit over time (money per unit).</p>

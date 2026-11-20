@@ -86,7 +86,10 @@ class Bank:
         self.id = bank_id
         self.owner_id = owner.id
         self.name = f"Bank of {owner.name}"
-        self.reserves = capital          # cash the bank holds
+        self.reserves = capital          # cash the bank holds itself (vault)
+        self.cb_reserves = 0.0           # its account at the central bank (required reserves)
+        self.cb_loans = 0.0              # what it owes the central bank (lender of last resort)
+        self.cb_interest = 0.0           # interest paid to the central bank so far
         self.capital_in = capital        # what the founder put in
         self.deposits = {}               # agent id -> balance
         self.loans = []
@@ -109,13 +112,16 @@ class Bank:
 
     @property
     def equity(self):
-        return self.reserves + self.loan_total - self.deposit_total
+        """Assets (vault cash + central bank account + loans) minus debts (deposits + central bank loans)."""
+        return self.reserves + self.cb_reserves + self.loan_total - self.deposit_total - self.cb_loans
 
     def to_dict(self, world):
         owner = world.agent_by_id(self.owner_id)
         return {"id": self.id, "name": self.name, "owner": owner.name if owner else None,
                 "status": self.status, "opened": self.opened,
                 "reserves": round(self.reserves, 2), "deposits": round(self.deposit_total, 2),
+                "cb_reserves": round(self.cb_reserves, 2), "cb_loans": round(self.cb_loans, 2),
+                "cb_interest": round(self.cb_interest, 2),
                 "loans": round(self.loan_total, 2), "equity": round(self.equity, 2),
                 "capital_in": round(self.capital_in, 2), "depositors": len(self.deposits),
                 "borrowers": len({l.borrower_id for l in self.loans}),
@@ -132,11 +138,12 @@ class Banking:
     """All the banks in the world. Live settings (on/off, rates) start from the rules and can
     be changed while the game runs."""
 
-    def __init__(self, rules):
+    def __init__(self, rules, government=None):
+        self.gov = government
         self.enabled = rules.banking_enabled
         self.deposit_rate = rules.deposit_rate
         self.loan_spread = rules.loan_spread
-        self.reserve_ratio = rules.reserve_ratio
+        self.liquidity = rules.bank_liquidity   # vault cash each bank keeps (share of deposits)
         self.min_capital = rules.bank_min_capital
         self.loan_income_share = rules.loan_income_share
         self.banks = []
@@ -201,11 +208,15 @@ class Banking:
         """Take out up to ``amount``, from the banks with the most cash first (a bank can only
         pay out the reserves it has). Returns what it got."""
         got = 0.0
-        for bank in sorted(self.banks, key=lambda b: -b.reserves):
+        for bank in sorted(self.banks, key=lambda b: -(b.reserves + b.cb_reserves)):
             if got >= amount - 1e-9:
                 break
             held = bank.deposits.get(agent.id, 0.0)
-            take = min(held, amount - got, max(0.0, bank.reserves))
+            want = min(held, amount - got)
+            if want <= 0:
+                continue
+            self._raise_cash(bank, want)
+            take = min(want, max(0.0, bank.reserves))
             if take <= 0:
                 continue
             bank.reserves -= take
@@ -216,6 +227,30 @@ class Banking:
             got += take
         _sync(agent, self)
         return got
+
+    def _raise_cash(self, bank, amount):
+        """Get ``amount`` of vault cash: from its central bank account, then (if the central bank is
+        a lender of last resort and the bank is solvent) by borrowing from the central bank."""
+        short = amount - bank.reserves
+        if short <= 0:
+            return
+        move = min(short, bank.cb_reserves)
+        bank.cb_reserves -= move
+        bank.reserves += move
+        short -= move
+        if short > 1e-9:
+            self._llr(bank, short)
+
+    def _llr(self, bank, amount):
+        """The central bank lends ``amount`` of new money to a solvent bank. Returns what it lent."""
+        gov = self.gov
+        if gov is None or not gov.lender_of_last_resort or bank.status != "open" or bank.equity <= 0:
+            return 0.0
+        bank.cb_loans += amount
+        bank.reserves += amount
+        gov.llr_outstanding += amount
+        gov.llr_lent += amount
+        return amount
 
     def cash_up(self, agent, amount):
         """Make sure the agent holds ``amount`` in cash, withdrawing from its deposits."""
@@ -237,12 +272,20 @@ class Banking:
         monthly = agent.income_avg * world.rules.month_steps
         return max(0.0, self.loan_income_share * monthly - self.debt_of(agent))
 
+    def required(self, bank):
+        """Reserves the central bank requires the bank to hold in its account there."""
+        return (self.gov.reserve_requirement if self.gov else 0.0) * bank.deposit_total
+
     def lendable(self, world, bank):
         """Most a bank can lend now (reserve ratio, capital ratio, banking services)."""
         owner = world.agent_by_id(bank.owner_id)
         if owner is None or bank.status != "open":
             return 0.0
-        by_reserves = bank.reserves - self.reserve_ratio * bank.deposit_total
+        # Vault cash above its own liquidity buffer; nothing while it misses the reserve requirement
+        # or owes the central bank.
+        by_reserves = bank.reserves - self.liquidity * bank.deposit_total
+        if bank.cb_loans > 0 or bank.cb_reserves < self.required(bank) - 0.01:
+            by_reserves = 0.0
         basel = world.government.capital_ratio    # set by the central bank
         by_capital = (bank.equity / basel - bank.loan_total if basel > 0 else math.inf)
         # (A cent of slack: dividends leave equity at exactly the minimum, give or take float noise.)
@@ -286,6 +329,7 @@ class Banking:
     def step(self, world):
         self._open_new(world)
         for bank in list(self.banks):
+            self._central_bank(world, bank)
             self._collect(world, bank)
             owner = world.agent_by_id(bank.owner_id)
             if bank.status == "open":
@@ -305,6 +349,42 @@ class Banking:
                 self._wind_down(world, bank, owner)
         if self.available(world):
             self._move_cash(world)
+
+    def _central_bank(self, world, bank):
+        """Settle with the central bank: keep the required reserves in the bank's account there
+        (topping it up from the vault, or borrowing as a last resort), get interest on reserves,
+        pay interest on central bank loans and repay them when it can."""
+        gov = world.government
+        if bank.cb_reserves > 0 and gov.reserve_rate > 0:
+            interest = bank.cb_reserves * gov.reserve_rate
+            gov.spend("reserve_interest", interest)
+            bank.reserves += interest
+        if bank.cb_loans > 0:
+            interest = bank.cb_loans * (gov.min_rate + gov.llr_penalty)
+            paid = min(interest, bank.reserves)
+            bank.reserves -= paid
+            bank.cb_interest += paid
+            gov.receive(paid)
+        required = self.required(bank) if bank.status == "open" else 0.0
+        gap = required - bank.cb_reserves
+        if gap > 0:
+            move = min(gap, max(0.0, bank.reserves))
+            bank.reserves -= move
+            bank.cb_reserves += move
+            if gap - move > 1e-9 and self._llr(bank, gap - move):
+                bank.reserves -= gap - move
+                bank.cb_reserves += gap - move
+                world.log(f"Central bank lent {bank.name} {gap - move:.2f} to meet its reserve requirement")
+        elif gap < 0:
+            bank.cb_reserves += gap          # the excess goes back to the vault
+            bank.reserves -= gap
+        if bank.cb_loans > 0:
+            spare = bank.reserves - self.liquidity * bank.deposit_total
+            repay = min(bank.cb_loans, max(0.0, spare))
+            if repay > 0:
+                bank.reserves -= repay
+                bank.cb_loans -= repay
+                gov.llr_outstanding -= repay   # the central bank's money disappears again
 
     def _open_new(self, world):
         if not self.available(world):
@@ -417,8 +497,14 @@ class Banking:
         profit = bank.equity - bank.last_equity
         dividend = 0.0
         if profit > 0:
+            # Profit tax first (paid from its cash).
+            tax = min(world.government.tax("profit", profit), max(0.0, bank.reserves))
+            if tax > 0:
+                bank.reserves -= tax
+                world.government.collect("profit", tax)
+                profit -= tax
             keep = max(self.min_capital, world.government.capital_ratio * bank.loan_total)
-            cash = bank.reserves - self.reserve_ratio * bank.deposit_total
+            cash = bank.reserves - self.liquidity * bank.deposit_total
             dividend = min(owner.personality["payout_ratio"] * profit, bank.equity - keep, cash)
             if dividend > 0.01:
                 bank.reserves -= dividend
@@ -431,7 +517,15 @@ class Banking:
         bank.last_equity = bank.equity
 
     def _wind_down(self, world, bank, owner):
-        """Pay depositors back pro rata from the cash it has; close once nothing is left."""
+        """Pay depositors back pro rata from the cash it has (after repaying the central bank);
+        close once nothing is left."""
+        bank.reserves += bank.cb_reserves
+        bank.cb_reserves = 0.0
+        if bank.cb_loans > 0:
+            repay = min(bank.cb_loans, bank.reserves)
+            bank.reserves -= repay
+            bank.cb_loans -= repay
+            world.government.llr_outstanding -= repay
         total = bank.deposit_total
         if total > 0 and bank.reserves > 0:
             paid = min(bank.reserves, total)
@@ -448,6 +542,11 @@ class Banking:
             bank.reserves -= paid
         if bank.loans:
             return
+        if bank.cb_loans > 1e-9 and bank.reserves <= 1e-9:
+            # Nothing left to repay the central bank with: that new money stays out there.
+            world.government.llr_outstanding -= bank.cb_loans
+            world.government.money_created += bank.cb_loans
+            bank.cb_loans = 0.0
         if bank.status == "failed" and bank.deposits and bank.reserves <= 1e-6:
             # Nothing left to pay with: depositors lose the rest.
             for agent_id in list(bank.deposits):
@@ -499,12 +598,16 @@ class Banking:
         open_banks = self.open_banks()
         cash = sum(a.money + a.company_cash for a in world.agents)   # people's and companies' cash
         deposits = sum(b.deposit_total for b in self.banks)
-        reserves = sum(b.reserves for b in self.banks)
+        reserves = sum(b.reserves + b.cb_reserves for b in self.banks)
         return {
             "enabled": self.enabled, "available": self.available(world),
             "industry_active": world.rules.is_active("banking"),
             "deposit_rate": self.deposit_rate, "loan_spread": self.loan_spread,
-            "reserve_ratio": self.reserve_ratio, "capital_ratio": world.government.capital_ratio,
+            "liquidity": self.liquidity, "reserve_requirement": world.government.reserve_requirement,
+            "capital_ratio": world.government.capital_ratio,
+            "lender_of_last_resort": world.government.lender_of_last_resort,
+            "cb_reserves": round(sum(b.cb_reserves for b in self.banks), 2),
+            "cb_loans": round(sum(b.cb_loans for b in self.banks), 2),
             "min_capital": self.min_capital, "loan_income_share": self.loan_income_share,
             "month_steps": world.rules.month_steps,
             "deposit_rate_now": self.deposit_rate_now(world), "loan_rate_now": self.loan_rate_now(world),

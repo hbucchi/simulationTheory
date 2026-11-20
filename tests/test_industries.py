@@ -14,6 +14,7 @@ def world_with(**rules):
     return World(seed=1, rules=Rules.from_dict({
         "assets": NO_ASSETS, "investing_enabled": False, "selling_enabled": False,
         "labor_saving": {g: 0 for g in GOODS}, "productivity_growth": {g: 0 for g in GOODS},
+        "depreciation": {g: 0 for g in GOODS},
         "efficiency_weights": {"hunger": 0, "thirst": 0, "sleep": 0, "boredom": 0},
         "asset_labor": {g: 1 for g in GOODS}, "productivity": {g: 1 for g in GOODS}, **rules}))
 

@@ -292,6 +292,15 @@ function renderReport(r) {
       KPI("Government spending", rate(p => p.gov_money), fmt.money, "rel", null,
           `per step · ${fmt.money(t.gov_money)} created · ${fmt.num(t.labor_gov, 1)} labour hired`),
     ]),
+    kpiSection("National accounts (last year)", [
+      KPI("Nominal GDP", stock(p => p.gdp_nominal), fmt.money, "rel", "up", "goods made in the last year × today's prices"),
+      KPI("Real GDP", stock(p => p.gdp_real), fmt.money, "rel", "up", "the same goods × prices a year ago"),
+      KPI("GDP deflator", stock(p => p.deflator), (v) => fmt.num(v, 1), "rel", null, "100 × nominal ÷ real"),
+      KPI("Consumer prices (CPI)", stock(p => p.cpi), (v) => fmt.num(v, 1), "rel", null, "last year's basket: today vs a year ago (100 = same)"),
+      KPI("Inflation", stock(p => p.inflation), pct, "pp", null, "CPI change over a year"),
+      KPI("Taxes", rate(p => p.tax_revenue), fmt.money, "rel", null, "per step: production + salary + profit"),
+      KPI("Unemployment benefit", rate(p => p.benefits_paid), fmt.money, "rel", null, "per step, paid from taxes"),
+    ]),
     kpiSection("Economy capacity", [
       KPI("Labour supply", rate(p => p.labor_made), (v) => fmt.num(v, 2), "rel", null, "labour capacity of all agents, per step"),
       KPI("Job capacity", rate(p => p.job_capacity), (v) => fmt.num(v, 2), "rel", null, "labour all assets could employ at full capacity"),
@@ -310,6 +319,14 @@ function renderReport(r) {
       KPI("Struggling", stock(p => p.struggling), pct, "pp", "down", "agents who badly need a job"),
     ]),
   );
+
+  // National accounts: GDP at today's and at year-ago prices, and price indexes.
+  lineChart($("chart-gdp"), { x, xLabel: "Step", title: "GDP over the last year", tipFormat: fmt.money,
+    series: [{ label: "Nominal (today's prices)", color: SERIES[0], values: s.map(p => p.gdp_nominal) },
+             { label: "Real (prices a year ago)", color: SERIES[1], values: s.map(p => p.gdp_real) }] });
+  lineChart($("chart-cpi"), { x, xLabel: "Step", title: "Price indexes (100 = a year ago)", tipFormat: (v) => fmt.num(v, 1),
+    series: [{ label: "CPI", color: SERIES[2], values: s.map(p => p.cpi) },
+             { label: "GDP deflator", color: SERIES[3], values: s.map(p => p.deflator) }] });
 
   // Prices: the average price of each industry layer, and the wage.
   const goods = activeGoods();
@@ -422,7 +439,8 @@ function renderReport(r) {
     r.quintiles.map((q, i) => [fifths[i], fmt.pct(q.share), fmt.money(q.wealth), fmt.money(q.income), q.wellbeing.toFixed(2)]));
 
   // Income by source.
-  const SOURCES = [["wages", "Wages"], ["goods", "Goods sales"], ["assets", "Asset sales"], ["government", "Government"]];
+  const SOURCES = [["wages", "Wages"], ["goods", "Goods sales"], ["assets", "Asset sales"], ["government", "Government"],
+                   ["benefits", "Unemployment benefit"], ["banking", "Bank dividends"]];
   lineChart($("chart-sources"), { x, xLabel: "Step", title: "Income by source", tipFormat: fmt.money,
     series: SOURCES.map(([k, label], i) => ({ label, color: SERIES[i], values: flow(p => p.income_sources[k]) })) });
   const srcTotal = Object.values(t.income_sources).reduce((a, v) => a + v, 0) || 1;

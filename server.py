@@ -14,9 +14,9 @@ API
     POST   /api/agents      {...}     create an agent (any field omitted = default)
     POST   /api/agents/<id> {...}     edit an agent (only the fields sent change)
     DELETE /api/agents/<id>           remove an agent
-    POST   /api/government {"enabled": bool, "min_rate": r, "labor_purchase": n, "capital_ratio": r}
-                           (central bank: capital_ratio is the Basel rule for banks)
-    POST   /api/banking    {"enabled": bool, "deposit_rate": r, "loan_spread": r, "reserve_ratio": r,
+    POST   /api/government any of POLICY_LIMITS (taxes, benefit, policy rate, Basel capital ratio,
+                           reserve requirement, lender of last resort, ...), changes live
+    POST   /api/banking    {"enabled": bool, "deposit_rate": r, "loan_spread": r, "liquidity": r,
                             "min_capital": m, "loan_income_share": s}
                            (any subset; changes live)
                                       change government policy while the game runs
@@ -90,21 +90,22 @@ class Simulation:
             self.world.update_agent(self._get(agent_id), **config)
             return self.world.to_dict(self.detail)
 
-    def set_policy(self, min_rate=None, labor_purchase=None, capital_ratio=None, enabled=None):
+    def set_policy(self, changes):
+        """Change government / central bank policy while the game runs (see government.py)."""
         with self.lock:
             gov = self.world.government
-            if enabled is not None:
-                gov.enabled = enabled
-            if min_rate is not None:
-                gov.min_rate = min_rate
-            if labor_purchase is not None:
-                gov.labor_purchase = labor_purchase
-            if capital_ratio is not None:
-                gov.capital_ratio = capital_ratio
-            self.world.log("Government switched off: no policy rate, no labour bought, no capital rule for banks"
+            for key, value in changes.items():
+                if key == "enabled":
+                    gov.enabled = value
+                else:
+                    gov.set(key, value)
+            self.world.log("Government switched off: no taxes, spending, policy rate or rules for banks"
                            if not gov.enabled else
-                           f"Government policy: minimum rate {gov.min_rate:.2%}, buying {gov.labor_purchase:g} "
-                           f"labour per step; central bank capital ratio (Basel) {gov.capital_ratio:.1%}")
+                           f"Government policy: taxes {gov.tax_production:.0%} production, {gov.tax_wage:.0%} salary, "
+                           f"{gov.tax_profit:.0%} profit; benefit {gov.benefit_rate:.0%} of the wage; policy rate "
+                           f"{gov.min_rate:.2%}; banks hold {gov.reserve_requirement:.0%} of deposits at the central bank "
+                           f"and equity of {gov.capital_ratio:.1%} of loans; lender of last resort "
+                           f"{'on' if gov.lender_of_last_resort else 'off'}")
             return self.world.to_dict(self.detail)
 
     def set_banking(self, changes):
@@ -115,7 +116,7 @@ class Simulation:
                 setattr(bank, key, value)
             self.world.log("Banking " + ("on" if bank.enabled else "off (banks wind down)") +
                            f": deposit rate {bank.deposit_rate:.2%}, loan spread {bank.loan_spread:.2%}, "
-                           f"reserve ratio {bank.reserve_ratio:.0%}, "
+                           f"keeps {bank.liquidity:.0%} of deposits as cash, "
                            f"minimum capital {bank.min_capital:,.0f}, lends up to "
                            f"{bank.loan_income_share:.0%} of a month's income")
             return self.world.to_dict(self.detail)
@@ -142,6 +143,29 @@ class Simulation:
     def state(self):
         with self.lock:
             return self.world.to_dict(self.detail)
+
+
+# Government / central bank settings that can be changed live: name -> (low, high) or bool.
+POLICY_LIMITS = {"min_rate": (0, 10), "labor_purchase": (0, 1e6), "capital_ratio": (0, 1),
+                 "tax_production": (0, 1), "tax_wage": (0, 1), "tax_profit": (0, 1), "benefit_rate": (0, 10),
+                 "reserve_requirement": (0, 1), "reserve_rate": (0, 1), "llr_penalty": (0, 1),
+                 "enabled": bool, "balanced_budget": bool, "lender_of_last_resort": bool}
+
+
+def parse_policy(body):
+    changes = {}
+    for key, value in body.items():
+        if key == "detail":
+            continue
+        if key not in POLICY_LIMITS:
+            raise ValueError(f"unknown government setting: {key}")
+        if POLICY_LIMITS[key] is bool:
+            if not isinstance(value, bool):
+                raise ValueError(f"{key} must be true or false")
+            changes[key] = value
+        else:
+            changes[key] = _number(value, key, *POLICY_LIMITS[key])
+    return changes
 
 
 def parse_detail(value):
@@ -256,7 +280,7 @@ class Handler(SimpleHTTPRequestHandler):
             if self.path == "/api/agents":
                 return self.sim.add_agent(parse_agent_config(body))
             if self.path == "/api/banking":
-                limits = {"deposit_rate": (0, 1), "loan_spread": (0, 1), "reserve_ratio": (0, 1),
+                limits = {"deposit_rate": (0, 1), "loan_spread": (0, 1), "liquidity": (0, 1),
                           "min_capital": (0, 1e12), "loan_income_share": (0, 100)}
                 changes = {}
                 for key, value in body.items():
@@ -272,12 +296,7 @@ class Handler(SimpleHTTPRequestHandler):
                         raise ValueError(f"unknown banking setting: {key}")
                 return self.sim.set_banking(changes)
             if self.path == "/api/government":
-                rate, buy, basel, on = (body.get(k) for k in ("min_rate", "labor_purchase", "capital_ratio", "enabled"))
-                if on is not None and not isinstance(on, bool):
-                    raise ValueError("enabled must be true or false")
-                return self.sim.set_policy(None if rate is None else _number(rate, "min_rate", 0, 10),
-                                           None if buy is None else _number(buy, "labor_purchase", 0, 1e6),
-                                           None if basel is None else _number(basel, "capital_ratio", 0, 1), on)
+                return self.sim.set_policy(parse_policy(body))
             match = AGENT_PATH.fullmatch(self.path)
             if match:
                 return self.sim.update_agent(int(match[1]), parse_agent_config(body))

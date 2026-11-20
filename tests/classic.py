@@ -7,7 +7,7 @@ layer 1), every industry is primary, nothing expires, the stock band covers 1000
 the old "100 units of each good"), and those three industries have the old productivity.
 """
 
-from simulation.rules import NEEDS
+from simulation.rules import GOODS, NEEDS
 
 CALM = {n: 0 for n in NEEDS}
 
@@ -19,4 +19,8 @@ CLASSIC = {
     # the old per-asset numbers for these three goods
     "asset_labor": {"food": 0.2, "water": 0.2, "games": 0.2},
     "productivity": {"food": 1.0, "water": 1.0, "games": 1.0},
+    # plants don't wear out (exact output in tests)
+    "depreciation": {g: 0 for g in GOODS},
+    # no taxes or government spending (mechanics are tested on their own)
+    "tax_production": 0, "tax_wage": 0, "tax_profit": 0, "benefit_rate": 0,
 }

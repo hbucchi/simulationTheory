@@ -619,3 +619,6 @@ input.recipe-input { width: 190px; }
 .module-text small { color: var(--muted); font-size: 11.5px; }
 .module-text .module-needs { color: var(--faint); }
 .setup-fields label.module-item.disabled .module-needs { color: var(--bad); }
+
+.gov-sub { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); margin: 14px 0 6px; }
+.bank-fields label.check { justify-content: space-between; }

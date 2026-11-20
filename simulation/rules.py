@@ -11,7 +11,7 @@ each new agent is drawn from; see distributions.py.
 from dataclasses import asdict, dataclass, field, fields
 
 from . import distributions
-from .catalog import BY_ID, CAPITAL_GOODS, CATALOG, OWN_USE_GOODS, default_build_cost
+from .catalog import BY_ID, CAPITAL_GOODS, CATALOG, OWN_USE_GOODS, TECH_SERVICES, default_build_cost
 
 GOODS = tuple(e["id"] for e in CATALOG)   # every good; each is made by its own industry (assets)
 # Default split (a game's rules can change what each good does, see Rules.effects):
@@ -59,6 +59,16 @@ PRODUCTIVITY_PER_LAYER = 1.0
 def default_productivity(good, layer):
     override = BY_ID[good].get("productivity")
     return override if override is not None else BASE_PRODUCTIVITY + PRODUCTIVITY_PER_LAYER * (layer - 1)
+
+
+def default_depreciation(good):
+    """Yearly wear of an industry's plant (1-5%): buildings last longest, machines and technology
+    wear out fastest."""
+    if good in ("housing",):
+        return 0.01
+    if good in ("banking",) or good in CAPITAL_GOODS or good in TECH_SERVICES or good == "electronics":
+        return 0.05 if good != "banking" else 0.02
+    return 0.03 if _DEFAULT_LAYERS[good] == 1 else 0.04
 
 
 def main_need(effects):
@@ -169,6 +179,9 @@ class Rules:
     productivity_growth: dict = field(default_factory=lambda: {g: 0.05 for g in GOODS})
     productivity_growth_steps: int = 50
     labor_saving: dict = field(default_factory=lambda: {g: 0.03 for g in GOODS})
+    # Depreciation: every industry's plant wears out by depreciation[g] a year (a year is
+    # 12 x month_steps steps), so asset shares shrink unless they are replaced by building.
+    depreciation: dict = field(default_factory=lambda: {g: default_depreciation(g) for g in GOODS})
     asset_return: dict = field(default_factory=lambda: {g: 0.01 for g in GOODS})
 
     # Industries. Every good is made by its own industry (its assets are the capital).
@@ -242,6 +255,22 @@ class Rules:
     gov_min_rate: float = 0.0
     gov_labor_purchase: float = 0.0
     capital_ratio: float = 0.12
+    # Central bank: banks keep reserve_ratio x deposits in an account at the central bank, which
+    # pays reserve_rate on it; as lender of last resort it lends to solvent banks that run out of
+    # cash, at the policy rate + llr_penalty (per step).
+    reserve_ratio: float = 0.1
+    reserve_rate: float = 0.0
+    lender_of_last_resort: bool = True
+    llr_penalty: float = 0.002
+    # Taxes (shares) and spending. Production tax: of the money of every sale of goods (seller
+    # pays). Salary tax: of every wage. Profit tax: of company and bank profits. The treasury pays
+    # public works, then an unemployment benefit of benefit_rate x the wage for labour offered and
+    # not hired; with balanced_budget what is left hires more idle labour for public works.
+    tax_production: float = 0.05
+    tax_wage: float = 0.10
+    tax_profit: float = 0.15
+    benefit_rate: float = 0.4
+    balanced_budget: bool = True
 
     # Banking (see banking.py). Banks are an industry ("banking"): its plant is built from capital
     # goods, runs on labour and electricity and makes the banking services that loans use up
@@ -252,7 +281,7 @@ class Rules:
     starting_banks: int = 3            # agents that start with a banking plant (and open a bank)
     starting_bank_shares: float = 1.0  # banking shares each of them starts with
     bank_min_capital: float = 5000.0   # founder's own money a bank needs to open (and to lend)
-    reserve_ratio: float = 0.1         # reserves >= this x deposits
+    bank_liquidity: float = 0.05       # vault cash each bank keeps itself (x deposits) before lending
     deposit_rate: float = 0.001
     loan_spread: float = 0.003         # loan rate = deposit rate + this
     loan_steps: int = 300              # loans are repaid over this many steps
@@ -282,12 +311,16 @@ class Rules:
     #     sellers = agents with some to spare.
     #   concentration  = 1 + concentration_weight[r] x C, where C is 0 when the available
     #     (sellable) supply is spread evenly over its holders and 1 when one agent holds it all.
-    # Target multiplier = pressure x concentration, kept within [price_floor, price_cap]; the
+    #   buying power  = 1 / (1 + buyer_power_weight[r] x B), where B is 0 when the money of the
+    #     agents that want it is spread evenly over them and 1 when one buyer has it all: a few
+    #     big buyers (monopsony) push prices down, as many sellers chase few customers.
+    # Target multiplier = pressure x concentration x buying power, within [price_floor, price_cap]; the
     # multiplier moves price_adjust_speed of the way to the target each step. When buyers
     # outnumber sellers, each extra unit in the same deal costs unit_markup more (compounding).
     demand_pricing_enabled: bool = True
     price_elasticity: dict = field(default_factory=lambda: {r: 0.5 for r in PRICED})
     concentration_weight: dict = field(default_factory=lambda: {r: 1.0 for r in PRICED})
+    buyer_power_weight: dict = field(default_factory=lambda: {r: 1.0 for r in PRICED})
     price_adjust_speed: float = 0.2
     price_floor: float = 0.25
     price_cap: float = 4.0
@@ -569,6 +602,7 @@ LIMITS = {
     "demand_pricing_enabled": (None, None, "bool"),
     "price_elasticity": ((PRICED, 0, 3, False), None, "map"),
     "concentration_weight": ((PRICED, 0, 10, False), None, "map"),
+    "buyer_power_weight": ((PRICED, 0, 10, False), None, "map"),
     "price_adjust_speed": (0.01, 1, "float"),
     "price_floor": (0.01, 1, "float"),
     "price_cap": (1, 100, "float"),
@@ -578,6 +612,7 @@ LIMITS = {
     "productivity": ((GOODS, 0, 1e6, False), None, "map"),
     "asset_return": ((GOODS, 0.0001, 10, False), None, "map"),
     "productivity_growth": ((GOODS, -0.99, 100, False), None, "map"),
+    "depreciation": ((GOODS, 0, 1, False), None, "map"),
     "labor_saving": ((GOODS, -1, 0.99, False), None, "map"),
     "labor_share": (0, 1, "float"),
     "money_weight": (0, 1, "float"),
@@ -603,6 +638,15 @@ LIMITS = {
     "bank_min_capital": (0, 1e12, "float"),
     "capital_ratio": (0, 1, "float"),
     "government_enabled": (None, None, "bool"),
+    "bank_liquidity": (0, 1, "float"),
+    "reserve_rate": (0, 1, "float"),
+    "lender_of_last_resort": (None, None, "bool"),
+    "llr_penalty": (0, 1, "float"),
+    "tax_production": (0, 1, "float"),
+    "tax_wage": (0, 1, "float"),
+    "tax_profit": (0, 1, "float"),
+    "benefit_rate": (0, 10, "float"),
+    "balanced_budget": (None, None, "bool"),
     "commerce_enabled": (None, None, "bool"),
     "industries_enabled": (None, None, "bool"),
     "reserve_ratio": (0, 1, "float"),
