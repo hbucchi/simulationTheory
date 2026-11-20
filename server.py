@@ -35,6 +35,7 @@ import argparse
 import json
 import re
 import socket
+import sys
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -357,6 +358,18 @@ def catalog_script():
     return f"window.CATALOG = {json.dumps(data)};\n"
 
 
+class ExclusiveServer(ThreadingHTTPServer):
+    """A server that refuses a port another server already uses. (On Windows the default lets a
+    second server share the port, and the browser then gets pages from either one at random:
+    an old version can answer half the requests.)"""
+    allow_reuse_address = sys.platform != "win32"
+
+    def server_bind(self):
+        if sys.platform == "win32" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def lan_address():
     """This computer's address on the local network (no traffic is sent: UDP connect only picks a route)."""
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
@@ -379,7 +392,12 @@ def main():
 
     host = "0.0.0.0" if args.lan else args.host
     Handler.sim = Simulation(args.agents, args.seed)
-    server = ThreadingHTTPServer((host, args.port), Handler)
+    try:
+        server = ExclusiveServer((host, args.port), Handler)
+    except OSError:
+        raise SystemExit(f"Port {args.port} is already in use: another copy of the simulation (maybe an older "
+                         f"version) is still running. Stop it (close its window, or Ctrl+C there), or start this "
+                         f"one on another port: python server.py --port {args.port + 1}")
     print(f"Simulation running at http://localhost:{args.port}  (Ctrl+C to stop)")
     if host == "0.0.0.0":
         print(f"On your phone (same Wi-Fi): http://{lan_address()}:{args.port}")
