@@ -440,7 +440,7 @@ function renderReport(r) {
 
   // Income by source.
   const SOURCES = [["wages", "Wages"], ["goods", "Goods sales"], ["assets", "Asset sales"], ["government", "Government"],
-                   ["benefits", "Unemployment benefit"], ["banking", "Bank dividends"]];
+                   ["benefits", "Unemployment benefit"], ["transfers", "Government transfers"], ["banking", "Bank dividends"]];
   lineChart($("chart-sources"), { x, xLabel: "Step", title: "Income by source", tipFormat: fmt.money,
     series: SOURCES.map(([k, label], i) => ({ label, color: SERIES[i], values: flow(p => p.income_sources[k]) })) });
   const srcTotal = Object.values(t.income_sources).reduce((a, v) => a + v, 0) || 1;

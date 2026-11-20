@@ -10,8 +10,9 @@ Fiscal policy (the government):
        the treasury can't pay is paid with newly created money (how money is injected);
     2. unemployment benefit: ``benefit_rate`` x the market wage for every unit of labour an agent
        offered and nobody hired (pro rata if the treasury runs short);
-    3. with ``balanced_budget``, whatever is left hires more idle labour for public works, so
-       taxes go back into the economy instead of sitting in the treasury.
+    3. with ``balanced_budget``, whatever is left hires more idle labour for public works, and what
+       is still left (nobody idle) is paid out equally to every agent (transfers), so taxes go
+       back into the economy instead of sitting in the treasury.
 
 Monetary policy (the central bank):
 - ``min_rate``: no asset may be valued at a return below this rate. The effective return of an
@@ -58,8 +59,8 @@ class Government:
         self.treasury = 0.0        # taxes collected and not yet spent
         self.revenue = {t: 0.0 for t in TAXES}           # taxes collected so far, by tax
         self.step_revenue = {t: 0.0 for t in TAXES}      # ... in the latest step
-        self.spent = {"public_works": 0.0, "benefits": 0.0, "reserve_interest": 0.0}
-        self.step_spent = {"public_works": 0.0, "benefits": 0.0, "reserve_interest": 0.0}
+        self.spent = {"public_works": 0.0, "benefits": 0.0, "reserve_interest": 0.0, "transfers": 0.0}
+        self.step_spent = {"public_works": 0.0, "benefits": 0.0, "reserve_interest": 0.0, "transfers": 0.0}
         self.llr_outstanding = 0.0   # central bank loans to banks not yet repaid (newly created money)
         self.llr_lent = 0.0          # all it has lent so far
         self.cb_income = 0.0         # interest banks paid on those loans (goes to the treasury)
@@ -104,7 +105,7 @@ class Government:
 
     def begin_step(self):
         self.step_revenue = {t: 0.0 for t in TAXES}
-        self.step_spent = {"public_works": 0.0, "benefits": 0.0, "reserve_interest": 0.0}
+        self.step_spent = {"public_works": 0.0, "benefits": 0.0, "reserve_interest": 0.0, "transfers": 0.0}
         self.last_spent = 0.0
 
     def tax(self, kind, base):

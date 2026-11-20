@@ -23,7 +23,7 @@ Definitions
   share whose need for a job is above 0.5.
 """
 
-INCOME_SOURCES = ("wages", "goods", "assets", "government", "benefits", "banking")
+INCOME_SOURCES = ("wages", "goods", "assets", "government", "benefits", "transfers", "banking")
 SMOOTHING = 0.05   # weight of the latest step in agents' smoothed income / consumption
 
 from collections import deque
@@ -226,6 +226,7 @@ class Recorder:
             "taxes": dict(world.government.step_revenue),
             "benefits_paid": world.government.step_spent["benefits"],
             "public_works": world.government.step_spent["public_works"],
+            "transfers": world.government.step_spent["transfers"],
             "treasury": world.government.treasury,
         })
 

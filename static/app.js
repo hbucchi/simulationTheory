@@ -752,8 +752,8 @@ function renderGovernment() {
     ["Labour price", usd(m.prices.labor), `food ${usd(m.prices.food)} · water ${usd(m.prices.water)}`],
     ["Taxes last step", usd(Object.values(g.step_revenue).reduce((a, v) => a + v, 0)),
       `production ${usd(g.step_revenue.production)} · salary ${usd(g.step_revenue.wage)} · profit ${usd(g.step_revenue.profit)}`],
-    ["Spending last step", usd(g.step_spent.benefits + g.step_spent.public_works),
-      `benefits ${usd(g.step_spent.benefits)} · public works ${usd(g.step_spent.public_works)}`],
+    ["Spending last step", usd(g.step_spent.benefits + g.step_spent.public_works + g.step_spent.transfers),
+      `benefits ${usd(g.step_spent.benefits)} · public works ${usd(g.step_spent.public_works)} · transfers ${usd(g.step_spent.transfers)}`],
     ["Treasury", usd(g.treasury), `${usd(Object.values(g.revenue).reduce((a, v) => a + v, 0))} collected so far`],
     ["Central bank loans", usd(g.llr_outstanding), `to banks · ${usd(g.llr_lent)} lent so far`],
     ...(state.macro ? [

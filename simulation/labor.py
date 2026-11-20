@@ -192,6 +192,15 @@ class LaborMarket:
         if gov.balanced_budget and gov.treasury > 1e-6:
             # Whatever the treasury has left hires more idle labour: taxes go back into the economy.
             stats["gov_hired"] += self._public_works(world, offers, remaining, math.inf, stats, budget=gov.treasury)
+        if gov.balanced_budget and gov.treasury > 1e-6 and world.agents:
+            # Nobody left to hire: the rest is paid out equally to everyone (transfers).
+            each = gov.treasury / len(world.agents)
+            for a in world.agents:
+                a.money += each
+                economy.earn(a, each, "transfers")
+            gov.spent["transfers"] += gov.treasury
+            gov.step_spent["transfers"] += gov.treasury
+            gov.treasury = 0.0
 
         # Unused capacity = withheld (not offered: the agent didn't need to work) + idle
         # (offered but nobody hired it).
