@@ -52,6 +52,8 @@ class World:
         self.government = Government.from_rules(self.rules)
         self.banking = Banking(self.rules, self.government)
         self.retained_total = 0.0
+        self.price_level = 1.0        # scales every price (money_velocity: M x V = P x Y)
+        self.price_level_set = False
         self.assets_depreciated = {}   # asset shares worn out so far, by industry   # company profits kept in companies so far
         self._by_id = {}
         self.recorder = Recorder()  # per-step snapshots for the Report view
@@ -243,6 +245,7 @@ class World:
         for i in range(n):
             self.create_agent(money=round(money[i], 2), inventory={k: v[i] for k, v in stock.items()},
                               assets={k: v[i] for k, v in assets.items()})
+        self.update_price_level()   # starting prices already at the money's level (M x V = P x Y)
 
     def in_cooldown(self, a, b):
         return self.cooldowns.get(frozenset((a.id, b.id)), -1) >= self.tick
@@ -354,6 +357,42 @@ class World:
             past, now = history[0], history[-1]
             full = len(history) == history.maxlen
             self.scarcity[r] = max(0.0, 1 - now / past) if full and past > 0 else 0.0
+
+    def yearly_basket(self):
+        """{good: units} people consume in a year: last year's consumption once a month has been
+        recorded (scaled up to a year), before that what their needs call for (each need met
+        with its most effective good)."""
+        acc = self.recorder.national
+        year = self.year_steps()
+        if len(acc.window) >= self.rules.month_steps:
+            scale = year / len(acc.window)
+            return {g: n * scale for g, n in acc.used.items() if n > 0}
+        basket = {}
+        n = len(self.agents)
+        for need in self.rules.consumer_needs:
+            goods = self.rules.goods_for(need)
+            best = goods[0]
+            rate = distributions.mean(self.rules.rates[need])
+            basket[best] = basket.get(best, 0.0) + rate * n * year / self.rules.relief(best, need)
+        return basket
+
+    def update_price_level(self):
+        """Move the price level toward money supply x velocity / (a year's consumption at the
+        scarcity formula's prices): M x V = P x Y."""
+        rules = self.rules
+        if rules.money_velocity <= 0 or rules.price_mode == "fixed" or not self.agents:
+            self.price_level = 1.0
+            return
+        base = economy.market_prices(self.agents, rules)
+        spending = sum(units * base[g] * self.price_multiplier[g] for g, units in self.yearly_basket().items())
+        if spending <= 0:
+            return
+        money = sum(economy.money_of(a) + a.company_cash for a in self.agents)
+        target = money * rules.money_velocity / spending
+        if self.price_level_set:
+            self.price_level += rules.price_level_speed * (target - self.price_level)
+        else:
+            self.price_level, self.price_level_set = target, True
 
     def update_demand(self):
         """Count buyers and sellers of each resource, measure how concentrated its sellable
@@ -572,7 +611,8 @@ class World:
                 cache[key] = prices
             return prices
         base = economy.market_prices(self.agents, self.rules)
-        prices = {r: base[r] * self.price_multiplier[r] for r in economy.RESOURCES}
+        level = self.price_level if self.rules.price_mode != "fixed" else 1.0
+        prices = {r: base[r] * self.price_multiplier[r] * level for r in economy.RESOURCES}
         if self.rules.cost_floor and self.rules.price_mode != "fixed":
             # Shallow layers first, so each good's inputs already carry their own floor.
             rules = self.rules
@@ -622,6 +662,7 @@ class World:
         self.grow_assets()
         self.update_scarcity()
         self.update_demand()
+        self.update_price_level()
         self.update_profitability()
         self.labor.clear(self)
         seekers = {}
@@ -970,6 +1011,7 @@ class World:
                 # Average units per agent over the scarcity window (oldest first) and how much it fell.
                 "per_agent_history": {r: list(h) for r, h in self.per_agent_history.items()},
                 "scarcity": self.scarcity,
+                "price_level": round(self.price_level, 4),
                 "buyer_concentration": {r: round(v, 3) for r, v in self.buyer_concentration.items()},
                 # Per product: agents owning its industry, and those that made some this step.
                 "owners": {g: sum(1 for a in self.agents if a.assets.get(g, 0) > 0) for g in self.rules.active_goods},

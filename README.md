@@ -612,13 +612,23 @@ that hoarded raw grain as food and let perishables rot.)
 
 ### Prices
 
-Prices are recomputed from what everyone holds at the moment of each trade:
+Relative prices come from what everyone holds:
 
     price(r) = total money / total units of all resources × (1 − share of r)
     share of r = units of r / total units
 
-A scarce resource has a small share, so it costs more. The Overview tab shows
-the current prices. With no goods left at all, every price is 0.
+A scarce resource has a small share, so it costs more. On its own this values money against
+every unit held (stockpiles included), which makes everyone rich: agents held about 16 years of
+living costs in cash, whatever the starting money (less money just meant lower prices).
+
+So the **price level** follows the quantity theory of money, **M × V = P × Y**: all prices are
+scaled so that a year of what people consume (Y; their needs before a month has been recorded)
+costs the money supply (M: cash + deposits + company cash) × the velocity of money (V,
+`money_velocity`, default 4 times a year). The level moves 5% of the way to its target each day.
+An average agent's cash then lasts about 1/V of a year: in a 100-agent test the median agent
+held about 5 months of living costs after a year and the poorest tenth about 1.5 months, and
+banks lent. The starting money (default $3,000 per agent) only sets the scale: a day's wage is
+roughly 6% of it. Velocity 0 switches the price level off (the plain formula).
 
 ### Death and depression
 

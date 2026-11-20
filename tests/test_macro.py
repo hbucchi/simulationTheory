@@ -140,5 +140,38 @@ class NationalAccountsTests(unittest.TestCase):
         self.assertIn("inflation", macro)
 
 
+class PriceLevelTests(unittest.TestCase):
+    """M x V = P x Y: the price level makes a year of consumption cost money x velocity."""
+
+    def months_of_cash(self, w):
+        from simulation import economy
+        prices = w.current_prices()
+        costs = [(a, economy.living_cost(a, prices, w.rules) * 30) for a in w.agents]
+        months = sorted(economy.money_of(a) / c for a, c in costs if c > 0)   # (some live off their own industries)
+        return months[len(months) // 2]
+
+    def test_velocity_sets_how_long_cash_lasts(self):
+        w = World(seed=1, rules=Rules.from_dict({"agents": 30, "money_velocity": 4}))
+        w.spawn_random_agents()
+        for _ in range(40):
+            w.step()
+        self.assertLess(self.months_of_cash(w), 24)       # months, not years (plain formula: ~16 years)
+
+    def test_the_amount_of_money_only_sets_the_scale(self):
+        levels = []
+        for money in (1000, 4000):
+            w = World(seed=1, rules=Rules.from_dict({"agents": 30, "money": money}))
+            w.spawn_random_agents()
+            levels.append(w.current_prices()["water"])
+        self.assertAlmostEqual(levels[1] / levels[0], 4, places=6)
+
+    def test_velocity_zero_is_the_plain_scarcity_formula(self):
+        from simulation import economy
+        w = World(seed=1, rules=Rules.from_dict({"agents": 10, "money_velocity": 0, "demand_pricing_enabled": False,
+                                                 "cost_floor": False}))
+        w.spawn_random_agents()
+        self.assertAlmostEqual(w.current_prices()["water"], economy.market_prices(w.agents, w.rules)["water"])
+
+
 if __name__ == "__main__":
     unittest.main()

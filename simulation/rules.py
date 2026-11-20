@@ -87,7 +87,10 @@ class Rules:
     # from the catalog (bigger industries for goods many people need).
     assets: dict = field(default_factory=lambda: {e["id"]: {"dist": "tiered", "average": e["shares"], "tiers": [
         {"agents": 10, "share": 100}, {"agents": 90, "share": 0}]} for e in CATALOG})
-    money: object = 22500.0           # 22,500 / 300 units x (1 - 1/3) = $50 starting price at the default stock
+    # Starting money per agent. With money_velocity on it only sets the scale of prices (a
+    # day's wage is roughly 6% of it); what makes agents rich or poor is velocity and how
+    # money is shared out (try a tiered spread).
+    money: object = 3000.0
     movement: object = field(default_factory=lambda: {"dist": "uniform", "min": 5, "max": 25})
     start_needs: object = field(default_factory=lambda: {"dist": "uniform", "min": 0.0, "max": 0.5})
 
@@ -232,7 +235,7 @@ class Rules:
     # spreads its labour evenly over its industries.
     labor_priority: str = "even"
     liquidity_units: float = 3
-    min_investment: float = 1000
+    min_investment: float = 150
     # Capitalists keep cash to pay for the labour their assets need: a purchase must leave them
     # holding at least capital_cash_ratio x (value of all their assets, the new one included) in cash.
     capital_cash_ratio: float = 0.2
@@ -280,13 +283,13 @@ class Rules:
     banking_enabled: bool = True
     starting_banks: int = 3            # agents that start with a banking plant (and open a bank)
     starting_bank_shares: float = 1.0  # banking shares each of them starts with
-    bank_min_capital: float = 5000.0   # founder's own money a bank needs to open (and to lend)
+    bank_min_capital: float = 1000.0   # founder's own money a bank needs to open (and to lend)
     bank_liquidity: float = 0.05       # vault cash each bank keeps itself (x deposits) before lending
     deposit_rate: float = 0.00008211      # 3% a year (rates are per step = per day)
     loan_spread: float = 0.00013554       # 5% a year: loan rate = deposit rate + this
     loan_steps: int = 300              # loans are repaid over this many steps
     max_loan_to_value: float = 0.6     # debt <= this x the borrower's asset shares (+ what it builds)
-    loan_per_service: float = 1000.0   # money lent per unit of banking services used
+    loan_per_service: float = 250.0    # money lent per unit of banking services used
     default_steps: int = 30            # unpaid steps in a row before a loan defaults
     deposit_share: float = 0.5         # share of spare cash agents deposit each step
     # Budget: every agent knows what living costs it (the cheapest goods for each need, housing
@@ -303,6 +306,13 @@ class Rules:
 
     # Prices
     price_mode: str = "scarcity"       # "scarcity": money/units*(1-share); "fixed": fixed_prices
+    # Price level (quantity theory of money, M x V = P x Y): the scarcity formula sets relative
+    # prices; all of them are then scaled so that a year of what people consume costs
+    # money supply x money_velocity. With velocity 4, money changes hands 4 times a year and an
+    # average agent's cash lasts about a quarter of a year. 0 = off (the plain scarcity formula,
+    # where money is valued against every unit held, so agents hold years of living in cash).
+    money_velocity: float = 4.0
+    price_level_speed: float = 0.05    # share of the gap to the target level closed each day
     fixed_prices: dict = field(default_factory=lambda: {r: 50.0 for r in PRICED})
 
     # Market adjustment on top of the base price, per resource:
@@ -603,6 +613,8 @@ LIMITS = {
     "price_elasticity": ((PRICED, 0, 3, False), None, "map"),
     "concentration_weight": ((PRICED, 0, 10, False), None, "map"),
     "buyer_power_weight": ((PRICED, 0, 10, False), None, "map"),
+    "money_velocity": (0, 1000, "float"),
+    "price_level_speed": (0.001, 1, "float"),
     "price_adjust_speed": (0.01, 1, "float"),
     "price_floor": (0.01, 1, "float"),
     "price_cap": (1, 100, "float"),

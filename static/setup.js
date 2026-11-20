@@ -64,9 +64,14 @@ const SETUP_SECTIONS = [
   ], hint: "Pick a smaller economy for a simpler (and faster) game: fewer layers, or leave out single industries. " +
       "Every industry the game keeps still needs all the inputs of its recipe, so leaving one out also leaves out what " +
       "is made from it. Each good is checked against every agent each day, so fewer industries also run faster." },
-  { title: "Prices", hint: "Scarcity: total money ÷ total units × (1 − share of that resource). Fixed: the prices below.", fields: [
+  { title: "Prices", hint: "Relative prices follow scarcity: total money ÷ total units × (1 − share of that resource). " +
+      "The price level follows the quantity theory of money, M × V = P × Y: all prices are scaled so a year of what " +
+      "people consume costs the money supply × velocity. With velocity 4 money changes hands 4 times a year, so an " +
+      "average agent's cash lasts about 3 months. Fixed: the prices below.", fields: [
     { path: "price_mode", label: "Price rule", kind: "choice", full: true,
       options: [["scarcity", "Scarcity (changes with supply)"], ["fixed", "Fixed prices"]] },
+    { path: "money_velocity", label: "Money velocity (times a year; 0 = off)", kind: "float", min: 0, max: 1000, step: 0.5,
+      enabledWhen: v => v.price_mode !== "fixed" },
     { path: "fixed_prices.labor", label: "Wage", kind: "float", min: 0, step: 0.01, enabledWhen: v => v.price_mode === "fixed" },
   ]},
   { title: "Starting agents", wide: true,
@@ -301,10 +306,10 @@ const PRESETS = [
   // Small stocks: agents need each other (and owners need workers) from the start.
   ["lean", "Lean start (small stocks: lots of trading)", {
     inventory: { food: 10, water: 10, games: 10 }, stock_steps: 20,
-    money: 2250 }],   // keeps the starting price at $50
+    money: 1500 }],
   ["spread", "Spread ownership (everyone owns some assets)", { assets: Object.fromEntries(GOODS.map(g =>
     [g, { dist: "uniform", min: 0, max: 2 }])) }],
-  ["unequal", "Unequal wealth (1% hold 50% of money)", { money: { dist: "tiered", average: 22500, tiers: EXAMPLE_TIERS } }],
+  ["unequal", "Unequal wealth (1% hold 50% of money)", { money: { dist: "tiered", average: 3000, tiers: EXAMPLE_TIERS } }],
   ["drought", "Drought (few water assets)", { inventory: { water: 30 }, assets: { water: { dist: "tiered", average: 0.4,
     tiers: [{ agents: 10, share: 100 }, { agents: 90, share: 0 }] } } }],
   ["easy", "Easy (no death or depression)", { death_enabled: false, depression_enabled: false }],
