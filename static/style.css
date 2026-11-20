@@ -758,3 +758,7 @@ button { border-radius: var(--radius-sm); }
 .setup-section:not([open]) { padding-top: 12px; padding-bottom: 12px; }
 .setup-divider { grid-column: 1 / -1; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin: 10px 0 0; }
 .setup { background: var(--bg); backdrop-filter: none; }
+
+.product-table th.sortable { cursor: pointer; user-select: none; }
+.product-table th.sortable:hover { color: var(--text); }
+.product-table th.sorted { color: var(--accent); font-weight: 600; }

@@ -163,19 +163,10 @@
 
       <section id="tab-products" class="page" role="tabpanel" hidden>
         <p class="hint">Every product in this game: its price, who makes it, how much is made and used, and its market.
-          Tap a row for details. Flows are averages per day over the last 20 days.</p>
+          Click a column name to sort by it (again to reverse); tap a row for details. Flows are averages per day
+          over the last 20 days.</p>
         <div class="product-tools">
           <input id="product-search" type="search" placeholder="Search products">
-          <select id="product-sort">
-            <option value="layer">Sort: layer</option>
-            <option value="price">Sort: price</option>
-            <option value="change">Sort: price change</option>
-            <option value="made">Sort: made per day</option>
-            <option value="consumed">Sort: consumed per day</option>
-            <option value="owners">Sort: producers</option>
-            <option value="held">Sort: units held</option>
-            <option value="pressure">Sort: buyers ÷ sellers</option>
-          </select>
         </div>
         <div id="product-summary" class="stat-grid"></div>
         <div class="table-wrap"><table id="product-table" class="product-table"></table></div>

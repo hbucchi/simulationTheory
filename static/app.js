@@ -45,7 +45,7 @@ const ui = {
   govRevert: $("gov-revert"),
   govStatus: $("gov-status"),
   govStats: $("gov-stats"),
-  productSearch: $("product-search"), productSort: $("product-sort"),
+  productSearch: $("product-search"),
   productSummary: $("product-summary"), productTable: $("product-table"),
   bankForm: $("bank-form"), bankEnabled: $("bank-enabled"), bankDeposit: $("bank-deposit"),
   bankSpread: $("bank-spread"), bankReserve: $("bank-reserve"),
@@ -990,7 +990,22 @@ function renderDashboard() {
 
 // ---------- Products tab: every product's KPIs ----------
 
-const productView = { query: "", sort: "layer", open: null };
+// Sorted by layer until a column name is clicked: then by that column, low to high (A to Z),
+// and high to low when it is clicked again.
+const productView = { query: "", sort: null, desc: false, open: null };
+
+// The table's columns: heading, sort value (text sorts A to Z), and cell text.
+const PRODUCT_COLUMNS = [
+  { key: "name", title: "Product", value: r => label(r.g).toLowerCase() },
+  { key: "price", title: "Price", value: r => r.price },
+  { key: "change", title: "20-day change", value: r => r.change },
+  { key: "made", title: "Made /day", value: r => r.made },
+  { key: "consumed", title: "Consumed /day", value: r => r.consumed },
+  { key: "used", title: "Inputs /day", value: r => r.used },
+  { key: "held", title: "Held", value: r => r.held },
+  { key: "owners", title: "Producers", value: r => r.owners },
+  { key: "pressure", title: "Buyers : sellers", value: r => r.pressure },
+];
 
 function productRows() {
   const m = state.market;
@@ -1017,10 +1032,17 @@ function renderProducts() {
   const all = rows;
   const q = productView.query;
   if (q) rows = rows.filter(r => label(r.g).toLowerCase().includes(q) || r.meta.sector.toLowerCase().includes(q));
-  const key = { layer: r => r.info.layer * 1000 - r.price / 1e6, price: r => -r.price, change: r => -r.change,
-                made: r => -r.made, consumed: r => -r.consumed, owners: r => -r.owners, held: r => -r.held,
-                pressure: r => -r.pressure }[productView.sort];
-  rows.sort((a, b) => key(a) - key(b));
+  const column = PRODUCT_COLUMNS.find(c => c.key === productView.sort);
+  if (column) {
+    const dir = productView.desc ? -1 : 1;
+    rows.sort((a, b) => {
+      const x = column.value(a), y = column.value(b);
+      const order = typeof x === "string" ? x.localeCompare(y) : x - y;
+      return (order || label(a.g).localeCompare(label(b.g))) * dir;
+    });
+  } else {
+    rows.sort((a, b) => a.info.layer - b.info.layer || label(a.g).localeCompare(label(b.g)));   // by layer
+  }
 
   // Summary cards for the whole market.
   const sum = (f) => all.reduce((a, r) => a + f(r), 0);
@@ -1043,9 +1065,19 @@ function renderProducts() {
   const t = ui.productTable;
   t.innerHTML = "";
   const head = t.createTHead().insertRow();
-  for (const h of ["Product", "Price", "20-day change", "Made /day", "Consumed /day", "Inputs /day",
-                   "Held", "Producers", "Buyers : sellers"]) {
-    head.append(Object.assign(document.createElement("th"), { textContent: h }));
+  for (const c of PRODUCT_COLUMNS) {
+    const sorted = productView.sort === c.key;
+    const th = Object.assign(document.createElement("th"), { className: "sortable" + (sorted ? " sorted" : ""),
+      textContent: c.title + (sorted ? (productView.desc ? " ▼" : " ▲") : ""),
+      title: sorted ? (productView.desc ? "High to low: click for low to high" : "Low to high: click for high to low")
+                    : "Click to sort low to high (A to Z)" });
+    th.setAttribute("aria-sort", sorted ? (productView.desc ? "descending" : "ascending") : "none");
+    th.onclick = () => {
+      productView.desc = productView.sort === c.key ? !productView.desc : false;
+      productView.sort = c.key;
+      renderProducts();
+    };
+    head.append(th);
   }
   const body = t.createTBody();
   const pct = (v) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%`;
@@ -1103,7 +1135,6 @@ function drawSpark(canvas, values, caption = "price") {
 }
 
 ui.productSearch.oninput = () => { productView.query = ui.productSearch.value.trim().toLowerCase(); renderProducts(); };
-ui.productSort.onchange = () => { productView.sort = ui.productSort.value; renderProducts(); };
 
 // ---------- Banking (in the Government tab) ----------
 
