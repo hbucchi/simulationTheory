@@ -321,7 +321,8 @@ class Banking:
         bank.loans.append(loan)
         _sync(agent, self)
         world.log(f"{bank.name} lent {agent.name} {amount:.2f} for {purpose} at "
-                  f"{loan.rate * 100:.2f}%/step over {loan.steps_left} steps")
+                  f"{((1 + loan.rate) ** (12 * world.rules.month_steps) - 1) * 100:.1f}% a year over "
+                  f"{loan.steps_left / world.rules.month_steps:.0f} months")
         return amount
 
     # ---------- each step ----------

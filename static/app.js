@@ -10,6 +10,9 @@ const ui = {
   stepsPerTick: $("steps-per-tick"),
   intervalLabel: $("interval-label"),
   agentCount: $("agent-count"),
+  pageTitle: $("page-title"), calDate: $("cal-date"),
+  dashKpis: $("dash-kpis"), dashCharts: $("dash-charts"), dashAlerts: $("dash-alerts"),
+  dashMovers: $("dash-movers"), dashEvents: $("dash-events"),
   seed: $("seed"),
   reset: $("reset"),
   showRange: $("show-range"),
@@ -130,21 +133,21 @@ function sampleSpread(spec, low = -Infinity, high = Infinity) {
 const FIELD_GROUPS = [
   { legend: "General", fields: [
     { path: "name", label: "Name", type: "text", full: true, get: a => a.name, placeholder: "auto" },
-    { path: "movement", label: "Movement (px/step)", min: 1, max: 200, step: 1, get: a => a.movement, placeholder: "from rules" },
+    { path: "movement", label: "Movement (px/day)", min: 1, max: 200, step: 1, get: a => a.movement, placeholder: "from rules" },
     { path: "money", label: "Money", min: 0, step: 0.01, get: a => a.money },
     { path: "x", label: "X", min: 0, max: 1024, step: 1, get: a => Math.round(a.x), placeholder: "random" },
     { path: "y", label: "Y", min: 0, max: 1024, step: 1, get: a => Math.round(a.y), placeholder: "random" },
   ]},
   { legend: "Current needs (0 = satisfied, 1 = desperate)", fields: NEEDS.map(n => (
     { path: `needs.${n}`, label: cap(n), min: 0, max: 1, step: 0.01, get: a => a.needs[n], placeholder: "random" }))},
-  { legend: "Need growth per step", fields: NEEDS.map(n => (
+  { legend: "Need growth per day", fields: NEEDS.map(n => (
     { path: `rates.${n}`, label: cap(n), min: 0, max: 1, step: 0.001, get: a => a.modules.NeedsDecay.rates[n] }))},
-  { legend: "Rest: sleep recovered per step while standing still", fields: [
+  { legend: "Rest: sleep recovered per day while standing still", fields: [
     { path: "sleep_recovery", label: "Sleep recovery", min: 0, max: 1, step: 0.01, get: a => a.modules.Rest.recovery }]},
   { legend: "Inventory (every good)", collapsed: true, fields: RESOURCES.map(r => (
     { path: `inventory.${r}`, label: label(r), min: 0, step: 1, get: a => a.inventory[r] ?? 0 }))},
   { legend: "Labour", fields: [
-    { path: "labor_capacity", label: "Labour capacity per step", min: 0, step: 0.05, get: a => a.labor.capacity }]},
+    { path: "labor_capacity", label: "Labour capacity per day", min: 0, step: 0.05, get: a => a.labor.capacity }]},
   { legend: "Personality", fields: [
     { path: "payout_ratio", label: "Pays out as dividends (share of profits)", min: 0, max: 1, step: 0.05,
       get: a => a.personality.payout_ratio, placeholder: "from rules" }]},
@@ -156,7 +159,7 @@ const FIELDS = FIELD_GROUPS.flatMap(g => g.fields);
 let state = null;
 let selectedId = null;
 let editingId = null;   // agent shown in the Manage form; null = creating a new one
-let activeTab = "overview";
+let activeTab = "dashboard";
 let playing = false;
 let busy = false;     // a request is in flight; skip timer ticks instead of queueing them
 let timer = null;
@@ -222,10 +225,13 @@ function render(next) {
   state = next;
   if (editingId !== null && !agentById(editingId)) editingId = null;
   ui.tick.textContent = state.tick;
+  ui.calDate.textContent = calendar(state.tick);
+  recordTrend();
   if (typeof refreshReport === "function") refreshReport();
   if (typeof reportVisible !== "undefined" && reportVisible) return;
-  draw();
+  if (activeTab === "dashboard") renderDashboard();
   if (activeTab === "overview") {
+    draw();
     renderMarket();
     renderAgents();
     renderEvents();
@@ -362,7 +368,7 @@ function renderMarket() {
     const lost = inLayer.reduce((s, g) => s + (m.expired_recent?.[g] || 0), 0);
     box.append(Object.assign(document.createElement("summary"), {
       textContent: `Layer ${layer} · ${layer === 1 ? "extraction" : `uses layer ${layer - 1}`} · ${inLayer.length} industries · ` +
-        `making ${made.toFixed(2)}/step` + (lost >= 0.005 ? ` · ${lost.toFixed(2)}/step expiring` : "") }));
+        `making ${made.toFixed(2)}/day` + (lost >= 0.005 ? ` · ${lost.toFixed(2)}/day expiring` : "") }));
     for (const g of inLayer) box.append(industryRow(g));
     ui.market.append(box);
   }
@@ -418,9 +424,9 @@ function industryRow(g) {
     `${recipeText(g)} · ${relieves} · ${life ? `keeps ${life} steps` : "never expires"}` });
   const numbers = Object.assign(document.createElement("div"), { className: "industry-stats", textContent:
     `${m.units[g]} held · made ${flows[0].toFixed(2)} · eaten ${flows[1].toFixed(2)} · as input ${flows[2].toFixed(2)}` +
-    (flows[3] >= 0.005 ? ` · expired ${flows[3].toFixed(2)}` : "") + " /step · " +
+    (flows[3] >= 0.005 ? ` · expired ${flows[3].toFixed(2)}` : "") + " /day · " +
     `${m.assets[g].toFixed(2)} shares (asset ${usd(m.asset_prices[g])})` });
-  numbers.title = `Averages over the last 20 steps. Capacity ${m.asset_output[g].toFixed(2)}/step when fully staffed; ` +
+  numbers.title = `Averages over the last 20 days. Capacity ${m.asset_output[g].toFixed(2)}/day when fully staffed; ` +
     `productivity ${m.productivity[g].toFixed(2)} units per labour.`;
   row.append(head, detail, numbers);
   const cost = Object.entries(state.rules.build_cost[g] || {});
@@ -451,10 +457,10 @@ function renderLaborCard() {
   head.append(name, wage, unit);
   const rows = [
     ["Wage", `base ${usd(L.base_wage)} × ${L.multiplier.toFixed(2)} (labour wanted ÷ offered → ${L.pressure.toFixed(2)})`],
-    ["Capacity", `${L.capacity.toFixed(2)}/step · own assets ${L.own_use.toFixed(2)} · offered ${L.offered.toFixed(2)}`],
+    ["Capacity", `${L.capacity.toFixed(2)}/day · own assets ${L.own_use.toFixed(2)} · offered ${L.offered.toFixed(2)}`],
     ["Jobs", `${L.wanted.toFixed(2)} wanted · ${L.hired.toFixed(2)} hired (${L.workers_hired} workers)` +
       (L.gov_hired ? ` · government ${L.gov_hired.toFixed(2)}` : "")],
-    ["Unused", `${L.unused.toFixed(2)}/step: ${L.withheld.toFixed(2)} not offered (no need to work) · ` +
+    ["Unused", `${L.unused.toFixed(2)}/day: ${L.withheld.toFixed(2)} not offered (no need to work) · ` +
       `${L.idle.toFixed(2)} offered but not hired`],
     ["Workers", `efficiency ${avg(a => a.labor.efficiency).toFixed(2)} · wellbeing ${avg(a => a.labor.wellbeing).toFixed(2)} · ` +
       `need for a job ${avg(a => a.labor.job_need).toFixed(2)}`],
@@ -614,21 +620,21 @@ function renderAgents() {
       ...(Object.keys(a.assets).length ? [["pays out", `${Math.round(a.personality.payout_ratio * 100)}% of profits`,
         "Personality: share of its companies' profits it takes as dividends; the rest is reinvested"]] : []),
       ...(a.budget ? [["monthly budget", usd(a.budget.total),
-        `Keeps ${usd(a.budget.total)} before investing: cash for what it needs now + ${a.budget.steps} steps × ` +
-        `(living ${usd(a.budget.living)} + loan payments ${usd(a.budget.loans)} per step). ` +
-        `Income ${usd(a.income)}/step.`],
+        `Keeps ${usd(a.budget.total)} before investing: cash for what it needs now + ${a.budget.steps} days × ` +
+        `(living ${usd(a.budget.living)} + loan payments ${usd(a.budget.loans)} per day). ` +
+        `Income ${usd(a.income)}/day.`],
         [a.budget.spare >= 0 ? "left to invest" : "short of budget", usd(Math.abs(a.budget.spare))]] : []),
       ["movement", a.depressed ? `${a.speed} px (depressed, ${a.movement} normally)` : `${a.speed} px`],
       ...GOODS.filter(r => a.assets[r]).map(r => {
         const price = state.market.asset_prices[r];
         return [`${label(r).toLowerCase()} industry`, `${a.assets[r].toFixed(2)} (worth ${usd(a.assets[r] * price)}, ` +
-          `${(a.assets[r] * state.market.asset_output_each[r]).toFixed(2)}/step)`,
+          `${(a.assets[r] * state.market.asset_output_each[r]).toFixed(2)}/day)`,
           `One whole ${r} asset costs ${usd(price)} now`];
       }),
       // Building project: capital goods held / needed.
       ...(a.project ? [["building", `${a.project.shares.toFixed(2)} ${label(a.project.good).toLowerCase()} asset(s): ` +
         Object.entries(a.project.need).map(([k, n]) => `${label(k).toLowerCase()} ${Math.min(a.inventory[k] ?? 0, n)}/${n}`).join(", "),
-        `Started at step ${a.project.started}; dropped after ${state.rules.project_steps} steps`]] : []),
+        `Started at day ${a.project.started}; dropped after ${state.rules.project_steps} days`]] : []),
       // Inputs its secondary industries keep in stock.
       ...Object.entries(a.input_target || {}).map(([r, n]) => [`${label(r).toLowerCase()} input buffer`, n,
         `Keeps ${n} ${r} for its industries; buys more when below ${Math.round(n * state.rules.input_reorder)}`]),
@@ -662,11 +668,11 @@ function renderAgents() {
       : a.activity;
     const owned = GOODS.filter(g => a.assets[g]);
     const worked = !lab ? "" : Object.entries(lab.employers).map(([who, u]) => `${u.toFixed(2)} for ${who}`).join(", ");
-    const prod = !lab ? "details load when shown" : `labour ${lab.capacity_now.toFixed(2)}/step (capacity ${lab.capacity.toFixed(2)} × efficiency ` +
+    const prod = !lab ? "details load when shown" : `labour ${lab.capacity_now.toFixed(2)}/day (capacity ${lab.capacity.toFixed(2)} × efficiency ` +
       `${lab.efficiency.toFixed(2)}) · wellbeing ${lab.wellbeing.toFixed(2)} · need for a job ${lab.job_need.toFixed(2)}` +
       (lab.offered ? ` · offers ${lab.offered.toFixed(2)} at ${usd(lab.asking_wage)}` : "") +
       (worked ? ` · worked ${worked}` : "") +
-      (owned.length ? ` · its assets employ ${a.labor_need.toFixed(2)}/step` +
+      (owned.length ? ` · its assets employ ${a.labor_need.toFixed(2)}/day` +
         (lab.bought ? ` (hired ${lab.bought.toFixed(2)})` : "") : "");
     activity.append(act);
     if (a.depressed) {
@@ -675,9 +681,19 @@ function renderAgents() {
       sad.textContent = "depressed";
       activity.append(" · ", sad);
     }
-    activity.append(` · ${prod}`);
+    meta.append(Object.assign(document.createElement("span"), { className: "work-line", textContent: prod }));
 
-    card.append(head, stats, meta, activity);
+    // At a glance: what it is doing, money and needs. Everything else is one click away.
+    const summary = Object.assign(document.createElement("div"), { className: "agent-summary" });
+    summary.append(Object.assign(document.createElement("span"), { textContent: `cash ${usd(a.money)}` }),
+                   ...(a.deposits ? [Object.assign(document.createElement("span"), { textContent: `bank ${usd(a.deposits)}` })] : []),
+                   ...(a.debt ? [Object.assign(document.createElement("span"), { className: "owes", textContent: `owes ${usd(a.debt)}` })] : []),
+                   ...(Object.keys(a.assets).length ? [Object.assign(document.createElement("span"),
+                     { textContent: `owns ${Object.keys(a.assets).length} industr${Object.keys(a.assets).length === 1 ? "y" : "ies"}` })] : []));
+    const more = Object.assign(document.createElement("details"), { className: "agent-more" });
+    more.append(Object.assign(document.createElement("summary"), { textContent: "Details: goods, industries, budget, work" }), meta);
+    more.onclick = (e) => e.stopPropagation();
+    card.append(head, activity, summary, stats, more);
     ui.agents.append(card);
   }
   if (matching.length > CARD_LIMIT) {
@@ -696,7 +712,7 @@ function renderEvents() {
     li.value = ev.tick;
     const msg = document.createElement("span");
     msg.textContent = ev.message;
-    li.append(`t${ev.tick}: `, msg);
+    li.append(Object.assign(document.createElement("span"), { className: "ev-day", textContent: calendar(ev.tick) }), msg);
     ui.events.append(li);
   }
 }
@@ -708,7 +724,9 @@ function showTab(name) {
   for (const t of ui.tabs) {
     t.classList.toggle("active", t.dataset.tab === name);
     $(`tab-${t.dataset.tab}`).hidden = t.dataset.tab !== name;
+    if (t.dataset.tab === name) ui.pageTitle.textContent = t.lastElementChild.textContent.trim();
   }
+  if (typeof showView === "function") showView(name === "report" ? "report" : "simulation");
   if (name === "government") fillGovernment(true);
   if (name === "banks") fillBanking(true);
   render(state);
@@ -724,12 +742,12 @@ function fillGovernment(force = false) {
   if (govDirty && !force) return;
   govDirty = false;
   const g = state.government;
-  setGovInputs(g.min_rate * 100, g.labor_purchase);
+  setGovInputs(perYear(g.min_rate) * 100, g.labor_purchase);   // shown % a year, kept per day
   ui.govEnabled.checked = g.enabled;
   for (const el of ui.govForm.querySelectorAll("[data-policy]")) {
     const v = g[el.dataset.policy];
     if (el.type === "checkbox") el.checked = v;
-    else el.value = +(v * Number(el.dataset.scale || 1)).toFixed(4);
+    else el.value = +((el.dataset.yearly ? perYear(v) : v) * Number(el.dataset.scale || 1)).toFixed(3);
   }
   ui.govBasel.value = +(g.capital_ratio * 100).toFixed(2);
 }
@@ -748,15 +766,15 @@ function renderGovernment() {
   const g = state.government;
   const m = state.market;
   const stats = [
-    ["Policy rate", `${(g.min_rate * 100).toFixed(2)}%`, "minimum return on assets"],
-    ["Labour hired", `${g.labor_purchase} / step`, "with newly created money"],
-    ["Money created", usd(g.money_created), `${usd(g.last_spent)} in the last step`],
+    ["Policy rate", pctYear(g.min_rate, 2), "minimum return on assets"],
+    ["Labour hired", `${g.labor_purchase} /day`, "with newly created money"],
+    ["Money created", usd(g.money_created), `${usd(g.last_spent)} yesterday`],
     ["Labour used up", g.labor_bought.toFixed(1), "in public works so far"],
     ["Money in the economy", usd(m.money), "held by agents"],
     ["Labour price", usd(m.prices.labor), `food ${usd(m.prices.food)} · water ${usd(m.prices.water)}`],
-    ["Taxes last step", usd(Object.values(g.step_revenue).reduce((a, v) => a + v, 0)),
+    ["Taxes today", usd(Object.values(g.step_revenue).reduce((a, v) => a + v, 0)),
       `production ${usd(g.step_revenue.production)} · salary ${usd(g.step_revenue.wage)} · profit ${usd(g.step_revenue.profit)}`],
-    ["Spending last step", usd(g.step_spent.benefits + g.step_spent.public_works + g.step_spent.transfers),
+    ["Spending today", usd(g.step_spent.benefits + g.step_spent.public_works + g.step_spent.transfers),
       `benefits ${usd(g.step_spent.benefits)} · public works ${usd(g.step_spent.public_works)} · transfers ${usd(g.step_spent.transfers)}`],
     ["Treasury", usd(g.treasury), `${usd(Object.values(g.revenue).reduce((a, v) => a + v, 0))} collected so far`],
     ["Central bank loans", usd(g.llr_outstanding), `to banks · ${usd(g.llr_lent)} lent so far`],
@@ -792,14 +810,15 @@ ui.govForm.onsubmit = async (e) => {
     const next = await api("/api/government", {
       enabled: ui.govEnabled.checked,
       ...Object.fromEntries([...ui.govForm.querySelectorAll("[data-policy]")].map(el =>
-        [el.dataset.policy, el.type === "checkbox" ? el.checked : Number(el.value) / Number(el.dataset.scale || 1)])),
-      min_rate: Number(ui.govRate.value) / 100,
+        [el.dataset.policy, el.type === "checkbox" ? el.checked
+          : el.dataset.yearly ? perDay(Number(el.value) / Number(el.dataset.scale || 1)) : Number(el.value) / Number(el.dataset.scale || 1)])),
+      min_rate: perDay(Number(ui.govRate.value) / 100),
       labor_purchase: Number(ui.govBuy.value),
       capital_ratio: Number(ui.govBasel.value) / 100,
     });
     govDirty = false;
     render(next);
-    ui.govStatus.textContent = "Policy applied from the next step.";
+    ui.govStatus.textContent = "Policy applied from tomorrow.";
     ui.govStatus.className = "status";
   } catch (err) {
     ui.govStatus.textContent = err.message;
@@ -807,6 +826,167 @@ ui.govForm.onsubmit = async (e) => {
   }
   ui.govStatus.hidden = false;
 };
+
+// ---------- Time: one step of the simulation is one day ----------
+
+const DAYS_PER_MONTH = () => state?.rules?.month_steps || 30;
+const DAYS_PER_YEAR = () => 12 * DAYS_PER_MONTH();
+
+// "Year 2 · Month 3 · Day 14" for a day number (day 1 = Year 1, Month 1, Day 1).
+function calendar(day) {
+  const d = Math.max(0, day - 1), m = DAYS_PER_MONTH();
+  return `Year ${Math.floor(d / (12 * m)) + 1} · Month ${Math.floor(d / m) % 12 + 1} · Day ${d % m + 1}`;
+}
+
+// A number of days in the most natural unit: "5 days", "3 weeks", "4 months", "1.5 years".
+function span(days) {
+  const m = DAYS_PER_MONTH(), y = 12 * m;
+  const fmt = (v, unit) => `${+v.toFixed(1)} ${unit}${Math.abs(v - 1) < 1e-9 ? "" : "s"}`;
+  if (days < 14) return fmt(days, "day");
+  if (days < 2 * m) return fmt(days / 7, "week");
+  if (days < 2 * y) return fmt(days / m, "month");
+  return fmt(days / y, "year");
+}
+
+// Rates: the simulation works per day; people think per year.
+const perYear = (daily) => (1 + daily) ** DAYS_PER_YEAR() - 1;
+const perDay = (yearly) => (1 + yearly) ** (1 / DAYS_PER_YEAR()) - 1;
+const pctYear = (daily, digits = 1) => `${(perYear(daily) * 100).toFixed(digits)}% a year`;
+
+// ---------- Dashboard: the economy at a glance ----------
+
+// Key figures recorded each day while you play (for the dashboard's trend lines).
+const trend = [];
+function recordTrend() {
+  if (!state || (trend.length && trend[trend.length - 1].day === state.tick)) return;
+  if (trend.length && trend[trend.length - 1].day > state.tick) trend.length = 0;   // a new game
+  const L = state.market.labor;
+  trend.push({
+    day: state.tick,
+    gdp: state.macro?.gdp_real ?? 0,
+    inflation: state.macro?.inflation ?? 0,
+    unemployment: L.offered ? L.idle / L.offered : 0,
+    wage: state.market.prices.labor,
+    people: state.agents.length,
+  });
+  if (trend.length > 2000) trend.splice(0, trend.length - 2000);
+}
+
+// The record from about ``days`` ago (null until there is that much history).
+const ago = (days) => {
+  const now = trend[trend.length - 1];
+  if (!now) return null;
+  for (let i = trend.length - 1; i >= 0; i--) if (now.day - trend[i].day >= days) return trend[i];
+  return null;
+};
+
+function gini(values) {
+  const v = values.filter(x => x >= 0).sort((a, b) => a - b), n = v.length, total = v.reduce((a, b) => a + b, 0);
+  if (n < 2 || total <= 0) return 0;
+  return v.reduce((a, x, i) => a + (2 * (i + 1) - n - 1) * x, 0) / (n * total);
+}
+
+function kpiTile(label, value, note, delta = null, good = null) {
+  const tile = Object.assign(document.createElement("div"), { className: "kpi" });
+  tile.append(Object.assign(document.createElement("div"), { className: "kpi-label", textContent: label }),
+              Object.assign(document.createElement("div"), { className: "kpi-value", textContent: value }));
+  if (delta) {
+    const tone = good === null ? "" : good ? " good" : " bad";
+    tile.append(Object.assign(document.createElement("div"), { className: "kpi-delta" + tone, textContent: delta }));
+  }
+  tile.append(Object.assign(document.createElement("div"), { className: "kpi-note", textContent: note }));
+  return tile;
+}
+
+function renderDashboard() {
+  const m = state.market, macro = state.macro, b = state.banking, g = state.government;
+  const L = m.labor;
+  const month = ago(DAYS_PER_MONTH());
+  const unemp = L.offered ? L.idle / L.offered : 0;
+  const arrow = (now, then, fmt, upIsGood) => {
+    if (then === undefined || then === null || !isFinite(then)) return [null, null];
+    const d = now - then;
+    if (Math.abs(d) < 1e-9) return ["no change this month", null];
+    return [`${d > 0 ? "▲" : "▼"} ${fmt(Math.abs(d))} this month`, upIsGood === null ? null : (d > 0) === upIsGood];
+  };
+  const money = (v) => usd(v).replace(/\.\d\d$/, "");
+  const tiles = [];
+  const [popD, popG] = arrow(state.agents.length, month?.people, v => `${Math.round(v)}`, true);
+  tiles.push(kpiTile("Population", `${state.agents.length}`, "people alive", popD, popG));
+  if (macro) {
+    const [gD, gG] = arrow(macro.gdp_real, month?.gdp, v => money(v), true);
+    tiles.push(kpiTile("Real GDP", money(macro.gdp_real), "last year's output at year-ago prices", gD, gG));
+    const sinceStart = macro.accounts_steps < DAYS_PER_YEAR();
+    tiles.push(kpiTile("Inflation", `${(macro.inflation * 100).toFixed(1)}%`,
+                       sinceStart ? `consumer prices vs day 1 (first year: ${span(macro.accounts_steps)} so far)` : "consumer prices vs a year ago", null,
+                       Math.abs(macro.inflation) < 0.1 ? null : false));
+  }
+  const [uD, uG] = arrow(unemp * 100, month ? month.unemployment * 100 : null, v => `${v.toFixed(1)} pts`, false);
+  tiles.push(kpiTile("Unemployment", `${(unemp * 100).toFixed(1)}%`, "work offered that nobody hired", uD, uG));
+  const [wD, wG] = arrow(m.prices.labor, month?.wage, v => usd(v), true);
+  tiles.push(kpiTile("Wage", usd(m.prices.labor), "per unit of labour (a day's work)", wD, wG));
+  tiles.push(kpiTile("Inequality", gini(state.agents.map(a => a.money + (a.deposits || 0))).toFixed(2),
+                     "Gini of money: 0 = equal, 1 = one person has it all"));
+  if (b?.industry_active) tiles.push(kpiTile("Bank loans", money(b.loans), `${b.open} banks open · money supply ${money(b.money_supply)}`));
+  if (g?.enabled) tiles.push(kpiTile("Taxes", money(Object.values(g.step_revenue).reduce((a, v) => a + v, 0)) + " / day",
+                                     `treasury ${money(g.treasury)}`));
+  ui.dashKpis.replaceChildren(...tiles);
+
+  // Trend lines (as recorded while playing).
+  const charts = [
+    ["Real GDP", t => t.gdp, v => money(v)],
+    ["Unemployment", t => t.unemployment, v => `${(v * 100).toFixed(0)}%`],
+    ["Wage", t => t.wage, v => usd(v)],
+    ["Inflation", t => t.inflation, v => `${(v * 100).toFixed(0)}%`],
+  ];
+  ui.dashCharts.replaceChildren(...charts.map(([title, f, fmt]) => {
+    const box = Object.assign(document.createElement("div"), { className: "mini-chart" });
+    const values = trend.map(f);
+    const last = values.length ? values[values.length - 1] : 0;
+    box.append(Object.assign(document.createElement("div"), { className: "mini-head",
+      innerHTML: `<span>${title}</span><b>${fmt(last)}</b>` }));
+    const canvas = Object.assign(document.createElement("canvas"), { width: 320, height: 70 });
+    box.append(canvas);
+    requestAnimationFrame(() => drawSpark(canvas, values, null));
+    return box;
+  }));
+
+  // Alerts: plain-language things worth a look.
+  const alerts = [];
+  const needy = state.agents.filter(a => a.wants.length).length;
+  if (needy / (state.agents.length || 1) > 0.25) alerts.push(["bad", `${needy} people can't meet a need right now (${Math.round(100 * needy / state.agents.length)}%).`]);
+  if (unemp > 0.5) alerts.push(["warn", `Half or more of the work offered finds no employer (${(unemp * 100).toFixed(0)}%).`]);
+  if (macro && macro.inflation > 0.2) alerts.push(["warn", `Prices rose ${(macro.inflation * 100).toFixed(0)}% over the last year.`]);
+  if (macro && macro.inflation < -0.1) alerts.push(["warn", `Prices fell ${(-macro.inflation * 100).toFixed(0)}% over the last year (deflation).`]);
+  if (b?.failed) alerts.push(["bad", `${b.failed} bank(s) have failed.`]);
+  if (b?.cb_loans > 0) alerts.push(["warn", `Banks owe the central bank ${money(b.cb_loans)} (emergency loans).`]);
+  if (!alerts.length) alerts.push(["good", "Nothing alarming: people can meet their needs and prices are steady."]);
+  ui.dashAlerts.replaceChildren(...alerts.map(([tone, text]) =>
+    Object.assign(document.createElement("li"), { className: tone, textContent: text })));
+
+  // Price movers over the last month.
+  const back = (h) => h.length > DAYS_PER_MONTH() ? h[h.length - 1 - DAYS_PER_MONTH()] : h[0];
+  const moves = activeGoods().map(g2 => {
+    const h = m.price_history[g2] || [];
+    const then = back(h);
+    return [g2, then ? m.prices[g2] / then - 1 : 0];
+  }).sort((a, b2) => Math.abs(b2[1]) - Math.abs(a[1])).slice(0, 6);
+  ui.dashMovers.replaceChildren(...moves.map(([g2, ch]) => {
+    const row = Object.assign(document.createElement("div"), { className: "mover" });
+    row.append(Object.assign(document.createElement("span"), { textContent: label(g2) }),
+               Object.assign(document.createElement("span"), { className: "mono", textContent: usd(m.prices[g2]) }),
+               Object.assign(document.createElement("b"), { className: ch >= 0 ? "up" : "down",
+                 textContent: `${ch >= 0 ? "▲" : "▼"} ${Math.abs(ch * 100).toFixed(0)}%` }));
+    return row;
+  }));
+
+  ui.dashEvents.replaceChildren(...[...state.events].reverse().slice(0, 6).map(ev => {
+    const li = document.createElement("li");
+    li.append(Object.assign(document.createElement("span"), { className: "ev-day", textContent: calendar(ev.tick) }),
+              Object.assign(document.createElement("span"), { textContent: ev.message }));
+    return li;
+  }));
+}
 
 // ---------- Products tab: every product's KPIs ----------
 
@@ -846,10 +1026,10 @@ function renderProducts() {
   const sum = (f) => all.reduce((a, r) => a + f(r), 0);
   const cards = [
     ["Products", `${all.length}`, `${new Set(all.map(r => r.info.layer)).size} layers`],
-    ["Output", usd(sum(r => r.made * r.price)), "value made per step"],
-    ["Consumed", usd(sum(r => r.consumed * r.price)), "value used up by people per step"],
+    ["Output", usd(sum(r => r.made * r.price)), "value made per day"],
+    ["Consumed", usd(sum(r => r.consumed * r.price)), "value used up by people per day"],
     ["Rising / falling", `${all.filter(r => r.change > 0.02).length} / ${all.filter(r => r.change < -0.02).length}`,
-      "prices up / down over 20 steps"],
+      "prices up / down over 20 days"],
   ];
   ui.productSummary.innerHTML = "";
   for (const [l, v, n] of cards) {
@@ -863,7 +1043,7 @@ function renderProducts() {
   const t = ui.productTable;
   t.innerHTML = "";
   const head = t.createTHead().insertRow();
-  for (const h of ["Product", "Price", "20-step change", "Made / step", "Consumed / step", "Inputs / step",
+  for (const h of ["Product", "Price", "20-day change", "Made /day", "Consumed /day", "Inputs /day",
                    "Held", "Producers", "Buyers : sellers"]) {
     head.append(Object.assign(document.createElement("th"), { textContent: h }));
   }
@@ -891,10 +1071,10 @@ function renderProducts() {
       const lines = [
         `${r.meta.industry} (${r.meta.sector}) · layer ${r.info.layer} · made from ${recipe || "labour and capital only (primary)"}`,
         `Effect per unit: ${effects || "none (an input only)"}${r.shelf ? ` · keeps ${r.shelf} steps` : " · never expires"}`,
-        `Industry: ${r.shares.toFixed(2)} asset shares owned by ${r.owners} agents (${r.producing} produced this step) · ` +
-          `can make ${r.capacity.toFixed(2)} / step fully staffed · wears out ${(r.depreciation * 100).toFixed(0)}% a year`,
+        `Industry: ${r.shares.toFixed(2)} asset shares owned by ${r.owners} agents (${r.producing} produced today) · ` +
+          `can make ${r.capacity.toFixed(2)} /day fully staffed · wears out ${(r.depreciation * 100).toFixed(0)}% a year`,
         `Market: ${r.buyers} buyers vs ${r.sellers} sellers (pressure ×${Math.pow(r.pressure, state.rules.price_elasticity[r.g]).toFixed(2)}) · ` +
-          `seller concentration ${r.concentration.toFixed(2)} · buyer power ${r.buyerPower.toFixed(2)} · expired ${r.expired.toFixed(2)} / step`,
+          `seller concentration ${r.concentration.toFixed(2)} · buyer power ${r.buyerPower.toFixed(2)} · expired ${r.expired.toFixed(2)} /day`,
       ];
       for (const text of lines) cell.append(Object.assign(document.createElement("div"), { textContent: text }));
       const canvas = Object.assign(document.createElement("canvas"), { className: "product-spark", width: 600, height: 80 });
@@ -905,7 +1085,7 @@ function renderProducts() {
 }
 
 // A small price chart (no axes): the line, its min and max.
-function drawSpark(canvas, values) {
+function drawSpark(canvas, values, caption = "price") {
   const c = canvas.getContext("2d");
   if (values.length < 2) return;
   const lo = Math.min(...values), hi = Math.max(...values), span = hi - lo || 1;
@@ -919,7 +1099,7 @@ function drawSpark(canvas, values) {
   c.stroke();
   c.fillStyle = cssVar("--muted");
   c.font = "11px sans-serif";
-  c.fillText(`price: ${usd(lo)} – ${usd(hi)} over the last ${values.length} steps`, 2, canvas.height - 2);
+  if (caption) c.fillText(`${caption}: ${usd(lo)} – ${usd(hi)} over the last ${span(values.length)}`, 2, canvas.height - 2);
 }
 
 ui.productSearch.oninput = () => { productView.query = ui.productSearch.value.trim().toLowerCase(); renderProducts(); };
@@ -934,8 +1114,8 @@ function fillBanking(force = false) {
   bankDirty = false;
   const b = state.banking;
   ui.bankEnabled.checked = b.enabled;
-  ui.bankDeposit.value = +(b.deposit_rate * 100).toFixed(4);
-  ui.bankSpread.value = +(b.loan_spread * 100).toFixed(4);
+  ui.bankDeposit.value = +(perYear(b.deposit_rate) * 100).toFixed(2);   // shown % a year, kept per day
+  ui.bankSpread.value = +(perYear(b.loan_spread) * 100).toFixed(2);
   ui.bankReserve.value = +(b.liquidity * 100).toFixed(2);
   ui.bankMinCapital.value = b.min_capital;
   ui.bankIncomeShare.value = +(b.loan_income_share * 100).toFixed(2);
@@ -947,7 +1127,7 @@ function renderBanking() {
   ui.bankForm.querySelectorAll("input, button").forEach(el => { el.disabled = !b.industry_active; });
   const stats = b.industry_active ? [
     ["Banks", `${b.open} open`, `${b.closed} closed · ${b.failed} failed`],
-    ["Rates", `${(b.deposit_rate_now * 100).toFixed(2)}% / ${(b.loan_rate_now * 100).toFixed(2)}%`, "deposits / loans, per step"],
+    ["Rates", `${(perYear(b.deposit_rate_now) * 100).toFixed(1)}% / ${(perYear(b.loan_rate_now) * 100).toFixed(1)}%`, "deposits / loans, a year"],
     ["Deposits", usd(b.deposits), `${usd(b.reserves)} held as reserves`],
     ["Loans", usd(b.loans), "outstanding"],
     ["Money supply", usd(b.money_supply), "cash (people + companies) + deposits"],
@@ -994,15 +1174,15 @@ ui.bankForm.onsubmit = async (e) => {
   try {
     const next = await api("/api/banking", {
       enabled: ui.bankEnabled.checked,
-      deposit_rate: Number(ui.bankDeposit.value) / 100,
-      loan_spread: Number(ui.bankSpread.value) / 100,
+      deposit_rate: perDay(Number(ui.bankDeposit.value) / 100),
+      loan_spread: perDay(Number(ui.bankSpread.value) / 100),
       liquidity: Number(ui.bankReserve.value) / 100,
       min_capital: Number(ui.bankMinCapital.value),
       loan_income_share: Number(ui.bankIncomeShare.value) / 100,
     });
     bankDirty = false;
     render(next);
-    ui.bankStatus.textContent = "Banking settings apply from the next step.";
+    ui.bankStatus.textContent = "Banking settings apply from tomorrow.";
     ui.bankStatus.className = "status";
   } catch (err) {
     ui.bankStatus.textContent = err.message;
@@ -1146,15 +1326,15 @@ function updateBalance() {
     const line = document.createElement("span");
     const even = Math.abs(net) < 1e-9;
     line.className = even ? "" : net < 0 ? "short" : "surplus";
-    line.textContent = `${need}: grows ${grows.toFixed(3)} · its industries make ${made.toFixed(3)} of relief per step → ` +
-      (even ? "balanced" : net < 0 ? `buys ${(-net).toFixed(3)}/step` : `sells ${net.toFixed(3)}/step`);
+    line.textContent = `${need}: grows ${grows.toFixed(3)} · its industries make ${made.toFixed(3)} of relief per day → ` +
+      (even ? "balanced" : net < 0 ? `buys ${(-net).toFixed(3)}/day` : `sells ${net.toFixed(3)}/day`);
     ui.balance.append(line);
   }
   const jobs = GOODS.reduce((sum, g) => sum + fieldValue(`assets.${g}`) * state.market.asset_labor[g], 0);
   const work = fieldValue("labor_capacity");
   const labourLine = document.createElement("span");
-  labourLine.textContent = `labour: makes ${work.toFixed(3)} · its assets employ ${jobs.toFixed(3)} per step → ` +
-    (work >= jobs ? `sells ${(work - jobs).toFixed(3)}/step` : `hires ${(jobs - work).toFixed(3)}/step`);
+  labourLine.textContent = `labour: makes ${work.toFixed(3)} · its assets employ ${jobs.toFixed(3)} per day → ` +
+    (work >= jobs ? `sells ${(work - jobs).toFixed(3)}/day` : `hires ${(jobs - work).toFixed(3)}/day`);
   ui.balance.append(labourLine);
   // Sleep rises at g while awake (0.3 -> 0.5) and falls at r while resting (0.5 -> 0.3),
   // so the agent spends g / (g + r) of its time asleep.
@@ -1163,7 +1343,7 @@ function updateBalance() {
   const line = document.createElement("span");
   line.className = r ? "" : "short";
   line.textContent = r
-    ? `sleep: rises ${g.toFixed(3)} · recovers ${r.toFixed(3)} per step at rest → asleep ${(100 * g / (g + r || 1)).toFixed(0)}% of the time`
+    ? `sleep: rises ${g.toFixed(3)} · recovers ${r.toFixed(3)} per day at rest → asleep ${(100 * g / (g + r || 1)).toFixed(0)}% of the time`
     : "sleep: recovery is 0, so a tired agent stops forever";
   ui.balance.append(line);
 }
@@ -1223,7 +1403,7 @@ canvas.addEventListener("click", (e) => {
 });
 
 ui.step.onclick = () => step(1);
-ui.run100.onclick = () => step(100);
+ui.run100.onclick = () => step(DAYS_PER_MONTH());   // one month
 ui.play.onclick = () => setPlaying(!playing);
 ui.stepsPerTick.onchange = () => { if (playing) setPlaying(true); };
 ui.interval.oninput = () => {

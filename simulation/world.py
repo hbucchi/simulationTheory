@@ -931,7 +931,7 @@ class World:
             "banking": self.banking.to_dict(self),
             # National accounts of the latest step (GDP over the last year, price indexes).
             "macro": ({k: round(self.recorder.history[-1][k], 4) for k in
-                       ("gdp_nominal", "gdp_real", "deflator", "cpi", "inflation")}
+                       ("gdp_nominal", "gdp_real", "deflator", "cpi", "inflation", "accounts_steps")}
                       if self.recorder.history else None),
             # Industries left out because their recipe needs a good that isn't in this game.
             "auto_excluded": list(self.rules.auto_excluded),

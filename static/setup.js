@@ -48,9 +48,9 @@ const SETUP_SECTIONS = [
     { path: "agents", label: "Agents", kind: "int", min: 1, max: 5000 },
     { path: "seed", label: "Seed", kind: "int", optional: true, placeholder: "random" },
     { path: "contact_distance", label: "Touch distance (px)", kind: "float", min: 1, max: 200, step: 1 },
-    { path: "depart_steps", label: "Walk apart (steps)", kind: "int", min: 0, max: 1000 },
-    { path: "cooldown_steps", label: "Ignore each other after a deal (steps)", kind: "int", min: 0, max: 10000 },
-    { path: "retry_steps", label: "… after no deal (steps)", kind: "int", min: 0, max: 10000 },
+    { path: "depart_steps", label: "Walk apart (days)", kind: "int", min: 0, max: 1000 },
+    { path: "cooldown_steps", label: "Ignore each other after a deal (days)", kind: "int", min: 0, max: 10000 },
+    { path: "retry_steps", label: "… after no deal (days)", kind: "int", min: 0, max: 10000 },
   ]},
   { title: "Game size: layers and industries", wide: true, fields: [
     { path: "industry_layers", label: "Industry layers in this game (1–10)", kind: "int", min: 1, max: 10, full: true },
@@ -59,7 +59,7 @@ const SETUP_SECTIONS = [
     { path: "excluded_industries", label: "Industries in this game", kind: "industries", full: true },
   ], hint: "Pick a smaller economy for a simpler (and faster) game: fewer layers, or leave out single industries. " +
       "Every industry the game keeps still needs all the inputs of its recipe, so leaving one out also leaves out what " +
-      "is made from it. Each good is checked against every agent each step, so fewer industries also run faster." },
+      "is made from it. Each good is checked against every agent each day, so fewer industries also run faster." },
   { title: "Modules: what this economy has", wide: true, hint: "Switch whole parts of the economy on or off. A module " +
       "only works with the modules it needs (greyed out otherwise). Quick starts below set a whole combination.",
     fields: [{ path: "#game-types", kind: "game-types" },
@@ -81,9 +81,9 @@ const SETUP_SECTIONS = [
     { path: "payout_ratio", label: "Personality: pays out (share of profits)", kind: "spread", min: 0, max: 1, step: 0.05 },
   ]},
   { title: "Labour capacity", wide: true, hint: "Labour is the only thing agents make themselves, and it is never stored: " +
-      "each step agents can work up to their capacity (scaled by efficiency) and sell it in the labour market. Anything " +
+      "each day agents can work up to their capacity (scaled by efficiency) and sell it in the labour market. Anything " +
       "unsold is lost. Every good is only made by its industry's assets worked by labour.", fields: [
-    { path: "labor_capacity", label: "Capacity per step", kind: "spread", min: 0, step: 0.05 },
+    { path: "labor_capacity", label: "Capacity per day", kind: "spread", min: 0, step: 0.05 },
   ]},
   { title: "Labour market", hint: "Base wage = labour share × value one unit of labour makes. The wage then follows " +
       "labour wanted ÷ capacity offered (labour elasticity in Market dynamics). Agents offer more and ask less when they " +
@@ -92,7 +92,7 @@ const SETUP_SECTIONS = [
     { path: "participation_floor", label: "Offer at least (share of capacity)", kind: "float", min: 0, max: 1, step: 0.05 },
     { path: "bargaining_spread", label: "Bargaining spread", kind: "float", min: 0, max: 2, step: 0.05 },
     { path: "money_weight", label: "Need: weight of money (vs needs)", kind: "float", min: 0, max: 1, step: 0.05 },
-    { path: "comfort_steps", label: "Comfortable cash (steps of living)", kind: "int", min: 0, max: 100000 },
+    { path: "comfort_steps", label: "Comfortable cash (days of living)", kind: "int", min: 0, max: 100000 },
   ]},
   { title: "Efficiency and wellbeing", hint: "Efficiency = 1 − Σ weight × need − depression penalty (at least the minimum). " +
       "It scales how much labour an agent can give. Wellbeing uses the same weights and raises its asking wage.", fields: [
@@ -100,8 +100,8 @@ const SETUP_SECTIONS = [
     { path: "depression_penalty", label: "Depression penalty", kind: "float", min: 0, max: 1, step: 0.05 },
     { path: "min_efficiency", label: "Minimum efficiency", kind: "float", min: 0, max: 1, step: 0.05 },
   ]},
-  { title: "Resource consumption", wide: true, hint: "How fast each need grows per step, and how sleep recovers at rest.", fields: [
-    ...per(NEEDS, n => ({ path: `rates.${n}`, label: `${cap(n)} / step`, kind: "spread", min: 0, max: 1, step: 0.001 })),
+  { title: "Resource consumption", wide: true, hint: "How fast each need grows per day, and how sleep recovers at rest.", fields: [
+    ...per(NEEDS, n => ({ path: `rates.${n}`, label: `${cap(n)} /day`, kind: "spread", min: 0, max: 1, step: 0.001 })),
     { path: "sleep_recovery", label: "Sleep recovery", kind: "spread", min: 0, max: 1, step: 0.01 },
   ]},
   { title: "Trading", hint: "A buyer buys its need × a random multiplier between these two (stocking up), " +
@@ -111,17 +111,17 @@ const SETUP_SECTIONS = [
   ]},
   { title: "Stock band", hint: "Agents keep between the floor and the cap of each resource: above the cap they go " +
       "out to sell the surplus (to make money for assets); below the floor they go out to buy back up to the cap.", fields: [
-    { path: "stock_steps", label: "Cap (steps of each need)", kind: "int", min: 1, enabledWhen: v => v.selling_enabled },
+    { path: "stock_steps", label: "Cap (days of each need)", kind: "int", min: 1, enabledWhen: v => v.selling_enabled },
     { path: "restock_below", label: "Floor (0.5 = half the cap)", kind: "float", min: 0, max: 1, step: 0.05,
       enabledWhen: v => v.selling_enabled },
   ]},
   { title: "Market dynamics: stockpiling", hint: "When a resource's average per agent falls by the trigger " +
       "within the window, agents hoard it: they buy a reserve (paid in money, within a budget) and stop selling into it.", fields: [
-    { path: "scarcity_window", label: "Watch the last (steps)", kind: "int", min: 10, max: 500,
+    { path: "scarcity_window", label: "Watch the last (days)", kind: "int", min: 10, max: 500,
       enabledWhen: v => v.stockpiling_enabled },
     { path: "scarcity_trigger", label: "Scarce after a fall of (0.1 = 10%)", kind: "float", min: 0.01, max: 0.9, step: 0.01,
       enabledWhen: v => v.stockpiling_enabled },
-    { path: "stockpile_steps", label: "Reserve (steps of own use)", kind: "int", min: 0, max: 5000,
+    { path: "stockpile_steps", label: "Reserve (days of own use)", kind: "int", min: 0, max: 5000,
       enabledWhen: v => v.stockpiling_enabled },
     { path: "stockpile_budget", label: "Spend at most (0.5 = half its money)", kind: "float", min: 0, max: 1, step: 0.05,
       enabledWhen: v => v.stockpiling_enabled },
@@ -133,7 +133,7 @@ const SETUP_SECTIONS = [
       enabledWhen: v => v.demand_pricing_enabled },
     { path: "concentration_weight.labor", label: "Labour concentration weight", kind: "float", min: 0, max: 10, step: 0.1,
       enabledWhen: v => v.demand_pricing_enabled },
-    { path: "price_adjust_speed", label: "Speed (share of gap per step)", kind: "float", min: 0.01, max: 1, step: 0.05,
+    { path: "price_adjust_speed", label: "Speed (share of gap per day)", kind: "float", min: 0.01, max: 1, step: 0.05,
       enabledWhen: v => v.demand_pricing_enabled },
     { path: "price_floor", label: "Never below base ×", kind: "float", min: 0.01, max: 1, step: 0.05,
       enabledWhen: v => v.demand_pricing_enabled },
@@ -150,12 +150,12 @@ const SETUP_SECTIONS = [
       "goods (machinery, construction), which are made very slowly, so building takes time.", fields: [
     { path: "build_min_q", label: "Build when an asset is worth ≥ (× its cost)", kind: "float", min: 0, step: 0.1,
       enabledWhen: v => v.building_enabled },
-    { path: "project_steps", label: "Drop unfinished projects after (steps)", kind: "int", min: 1,
+    { path: "project_steps", label: "Drop unfinished projects after (days)", kind: "int", min: 1,
       enabledWhen: v => v.building_enabled },
     { path: "layer_bonus", label: "Extra relief per layer (0.5 = +50%)", kind: "float", min: 0, max: 10, step: 0.1 },
-    { path: "input_buffer_steps", label: "Owners keep inputs for (steps)", kind: "int", min: 1, max: 10000 },
+    { path: "input_buffer_steps", label: "Owners keep inputs for (days)", kind: "int", min: 1, max: 10000 },
     { path: "input_reorder", label: "… and reorder below (share)", kind: "float", min: 0, max: 1, step: 0.05 },
-    { path: "output_buffer_steps", label: "Stop producing above (steps of output held)", kind: "int", min: 0 },
+    { path: "output_buffer_steps", label: "Stop producing above (days of output held)", kind: "int", min: 0 },
     { path: "max_output_stock", label: "… or above (units held, 0 = never)", kind: "int", min: 0 },
     { path: "cost_floor", label: "Secondary goods never sell below their inputs", kind: "bool", full: true },
     { path: "profit_check", label: "Industries stop hiring when labour costs more than it adds", kind: "bool", full: true },
@@ -166,8 +166,8 @@ const SETUP_SECTIONS = [
       "empty = extraction). Effects: what consuming one unit does to each need, from −1 (harms) to +1 (fully relieves); " +
       "a good can help several needs and hurt others (fast food: hunger +, boredom +, health −). Benefits grow with the " +
       "layer, harm doesn't; sleep can only be harmed. New asset share costs: the capital goods (machinery, construction, " +
-      "electronics) one new share of this industry is built from. Shelf life in steps (0 = never " +
-      "expires). Jobs per asset × units per labour = what one asset makes per step when fully staffed.", fields:
+      "electronics) one new share of this industry is built from. Shelf life in days (0 = never " +
+      "expires). Jobs per asset × units per labour = what one asset makes per day when fully staffed.", fields:
     GOODS.flatMap(g => {
       const e = CATALOG_INFO[g];
       const group = `${e.label} · layer ${catalogLayer(g)} · ${e.sector} · ${e.industry}`;
@@ -176,12 +176,12 @@ const SETUP_SECTIONS = [
         { path: `build_cost.${g}`, label: "New asset share costs", kind: "recipe", full: true, group, allowSelf: true },
         ...NEEDS.map(n => ({ path: `effects.${g}.${n}`, label: `Effect on ${n}`, kind: "float", group, optional: true,
           min: -1, max: n === "sleep" ? 0 : 1, step: 0.05, placeholder: "0" })),
-        { path: `shelf_life.${g}`, label: "Shelf life (steps)", kind: "int", min: 0, group },
+        { path: `shelf_life.${g}`, label: "Shelf life (days)", kind: "int", min: 0, group },
         { path: `asset_labor.${g}`, label: "Jobs per asset", kind: "float", min: 0, step: 0.05, group },
         { path: `productivity.${g}`, label: "Units per labour", kind: "float", min: 0, step: 0.1, group },
         { path: `productivity_growth.${g}`, label: "Productivity growth", kind: "float", min: -0.99, max: 100, step: 0.01, group },
         { path: `labor_saving.${g}`, label: "Labour-saving", kind: "float", min: -1, max: 0.99, step: 0.01, group },
-        { path: `asset_return.${g}`, label: "Asset return", kind: "float", min: 0.0001, max: 10, step: 0.001, group },
+        { path: `asset_return.${g}`, label: "Asset return (per day)", kind: "float", min: 0.0001, max: 10, step: 0.001, group },
         { path: `fixed_prices.${g}`, label: "Fixed price", kind: "float", min: 0, step: 0.01, group,
           enabledWhen: v => v.price_mode === "fixed" },
         { path: `price_elasticity.${g}`, label: "Price elasticity", kind: "float", min: 0, max: 3, step: 0.1, group,
@@ -191,12 +191,12 @@ const SETUP_SECTIONS = [
       ];
     }) },
   { title: "Assets, productivity and investment", hint: "Each good has its own asset. One asset share employs up to " +
-      "“jobs per asset” labour per step; each unit of labour makes “productivity” units of the good, and productivity grows " +
+      "“jobs per asset” labour per day; each unit of labour makes “productivity” units of the good, and productivity grows " +
       "over time (per-industry numbers are in the Industry catalog). Output = productivity × min(labour, shares × jobs " +
       "per asset). The only assets are the starting ones; they " +
-      "change hands between agents. Asset price = output per step × good price ÷ return. Agents invest spare cash in assets " +
+      "change hands between agents. Asset price = output per day × good price ÷ return. Agents invest spare cash in assets " +
       "of what they lack, buying from owners short of cash or holding more than the stock cap of that good.", fields: [
-    { path: "productivity_growth_steps", label: "Productivity grows every (steps)", kind: "int", min: 1, max: 100000 },
+    { path: "productivity_growth_steps", label: "Productivity grows every (days)", kind: "int", min: 1, max: 100000 },
     { path: "liquidity_units", label: "Keep cash for (units of each)", kind: "float", min: 0, step: 1,
       enabledWhen: v => v.investing_enabled },
     { path: "min_investment", label: "Invest once spare cash ≥", kind: "float", min: 0.01, step: 1,
@@ -208,11 +208,11 @@ const SETUP_SECTIONS = [
       "machinery and construction like any industry, run with labour and electricity) and its founder's own money: at least " +
       "the minimum capital goes in as the bank's equity. The plant makes banking services, and every loan uses them up " +
       "(one unit per “money lent per service unit”). Agents deposit spare cash; investors borrow to build when the asset " +
-      "earns more than the loan costs, and agents short of cash borrow for what they need now. Steps are days: nobody may " +
+      "earns more than the loan costs, and agents short of cash borrow for what they need now. Nobody may " +
       "owe more than the chosen share of a month's income. A bank lends only while it keeps the reserve ratio of deposits " +
-      "in cash and equity of at least the capital ratio of its loans (Basel). Each step the owner takes its payout share " +
+      "in cash and equity of at least the capital ratio of its loans (Basel). Each day the owner takes its payout share " +
       "(personality) of the bank's profit as dividends and the rest stays as equity, so the bank can lend more. " +
-      "Rates are per step.", fields: [
+      "Rates are per year.", fields: [
     { path: "starting_banks", label: "Banks at the start", kind: "int", min: 0, max: 1000,
       enabledWhen: v => v.banking_enabled },
     { path: "starting_bank_shares", label: "… each with a plant of (shares)", kind: "float", min: 0.05, step: 0.1,
@@ -221,42 +221,42 @@ const SETUP_SECTIONS = [
       enabledWhen: v => v.banking_enabled },
     { path: "bank_liquidity", label: "Vault cash each bank keeps (× deposits)", kind: "float", min: 0, max: 1, step: 0.01,
       enabledWhen: v => v.banking_enabled },
-    { path: "deposit_rate", label: "Deposit rate (per step)", kind: "float", min: 0, max: 1, step: 0.0005,
+    { path: "deposit_rate", label: "Deposit rate (% a year)", kind: "float", min: 0, step: 0.1, yearly: true,
       enabledWhen: v => v.banking_enabled },
-    { path: "loan_spread", label: "Loan rate = deposit rate +", kind: "float", min: 0, max: 1, step: 0.0005,
+    { path: "loan_spread", label: "Loan rate = deposit rate + (% a year)", kind: "float", min: 0, step: 0.1, yearly: true,
       enabledWhen: v => v.banking_enabled },
-    { path: "loan_steps", label: "Loans repaid over (steps)", kind: "int", min: 1, enabledWhen: v => v.banking_enabled },
+    { path: "loan_steps", label: "Loans repaid over (days)", kind: "int", min: 1, enabledWhen: v => v.banking_enabled },
     { path: "max_loan_to_value", label: "Debt ≤ (× value of its assets)", kind: "float", min: 0, max: 10, step: 0.05,
       enabledWhen: v => v.banking_enabled },
     { path: "loan_per_service", label: "Money lent per service unit ($)", kind: "float", min: 0.01, step: 100,
       enabledWhen: v => v.banking_enabled },
-    { path: "default_steps", label: "Default after unpaid (steps)", kind: "int", min: 1, enabledWhen: v => v.banking_enabled },
+    { path: "default_steps", label: "Default after unpaid (days)", kind: "int", min: 1, enabledWhen: v => v.banking_enabled },
     { path: "deposit_share", label: "Share of spare cash deposited", kind: "float", min: 0, max: 1, step: 0.05,
       enabledWhen: v => v.banking_enabled },
-    { path: "month_steps", label: "Days (steps) in a month", kind: "int", min: 1, enabledWhen: v => v.banking_enabled },
+    { path: "month_steps", label: "Days in a month", kind: "int", min: 1, enabledWhen: v => v.banking_enabled },
     { path: "loan_income_share", label: "Lend each agent up to (× its monthly income)", kind: "float", min: 0, max: 100,
       step: 0.05, enabledWhen: v => v.banking_enabled },
   ]},
-  { title: "Budget", hint: "Every agent knows its budget: what living costs it per step (the cheapest goods for each " +
-      "need, housing included, net of what its own industries make) plus its loan payments. It keeps that many steps of " +
+  { title: "Budget", hint: "Every agent knows its budget: what living costs it per day (the cheapest goods for each " +
+      "need, housing included, net of what its own industries make) plus its loan payments. It keeps that many days of " +
       "it (a “month”) on top of the cash it needs right now, and only invests or builds with what is left. " +
       "Loans are paid only out of money left after what it needs to buy now.", fields: [
-    { path: "budget_steps", label: "Budget covers (steps)", kind: "int", min: 0, max: 100000 },
+    { path: "budget_steps", label: "Budget covers (days)", kind: "int", min: 0, max: 100000 },
   ]},
   { title: "Central government", hint: "A minimum interest rate that no asset's return can fall below (higher rates " +
-      "make assets cheaper), and labour bought every step with newly created money. Both can be changed during the game " +
+      "make assets cheaper), and labour bought every day with newly created money. Both can be changed during the game " +
       "in the Government tab.", fields: [
-    { path: "gov_min_rate", label: "Minimum rate (0.01 = 1%)", kind: "float", min: 0, max: 10, step: 0.005,
+    { path: "gov_min_rate", label: "Policy rate: minimum return (% a year)", kind: "float", min: 0, step: 0.25, yearly: true,
       enabledWhen: v => v.government_enabled },
     { path: "capital_ratio", label: "Central bank: bank equity ≥ (× loans, Basel)", kind: "float", min: 0, max: 1,
       step: 0.01, enabledWhen: v => v.government_enabled },
     { path: "reserve_ratio", label: "Central bank: reserves banks hold there (× deposits)", kind: "float", min: 0, max: 1,
       step: 0.01, enabledWhen: v => v.government_enabled },
-    { path: "reserve_rate", label: "Central bank: interest on reserves (per step)", kind: "float", min: 0, max: 1,
+    { path: "reserve_rate", label: "Central bank: interest on reserves (% a year)", kind: "float", min: 0, yearly: true,
       step: 0.0005, enabledWhen: v => v.government_enabled },
     { path: "lender_of_last_resort", label: "Central bank lends to solvent banks short of cash", kind: "bool", full: true,
       enabledWhen: v => v.government_enabled },
-    { path: "llr_penalty", label: "… at the policy rate + (per step)", kind: "float", min: 0, max: 1, step: 0.0005,
+    { path: "llr_penalty", label: "… at the policy rate + (% a year)", kind: "float", min: 0, step: 0.1, yearly: true,
       enabledWhen: v => v.government_enabled && v.lender_of_last_resort },
     { path: "tax_production", label: "Production tax (share of every sale)", kind: "float", min: 0, max: 1, step: 0.01,
       enabledWhen: v => v.government_enabled },
@@ -268,7 +268,7 @@ const SETUP_SECTIONS = [
       enabledWhen: v => v.government_enabled },
     { path: "balanced_budget", label: "Spend all taxes (the rest buys public works)", kind: "bool", full: true,
       enabledWhen: v => v.government_enabled },
-    { path: "gov_labor_purchase", label: "Labour bought per step", kind: "float", min: 0, step: 0.5,
+    { path: "gov_labor_purchase", label: "Labour bought per day", kind: "float", min: 0, step: 0.5,
       enabledWhen: v => v.government_enabled },
   ]},
   { title: "Need thresholds", hint: "When agents act on a need, and what consuming does.", fields: [
@@ -801,6 +801,7 @@ function fillSetup(rules, seed = "") {
     const value = f.path === "seed" ? seed : getPath(rules, f.path);
     if (f.kind === "bool") el.checked = value;
     else if (f.kind === "recipe") el.value = formatRecipe(value);
+    else if (f.yearly && typeof value === "number") el.value = +(perYear(value) * 100).toFixed(3);   // % a year
     else el.value = value ?? "";
   }
   updateSetup();
@@ -828,7 +829,7 @@ function readSetup() {
           if (f.optional) continue;
           throw new Error(`${f.label} can't be empty`);
         }
-        value = Number(el.value);
+        value = f.yearly ? perDay(Number(el.value) / 100) : Number(el.value);   // shown % a year, kept per day
       }
     }
     if (f.path === "seed") { seed = value; continue; }
@@ -903,8 +904,10 @@ function updateSetup() {
       el.classList.toggle("changed", formatRecipe(now) !== formatRecipe(factory));
       continue;
     }
-    const now = f.kind === "bool" ? el.checked : f.kind === "choice" ? el.value : Number(el.value);
-    el.classList.toggle("changed", factory !== undefined && el.value !== "" && now !== factory);
+    const now = f.kind === "bool" ? el.checked : f.kind === "choice" ? el.value
+      : f.yearly ? perDay(Number(el.value) / 100) : Number(el.value);
+    const differs = f.yearly ? Math.abs(Number(el.value) - +(perYear(factory ?? 0) * 100).toFixed(3)) > 1e-9 : now !== factory;
+    el.classList.toggle("changed", factory !== undefined && el.value !== "" && differs);
   }
   updateModules();   // after the loop above, which resets every label's disabled look
   if (!values) return renderPreview(null, error);
@@ -985,43 +988,43 @@ function renderPreview(r, error, moduleNotes = []) {
     const grows = avg(r.rates[need]) * n;
     if (!goods.length) {
       const deadly = (need === "hunger" || need === "thirst") && r.death_enabled && grows > 0;
-      line(`${cap(need)}: nothing in this game relieves it (it grows ${grows.toFixed(3)}/step in total)` +
+      line(`${cap(need)}: nothing in this game relieves it (it grows ${grows.toFixed(3)}/day in total)` +
            (deadly ? ". ⚠ Agents will die of it: include an industry that relieves it." : "."), grows ? "short" : "");
       continue;
     }
     const capacity = goods.reduce((sum, g) => sum + sharesPerAgent(g) * n * perShare(g) * relief(g), 0);
     const best = goods[0];
-    const head = `${cap(need)}: grows ${grows.toFixed(3)}/step in total; its ${goods.length} good${goods.length === 1 ? "" : "s"} (best: ${label(best).toLowerCase()}, ` +
-                 `layer ${layerOf(best)}, ${relief(best).toFixed(3)}/unit) can relieve ${capacity.toFixed(3)}/step when fully staffed`;
+    const head = `${cap(need)}: grows ${grows.toFixed(3)}/day in total; its ${goods.length} good${goods.length === 1 ? "" : "s"} (best: ${label(best).toLowerCase()}, ` +
+                 `layer ${layerOf(best)}, ${relief(best).toFixed(3)}/unit) can relieve ${capacity.toFixed(3)}/day when fully staffed`;
     const deadly = (need === "hunger" || need === "thirst") && r.death_enabled;
     line(capacity >= grows ? `${head}.` : `${head} → short${deadly ? " (can kill)" : ""}.`, capacity >= grows ? "surplus" : "short");
   }
   if (r.expiry_enabled) {
     const quick = active.filter(g => r.shelf_life[g] > 0).sort((a, b) => r.shelf_life[a] - r.shelf_life[b]).slice(0, 4);
-    if (quick.length) line(`Expiry: ${quick.map(g => `${label(g).toLowerCase()} ${r.shelf_life[g]}`).join(", ")} steps keep the ` +
+    if (quick.length) line(`Expiry: ${quick.map(g => `${label(g).toLowerCase()} ${r.shelf_life[g]}`).join(", ")} days keep the ` +
                            "shortest; agents only stock perishables they will use in time.");
   }
   const supply = avg(r.labor_capacity) * n;
   const jobs = active.reduce((sum, g) => sum + sharesPerAgent(g) * n * r.asset_labor[g], 0);
   const range = (vals) => { const lo = Math.min(...vals), hi = Math.max(...vals); return lo === hi ? `${lo}` : `${lo}–${hi}`; };
-  line(`Labour: agents make ${supply.toFixed(2)}/step and assets can employ ${jobs.toFixed(2)}/step → ` +
-       (supply >= jobs ? `${(supply - jobs).toFixed(2)}/step more work than jobs (labour will be cheap).`
-                       : `${(jobs - supply).toFixed(2)}/step more jobs than workers, so assets can't all run.`),
+  line(`Labour: agents make ${supply.toFixed(2)}/day and assets can employ ${jobs.toFixed(2)}/day → ` +
+       (supply >= jobs ? `${(supply - jobs).toFixed(2)}/day more work than jobs (labour will be cheap).`
+                       : `${(jobs - supply).toFixed(2)}/day more jobs than workers, so assets can't all run.`),
        supply >= jobs ? "" : "short");
-  line(`Labour is sold each step and never stored; owners first use their own. Over ${r.productivity_growth_steps} steps ` +
+  line(`Labour is sold each day and never stored; owners first use their own. Over ${r.productivity_growth_steps} days ` +
        `industries need ${range(active.map(g => +(r.labor_saving[g] * 100).toFixed(0)))}% less labour per asset ` +
        `while each unit of labour makes ${range(active.map(g => +(r.productivity_growth[g] * 100).toFixed(0)))}% more.`);
   const stock = RESOURCES.map(x => avg(r.inventory[x]));
   const needPerStep = Math.max(avg(r.rates.hunger), avg(r.rates.thirst)) / r.relief_per_unit;
   const goodsStock = Math.min(...["food", "water"].map(x => avg(r.inventory[x])));
   if (goodsStock / needPerStep > 300) {
-    line(`Agents start with enough of everything for ${Math.round(goodsStock / needPerStep)}+ steps, ` +
+    line(`Agents start with enough of everything for ${Math.round(goodsStock / needPerStep)}+ days, ` +
          "so they won't need to trade goods for a long time. Lower the starting inventory for more trading.");
   }
 
   if (r.stockpiling_enabled) {
     line(`Stockpiling: when a resource's average per agent falls ${(r.scarcity_trigger * 100).toFixed(0)}% within ` +
-         `${r.scarcity_window} steps, agents short of it want ${r.stockpile_steps} steps of their own use in reserve ` +
+         `${r.scarcity_window} days, agents short of it want ${r.stockpile_steps} days of their own use in reserve ` +
          `(up to 3× if it falls faster), spending at most ${(r.stockpile_budget * 100).toFixed(0)}% of their money per trade.`);
   }
 
@@ -1032,7 +1035,7 @@ function renderPreview(r, error, moduleNotes = []) {
     const at = (b, s) => clamp(((b + 1) / (s + 1)) ** e);
     line(`At the average elasticity (${e.toFixed(2)}): 9 buyers for 1 seller → ×${at(9, 1).toFixed(2)}; 1 buyer for 9 ` +
          `sellers → ×${at(1, 9).toFixed(2)}; supply held by one agent → ×${clamp(1 + w).toFixed(2)}.`);
-    line(`Prices close ${(r.price_adjust_speed * 100).toFixed(0)}% of the gap each step` +
+    line(`Prices close ${(r.price_adjust_speed * 100).toFixed(0)}% of the gap each day` +
          (r.unit_markup ? `, and the 5th unit in one deal costs ×${((1 + r.unit_markup) ** 4).toFixed(2)} the first.` : "."));
   }
 
@@ -1042,7 +1045,7 @@ function renderPreview(r, error, moduleNotes = []) {
     const startPrices = RESOURCES.map((x, i) => r.price_mode === "fixed" ? r.fixed_prices[x]
       : units ? avg(r.money) / units * (1 - stock[i] / units) : 0);
     const values = active.map(x => perShare(x) * startPrices[RESOURCES.indexOf(x)] / r.asset_return[x]);
-    line(`One whole asset makes ${range(active.map(x => +perShare(x).toFixed(2)))} units/step when fully staffed and ` +
+    line(`One whole asset makes ${range(active.map(x => +perShare(x).toFixed(2)))} units/day when fully staffed and ` +
          `costs about ${usd(Math.min(...values))}–${usd(Math.max(...values))} at starting prices (before wages).`);
     const held = active.reduce((sum, x) => sum + avg(r.assets[x]), 0);
     line(`Assets: ${held.toFixed(2)} shares per agent on average. No new assets are ever made` +
@@ -1058,9 +1061,9 @@ function renderPreview(r, error, moduleNotes = []) {
     return r.labor_share * GOODS.reduce((s, g) => s + r.productivity[g] * price(g), 0) / GOODS.length;
   };
   if (r.gov_min_rate || r.gov_labor_purchase) {
-    line(`Government: no asset valued below ${(r.gov_min_rate * 100).toFixed(2)}% per step` +
-         (r.gov_labor_purchase ? `; buys ${r.gov_labor_purchase} labour per step with new money ` +
-          `(about ${usd(r.gov_labor_purchase * startLaborPrice())} created per step at the starting labour price).` : "."));
+    line(`Government: no asset valued below a return of ${pctYear(r.gov_min_rate)}` +
+         (r.gov_labor_purchase ? `; buys ${r.gov_labor_purchase} labour per day with new money ` +
+          `(about ${usd(r.gov_labor_purchase * startLaborPrice())} created per day at the starting labour price).` : "."));
   }
 
   if (r.banking_enabled) {
@@ -1068,8 +1071,8 @@ function renderPreview(r, error, moduleNotes = []) {
     const multiplier = rr > 0 ? (1 / rr).toFixed(0) : "unlimited";
     line(game.active.has("banking")
       ? `Banking: ${r.starting_banks} bank${r.starting_banks === 1 ? "" : "s"} at the start, each needing ${usd(r.bank_min_capital)} ` +
-        `of its founder's money; deposits ${(r.deposit_rate * 100).toFixed(2)}%, loans ` +
-        `${((r.deposit_rate + r.loan_spread) * 100).toFixed(2)}% per step. Each bank can lend up to ` +
+        `of its founder's money; deposits ${pctYear(r.deposit_rate)}, loans ` +
+        `${pctYear(r.deposit_rate + r.loan_spread)}. Each bank can lend up to ` +
         `${r.government_enabled && r.capital_ratio > 0 ? usd(r.bank_min_capital / r.capital_ratio) : "any amount (no central bank rule)"} on its minimum capital, and deposits can ` +
         `grow to about ${multiplier}× the cash put in (money multiplier).`
       : "Banking is on, but the banking industry isn't in this game (it needs electricity, layer 3).", game.active.has("banking") ? "" : "short");

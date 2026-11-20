@@ -96,7 +96,7 @@ class Invest(Module):
                 sources += f" and {sum(n for _, n in top[3:]):.2f} from {len(top) - 3} others"
             world.log(f"{agent.name} bought {total:.2f} {resource} asset(s) at {price:.2f} each for "
                       f"{total * price:.2f} ({sources}); "
-                      f"now owns {held:.2f}, making {world.asset_output(resource, held):.2f} {resource}/step")
+                      f"now owns {held:.2f}, making {world.asset_output(resource, held):.2f} {resource}/day")
             return
 
 

@@ -2,15 +2,12 @@
 // Shares globals with app.js (api, state, $, RESOURCES, GOODS, cap, cssVar).
 
 const reportUi = {
-  simView: $("sim-view"),
-  reportView: $("report-view"),
-  viewButtons: document.querySelectorAll(".view-switch button"),
   windowButtons: document.querySelectorAll("#report-window button"),
   range: $("report-range"),
   kpis: $("report-kpis"),
 };
 
-let reportWindow = 100;
+let reportWindow = 90;   // days
 let reportVisible = false;
 let reportBusy = false;
 let reportLast = 0;
@@ -229,19 +226,19 @@ function renderReport(r) {
   // Flows (production, labour, trades, income) are averaged over ~5% of the window.
   const w = Math.max(1, Math.round(s.length / 20));
   const steps = s.length > 1 ? Math.round((x[x.length - 1] - x[0]) / (s.length - 1)) || 1 : 1;
-  const avgNote = w > 1 ? `${w * steps}-step average` : "per step";
+  const avgNote = w > 1 ? `${w * steps}-day average` : "per day";
   const flow = (fn) => smooth(s.map(fn), w);
   for (const el of document.querySelectorAll(".avg-note")) el.textContent = avgNote;
   reportUi.range.textContent = t.steps
-    ? `Steps ${t.from_tick}–${r.tick} · ${t.steps} steps${t.steps < reportWindow ? " (all recorded so far)" : ""}`
-    : "No steps recorded yet: press Step or Play.";
+    ? `Days ${t.from_tick}–${r.tick} · ${t.steps} days${t.steps < reportWindow ? " (all recorded so far)" : ""}`
+    : "No days recorded yet: press Next day or Play.";
 
   // Headline numbers. Holdings compare the last step of the window with the first; per-step
   // flows (income, unemployment, ...) compare the average of the first and last ~5% of the
   // window so one noisy step doesn't decide the change.
   const edge = (pts) => (fn) => pts.reduce((a, p) => a + fn(p), 0) / (pts.length || 1);
   const head = edge(s.slice(0, w)), tail = edge(s.slice(-w));
-  const since = `since step ${t.from_tick}`;
+  const since = `since day ${t.from_tick}`;
   const change = (now, start, kind) => {
     if (!s.length || start == null || !isFinite(now) || !isFinite(start)) return null;
     const d = now - start;
@@ -290,7 +287,7 @@ function renderReport(r) {
       KPI("Wage", rate(p => p.wage), fmt.money, "rel", "up", "market wage per unit of labour"),
       KPI("Labour share of output", rate(p => p.labor_share_output), pct, "pp", null, "wages ÷ value of goods produced"),
       KPI("Government spending", rate(p => p.gov_money), fmt.money, "rel", null,
-          `per step · ${fmt.money(t.gov_money)} created · ${fmt.num(t.labor_gov, 1)} labour hired`),
+          `per day · ${fmt.money(t.gov_money)} created · ${fmt.num(t.labor_gov, 1)} labour hired`),
     ]),
     kpiSection("National accounts (last year)", [
       KPI("Nominal GDP", stock(p => p.gdp_nominal), fmt.money, "rel", "up", "goods made in the last year × today's prices"),
@@ -298,11 +295,11 @@ function renderReport(r) {
       KPI("GDP deflator", stock(p => p.deflator), (v) => fmt.num(v, 1), "rel", null, "100 × nominal ÷ real"),
       KPI("Consumer prices (CPI)", stock(p => p.cpi), (v) => fmt.num(v, 1), "rel", null, "last year's basket: today vs a year ago (100 = same)"),
       KPI("Inflation", stock(p => p.inflation), pct, "pp", null, "CPI change over a year"),
-      KPI("Taxes", rate(p => p.tax_revenue), fmt.money, "rel", null, "per step: production + salary + profit"),
-      KPI("Unemployment benefit", rate(p => p.benefits_paid), fmt.money, "rel", null, "per step, paid from taxes"),
+      KPI("Taxes", rate(p => p.tax_revenue), fmt.money, "rel", null, "per day: production + salary + profit"),
+      KPI("Unemployment benefit", rate(p => p.benefits_paid), fmt.money, "rel", null, "per day, paid from taxes"),
     ]),
     kpiSection("Economy capacity", [
-      KPI("Labour supply", rate(p => p.labor_made), (v) => fmt.num(v, 2), "rel", null, "labour capacity of all agents, per step"),
+      KPI("Labour supply", rate(p => p.labor_made), (v) => fmt.num(v, 2), "rel", null, "labour capacity of all agents, per day"),
       KPI("Job capacity", rate(p => p.job_capacity), (v) => fmt.num(v, 2), "rel", null, "labour all assets could employ at full capacity"),
       KPI("Jobs employers can fund", rate(p => p.funded_share), pct, "pp", "up", "share of job capacity backed by cash"),
       KPI("Supply ÷ job capacity", rate(p => p.supply_vs_jobs), (v) => fmt.num(v, 2) + "×", "rel", null, "above 1× = more workers than jobs the assets hold"),
@@ -312,8 +309,8 @@ function renderReport(r) {
       KPI("Total wealth", stock(p => p.wealth), fmt.money, "rel", "up", "money + goods + assets at current prices"),
       KPI("Wealth per agent", stock(perAgent(p => p.wealth)), fmt.money, "rel", "up",
           `money ${fmt.money(c.money / n)} · goods ${fmt.money(c.goods_value / n)} · assets ${fmt.money(c.asset_value / n)}`),
-      KPI("Income per agent", rate(perAgent(p => p.income)), fmt.money, "rel", "up", "per step, all sources"),
-      KPI("Consumption per agent", rate(perAgent(consumedOf)), (v) => fmt.num(v, 3), "rel", "up", "units of goods per step"),
+      KPI("Income per agent", rate(perAgent(p => p.income)), fmt.money, "rel", "up", "per day, all sources"),
+      KPI("Consumption per agent", rate(perAgent(consumedOf)), (v) => fmt.num(v, 3), "rel", "up", "units of goods per day"),
       KPI("Wellbeing", stock(p => p.wellbeing), g2, "num", "up", "average, 1 = all needs met"),
       KPI("In need", stock(p => p.in_need), pct, "pp", "down", "agents with a need above the seek threshold"),
       KPI("Struggling", stock(p => p.struggling), pct, "pp", "down", "agents who badly need a job"),
@@ -321,10 +318,10 @@ function renderReport(r) {
   );
 
   // National accounts: GDP at today's and at year-ago prices, and price indexes.
-  lineChart($("chart-gdp"), { x, xLabel: "Step", title: "GDP over the last year", tipFormat: fmt.money,
+  lineChart($("chart-gdp"), { x, xLabel: "Day", title: "GDP over the last year", tipFormat: fmt.money,
     series: [{ label: "Nominal (today's prices)", color: SERIES[0], values: s.map(p => p.gdp_nominal) },
              { label: "Real (prices a year ago)", color: SERIES[1], values: s.map(p => p.gdp_real) }] });
-  lineChart($("chart-cpi"), { x, xLabel: "Step", title: "Price indexes (100 = a year ago)", tipFormat: (v) => fmt.num(v, 1),
+  lineChart($("chart-cpi"), { x, xLabel: "Day", title: "Price indexes (100 = a year ago)", tipFormat: (v) => fmt.num(v, 1),
     series: [{ label: "CPI", color: SERIES[2], values: s.map(p => p.cpi) },
              { label: "GDP deflator", color: SERIES[3], values: s.map(p => p.deflator) }] });
 
@@ -332,7 +329,7 @@ function renderReport(r) {
   const goods = activeGoods();
   const layers = [...new Set(goods.map(g => industry(g).layer))].sort((a, b) => a - b);
   const layerAvg = (p, L) => { const gs = goods.filter(g => industry(g).layer === L); return gs.reduce((a, g) => a + p.prices[g], 0) / gs.length; };
-  lineChart($("chart-prices"), { x, xLabel: "Step", title: "Prices", tipFormat: fmt.money,
+  lineChart($("chart-prices"), { x, xLabel: "Day", title: "Prices", tipFormat: fmt.money,
     series: [...layers.map((L, i) => ({ label: `Layer ${L} (avg)`, color: SERIES[i % SERIES.length], values: s.map(p => layerAvg(p, L)) })),
              { label: "Wage", color: "var(--muted)", values: s.map(p => p.prices.labor) }] });
   const priced = [...goods.sort((a, b) => industry(a).layer - industry(b).layer), "labor"];
@@ -361,7 +358,7 @@ function renderReport(r) {
     const chart = document.createElement("div");
     cell.append(chart);
     box.append(cell);
-    lineChart(chart, { x, xLabel: "Step", height: 150, yMax: flowTicks[flowTicks.length - 1], title: `Layer ${L} flow`,
+    lineChart(chart, { x, xLabel: "Day", height: 150, yMax: flowTicks[flowTicks.length - 1], title: `Layer ${L} flow`,
       series: [{ label: "Produced", color: SERIES[0], values: flows[L].produced },
                { label: "Used", color: SERIES[1], values: flows[L].used },
                { label: "Expired", color: SERIES[3], values: flows[L].expired }] });
@@ -376,7 +373,7 @@ function renderReport(r) {
   }));
 
   // Employment.
-  lineChart($("chart-employment"), { x, xLabel: "Step", yMax: 1, yFormat: (v) => fmt.pct(v, 0), title: "Employment",
+  lineChart($("chart-employment"), { x, xLabel: "Day", yMax: 1, yFormat: (v) => fmt.pct(v, 0), title: "Employment",
     tipFormat: (v) => fmt.pct(v),
     series: [{ label: "Employment rate", color: SERIES[0], values: flow(p => p.employment) },
              { label: "Participation", color: SERIES[1], values: flow(p => p.participation) },
@@ -388,14 +385,14 @@ function renderReport(r) {
     ["Share of wealth", fmt.pct(grp.owners.share), fmt.pct(grp.workers.share)],
     ["Wealth", fmt.money(grp.owners.wealth), fmt.money(grp.workers.wealth)],
     ["Money", fmt.money(grp.owners.money), fmt.money(grp.workers.money)],
-    ["Income / step", fmt.money(grp.owners.income), fmt.money(grp.workers.income)],
-    ["Worked this step", fmt.pct(grp.owners.worked), fmt.pct(grp.workers.worked)],
+    ["Income /day", fmt.money(grp.owners.income), fmt.money(grp.workers.income)],
+    ["Worked today", fmt.pct(grp.owners.worked), fmt.pct(grp.workers.worked)],
     ["Wellbeing", grp.owners.wellbeing.toFixed(2), grp.workers.wellbeing.toFixed(2)],
     ["Need for a job", grp.owners.job_need.toFixed(2), grp.workers.job_need.toFixed(2)],
   ].map((row, i) => [row[0], grp.owners.count || !i ? row[1] : "–", grp.workers.count || !i ? row[2] : "–"]));
 
   // Labour.
-  lineChart($("chart-labor"), { x, xLabel: "Step", title: "Labour per step",
+  lineChart($("chart-labor"), { x, xLabel: "Day", title: "Labour per day",
     series: [{ label: "Capacity", color: SERIES[0], values: flow(p => p.labor_made) },
              { label: "Used on assets", color: SERIES[1], values: flow(p => p.labor_used) },
              { label: "Unused", color: SERIES[2], values: flow(p => p.labor_expired) },
@@ -407,11 +404,11 @@ function renderReport(r) {
     ["Unused (not offered or not hired)", fmt.num(t.labor_expired, 1), fmt.pct(t.labor_expired / made)],
     ["Hired by government", fmt.num(t.labor_gov, 1), fmt.pct(t.labor_gov / made)],
   ]);
-  lineChart($("chart-workers"), { x, xLabel: "Step", yMax: 1, yFormat: (v) => v.toFixed(2), title: "Workers' condition",
+  lineChart($("chart-workers"), { x, xLabel: "Day", yMax: 1, yFormat: (v) => v.toFixed(2), title: "Workers' condition",
     series: [{ label: "Efficiency", color: SERIES[0], values: s.map(p => p.efficiency) },
              { label: "Wellbeing", color: SERIES[1], values: s.map(p => p.wellbeing) },
              { label: "Need for a job", color: SERIES[2], values: s.map(p => p.job_need) }] });
-  lineChart($("chart-hardship"), { x, xLabel: "Step", yMax: 1, yFormat: (v) => fmt.pct(v, 0), tipFormat: (v) => fmt.pct(v),
+  lineChart($("chart-hardship"), { x, xLabel: "Day", yMax: 1, yFormat: (v) => fmt.pct(v, 0), tipFormat: (v) => fmt.pct(v),
     height: 160, title: "Hardship",
     series: [{ label: "In need", color: SERIES[0], values: s.map(p => p.in_need) },
              { label: "Struggling", color: SERIES[1], values: s.map(p => p.struggling) }] });
@@ -420,7 +417,7 @@ function renderReport(r) {
 
   // Inequality.
   const gFmt = (v) => v.toFixed(2);
-  lineChart($("chart-gini"), { x, xLabel: "Step", yMax: 1, yFormat: gFmt, title: "Inequality (Gini)",
+  lineChart($("chart-gini"), { x, xLabel: "Day", yMax: 1, yFormat: gFmt, title: "Inequality (Gini)",
     series: [{ label: "Money", color: SERIES[0], values: s.map(p => p.gini_money) },
              { label: "Asset shares", color: SERIES[1], values: s.map(p => p.gini_assets) },
              { label: "Wealth", color: SERIES[2], values: s.map(p => p.gini_wealth) }] });
@@ -431,36 +428,36 @@ function renderReport(r) {
              { label: "Asset shares", color: SERIES[1], values: r.lorenz.assets.map(p => p[1]) },
              { label: "Wealth", color: SERIES[2], values: r.lorenz.wealth.map(p => p[1]) },
              { label: "Income", color: SERIES[3], values: r.lorenz.income.map(p => p[1]) }] });
-  lineChart($("chart-gini-flows"), { x, xLabel: "Step", yMax: 1, yFormat: gFmt, title: "Income and consumption inequality",
+  lineChart($("chart-gini-flows"), { x, xLabel: "Day", yMax: 1, yFormat: gFmt, title: "Income and consumption inequality",
     series: [{ label: "Income", color: SERIES[0], values: s.map(p => p.gini_income) },
              { label: "Consumption", color: SERIES[1], values: s.map(p => p.gini_consumption) }] });
   const fifths = ["Poorest", "2nd", "Middle", "4th", "Richest"];
-  table($("table-quintiles"), ["Group", "Share of wealth", "Avg wealth", "Income / step", "Wellbeing"],
+  table($("table-quintiles"), ["Group", "Share of wealth", "Avg wealth", "Income /day", "Wellbeing"],
     r.quintiles.map((q, i) => [fifths[i], fmt.pct(q.share), fmt.money(q.wealth), fmt.money(q.income), q.wellbeing.toFixed(2)]));
 
   // Income by source.
   const SOURCES = [["wages", "Wages"], ["goods", "Goods sales"], ["assets", "Asset sales"], ["government", "Government"],
                    ["benefits", "Unemployment benefit"], ["transfers", "Government transfers"], ["banking", "Bank dividends"]];
-  lineChart($("chart-sources"), { x, xLabel: "Step", title: "Income by source", tipFormat: fmt.money,
+  lineChart($("chart-sources"), { x, xLabel: "Day", title: "Income by source", tipFormat: fmt.money,
     series: SOURCES.map(([k, label], i) => ({ label, color: SERIES[i], values: flow(p => p.income_sources[k]) })) });
   const srcTotal = Object.values(t.income_sources).reduce((a, v) => a + v, 0) || 1;
   table($("table-sources"), ["Source", "Total", "Share"], SOURCES.map(([k, label], i) =>
     [swatchLabel(label, SERIES[i]), fmt.money(t.income_sources[k]), fmt.pct(t.income_sources[k] / srcTotal)]));
 
   // Wealth and income.
-  lineChart($("chart-wealth"), { x, xLabel: "Step", title: "Total wealth", tipFormat: fmt.money,
+  lineChart($("chart-wealth"), { x, xLabel: "Day", title: "Total wealth", tipFormat: fmt.money,
     series: [{ label: "Total wealth", color: SERIES[0], values: s.map(p => p.wealth) }] });
-  lineChart($("chart-income"), { x, xLabel: "Step", title: "Income per step",
-    series: [{ label: "Income per step", color: SERIES[0], values: flow(p => p.income) }] });
+  lineChart($("chart-income"), { x, xLabel: "Day", title: "Income per day",
+    series: [{ label: "Income per day", color: SERIES[0], values: flow(p => p.income) }] });
   table($("table-top"), ["Agent", "Wealth", "Share", "Money", "Assets"], r.top_agents.map(a =>
     [swatchLabel(a.name, a.color), fmt.money(a.wealth), fmt.pct(a.share), fmt.money(a.money), fmt.money(a.assets)]));
 
   // Activity.
-  lineChart($("chart-trades"), { x, xLabel: "Step", title: "Trades per step",
+  lineChart($("chart-trades"), { x, xLabel: "Day", title: "Trades per day",
     series: [{ label: "Goods deals", color: SERIES[0], values: flow(p => p.goods_deals) },
              { label: "Labour hires", color: SERIES[1], values: flow(p => p.labor_deals) },
              { label: "Asset trades", color: SERIES[2], values: flow(p => p.asset_trades) }] });
-  lineChart($("chart-population"), { x, xLabel: "Step", title: "Population",
+  lineChart($("chart-population"), { x, xLabel: "Day", title: "Population",
     yFormat: (v) => `${Math.round(v)}`,
     series: [{ label: "Population", color: SERIES[0], values: s.map(p => p.population) }] });
 }
@@ -480,16 +477,11 @@ async function refreshReport(force = false) {
   }
 }
 
+// The Reports page is one of the sections (app.js showTab calls this).
 function showView(name) {
   reportVisible = name === "report";
-  reportUi.simView.hidden = reportVisible;
-  reportUi.reportView.hidden = !reportVisible;
-  for (const b of reportUi.viewButtons) b.classList.toggle("active", b.dataset.view === name);
   if (reportVisible) refreshReport(true);
-  else draw();
 }
-
-for (const b of reportUi.viewButtons) b.onclick = () => showView(b.dataset.view);
 for (const b of reportUi.windowButtons) {
   b.onclick = () => {
     reportWindow = Number(b.dataset.window);

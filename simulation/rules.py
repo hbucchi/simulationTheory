@@ -261,7 +261,7 @@ class Rules:
     reserve_ratio: float = 0.1
     reserve_rate: float = 0.0
     lender_of_last_resort: bool = True
-    llr_penalty: float = 0.002
+    llr_penalty: float = 0.00005501       # 2% a year
     # Taxes (shares) and spending. Production tax: of the money of every sale of goods (seller
     # pays). Salary tax: of every wage. Profit tax: of company and bank profits. The treasury pays
     # public works, then an unemployment benefit of benefit_rate x the wage for labour offered and
@@ -282,8 +282,8 @@ class Rules:
     starting_bank_shares: float = 1.0  # banking shares each of them starts with
     bank_min_capital: float = 5000.0   # founder's own money a bank needs to open (and to lend)
     bank_liquidity: float = 0.05       # vault cash each bank keeps itself (x deposits) before lending
-    deposit_rate: float = 0.001
-    loan_spread: float = 0.003         # loan rate = deposit rate + this
+    deposit_rate: float = 0.00008211      # 3% a year (rates are per step = per day)
+    loan_spread: float = 0.00013554       # 5% a year: loan rate = deposit rate + this
     loan_steps: int = 300              # loans are repaid over this many steps
     max_loan_to_value: float = 0.6     # debt <= this x the borrower's asset shares (+ what it builds)
     loan_per_service: float = 1000.0   # money lent per unit of banking services used
