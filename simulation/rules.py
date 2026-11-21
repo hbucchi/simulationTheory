@@ -360,6 +360,9 @@ class Rules:
     # Subsistence: an agent with no assets can use the labour nobody hired to make a little of a
     # basic good on its own (fetch water, a garden, gather wood or herbs, collect stone), at
     # these units per unit of labour (an industry worker makes about 4). See labor.py.
+    # Share of agents that start owning assets (industry shares, houses); the rest own nothing but
+    # their labour (and their starting money and goods). 1 = everyone gets a draw.
+    asset_owner_share: float = 0.1
     subsistence_enabled: bool = True
     subsistence_rates: dict = field(default_factory=lambda: {"water": 0.4, "grain": 0.4, "wood": 0.4, "herbs": 0.4,
                                                              "stone": 0.2})
@@ -747,6 +750,7 @@ LIMITS = {
     "need_penalties_enabled": (None, None, "bool"),
     "need_priority": ((NEEDS, 0.1, 10, False), None, "map"),
     "subsistence_enabled": (None, None, "bool"),
+    "asset_owner_share": (0.001, 1, "float"),
     "subsistence_rates": ((GOODS, 0, 10, False), None, "map"),
     "depression_enabled": (None, None, "bool"),
     "depression_factor": (0, 1, "float"),

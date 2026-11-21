@@ -208,7 +208,7 @@ class LaborMarket:
             gov.step_spent["transfers"] += gov.treasury
             gov.treasury = 0.0
 
-        if rules.subsistence_enabled:
+        if rules.subsistence_enabled and rules.industries_enabled:
             stats["subsistence"] = self._subsistence(world)
 
         # Unused capacity = withheld (not offered: the agent didn't need to work) + idle

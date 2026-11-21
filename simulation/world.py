@@ -257,6 +257,26 @@ class World:
             chosen += [i for i in richest if i not in chosen][:r.starting_banks - k]
             for i in chosen:
                 assets["banking"][i] = assets["banking"][i] + r.starting_bank_shares
+        else:
+            chosen = []
+        # Only asset_owner_share of agents start owning assets (the rest own only their labour):
+        # every industry's starting shares are handed to them, in proportion to what they drew.
+        if 0 < r.asset_owner_share < 1 and n > 1:
+            pick = random.Random(f"owners-{self.seed}")
+            k = max(1, round(n * r.asset_owner_share))
+            owners = set(chosen)              # bank founders always keep their banks
+            if k > len(owners):
+                owners |= set(pick.sample([i for i in range(n) if i not in owners], k - len(owners)))
+            for good, shares in assets.items():
+                total = sum(shares)
+                kept = sum(shares[i] for i in owners)
+                for i in range(n):
+                    if i not in owners:
+                        shares[i] = 0.0
+                    elif kept > 0:
+                        shares[i] *= total / kept
+                    else:
+                        shares[i] = total / len(owners)
         for i in range(n):
             self.create_agent(money=round(money[i], 2), inventory={k: v[i] for k, v in stock.items()},
                               assets={k: v[i] for k, v in assets.items()})

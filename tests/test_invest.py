@@ -74,7 +74,7 @@ class AssetTests(unittest.TestCase):
         self.assertEqual(agent.inventory.count("food"), 10)    # 5 labour x productivity 2
 
     def test_starting_assets_follow_the_rules_distribution(self):
-        world = World(seed=1, rules=Rules.from_dict({"agents": 10, "investing_enabled": False, "assets": {"water": {
+        world = World(seed=1, rules=Rules.from_dict({"agents": 10, "investing_enabled": False, "asset_owner_share": 1, "assets": {"water": {
             "dist": "tiered", "average": 0.5, "tiers": [{"agents": 10, "share": 60}, {"agents": 90, "share": 40}]}}}))
         world.spawn_random_agents()
         water = sorted(a.assets.get("water", 0) for a in world.agents)

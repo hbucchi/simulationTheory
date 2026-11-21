@@ -193,8 +193,9 @@ class BudgetAndConsumerCreditTests(unittest.TestCase):
         w.spawn_random_agents()
         for _ in range(5):
             w.step()
-        a = w.agents[0]
+        from simulation import economy
         prices = w.current_prices()
+        a = max(w.agents, key=lambda x: economy.living_cost(x, prices, w.rules))   # lives off what it buys
         b = budget(a, prices, w)
         self.assertGreater(b["living"], 0)
         self.assertAlmostEqual(b["total"], cash_needed(a, prices, w.rules) + 30 * (b["living"] + b["loans"]))
