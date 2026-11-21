@@ -89,6 +89,7 @@ class Bank:
         self.reserves = capital          # cash the bank holds itself (vault)
         self.cb_reserves = 0.0           # its account at the central bank (required reserves)
         self.cb_loans = 0.0              # what it owes the central bank (lender of last resort)
+        self.bonds = 0.0                 # government bonds it holds (lent to the government; bonds.py)
         self.cb_interest = 0.0           # interest paid to the central bank so far
         self.capital_in = capital        # what the founder put in
         self.deposits = {}               # agent id -> balance
@@ -112,8 +113,9 @@ class Bank:
 
     @property
     def equity(self):
-        """Assets (vault cash + central bank account + loans) minus debts (deposits + central bank loans)."""
-        return self.reserves + self.cb_reserves + self.loan_total - self.deposit_total - self.cb_loans
+        """Assets (vault cash + central bank account + loans + government bonds) minus debts
+        (deposits + central bank loans)."""
+        return self.reserves + self.cb_reserves + self.loan_total + self.bonds - self.deposit_total - self.cb_loans
 
     def to_dict(self, world):
         owner = world.agent_by_id(self.owner_id)
@@ -121,6 +123,7 @@ class Bank:
                 "status": self.status, "opened": self.opened,
                 "reserves": round(self.reserves, 2), "deposits": round(self.deposit_total, 2),
                 "cb_reserves": round(self.cb_reserves, 2), "cb_loans": round(self.cb_loans, 2),
+                "bonds": round(self.bonds, 2),
                 "cb_interest": round(self.cb_interest, 2),
                 "loans": round(self.loan_total, 2), "equity": round(self.equity, 2),
                 "capital_in": round(self.capital_in, 2), "depositors": len(self.deposits),

@@ -140,7 +140,7 @@ class DepositAndLoanTests(unittest.TestCase):
             w.step()
         if len(w.agents) == 20:
             base = w.base_money()
-            self.assertAlmostEqual(base, start, places=5)
+            self.assertAlmostEqual(base, start + w.money_issued(), places=5)   # (+ new money: bond interest)
             self.assertGreater(w.banking.to_dict(w)["deposits"], 0)
 
 

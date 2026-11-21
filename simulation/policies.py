@@ -113,6 +113,11 @@ class Policies:
             p.recipients, p.delivered, p.hired = 0, 0.0, 0.0
             want = p.budget / world.rules.month_steps if p.budget > 0 else math.inf
             people = audience(world, p, prices, remaining)
+            if people:
+                # Short of taxes: sell bonds for what this policy needs today (if allowed).
+                need = want if want != math.inf else (
+                    sum(max(0.0, _food_gap(x, prices, world.rules)) for x in people) if p.audience == "cant_afford" else 0.0)
+                gov.borrow_for(world, need)
             spent = 0.0
             if people and gov.treasury > 1e-6:
                 limit = min(want, gov.treasury)

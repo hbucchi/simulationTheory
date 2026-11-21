@@ -949,10 +949,22 @@ function renderGovernment() {
     ["Labour price", usd(m.prices.labor), `food ${usd(m.prices.food)} · water ${usd(m.prices.water)}`],
     ["Taxes today", usd(Object.values(g.step_revenue).reduce((a, v) => a + v, 0)),
       `production ${usd(g.step_revenue.production)} · salary ${usd(g.step_revenue.wage)} · profit ${usd(g.step_revenue.profit)}`],
-    ["Spending today", usd(g.step_spent.benefits + g.step_spent.public_works + g.step_spent.transfers),
-      `benefits ${usd(g.step_spent.benefits)} · public works ${usd(g.step_spent.public_works)} · transfers ${usd(g.step_spent.transfers)}`],
+    ["Spending today", usd(g.step_spent.benefits + g.step_spent.public_works + g.step_spent.transfers + (g.step_spent.interest || 0)),
+      `benefits ${usd(g.step_spent.benefits)} · public works ${usd(g.step_spent.public_works)} · transfers ${usd(g.step_spent.transfers)}` +
+      (g.step_spent.interest ? ` · interest ${usd(g.step_spent.interest)}` : "")],
     ["Treasury", usd(g.treasury), `${usd(Object.values(g.revenue).reduce((a, v) => a + v, 0))} collected so far`],
     ["Central bank loans", usd(g.llr_outstanding), `to banks · ${usd(g.llr_lent)} lent so far`],
+    ...(g.debt ? [
+      ["Public debt", usd(g.debt.debt), g.debt.gdp_year > 0
+        ? `${(g.debt.debt_to_gdp * 100).toFixed(1)}% of a year's GDP (limit ${Math.round(g.debt_limit * 100)}%)`
+        : `limit ${Math.round(g.debt_limit * 100)}% of GDP`],
+      ["Bond rate", `${(g.debt.rate_year * 100).toFixed(2)}% a year`,
+        `central bank rate + ${(perYear(g.bond_spread) * 100).toFixed(2)}% · ${g.debt.bonds} bonds`],
+      ["Interest on debt", `${usd(g.debt.step_interest)} /day`, `${usd(g.debt.interest_paid)} paid so far`],
+      ["Who lent", `banks ${usd(g.debt.holders_banks)}`, `savers ${usd(g.debt.holders_agents)}` +
+        (g.debt.step_borrowed ? ` · borrowed ${usd(g.debt.step_borrowed)} yesterday` : "") +
+        (g.debt.step_repaid ? ` · repaid ${usd(g.debt.step_repaid)} yesterday` : "")],
+    ] : []),
     ...(state.macro ? [
       ["GDP (last year)", usd(state.macro.gdp_nominal), `real ${usd(state.macro.gdp_real)} at year-ago prices`],
       ["Inflation", `${(state.macro.inflation * 100).toFixed(1)}%`, `CPI ${state.macro.cpi.toFixed(1)} · deflator ${state.macro.deflator.toFixed(1)}`],

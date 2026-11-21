@@ -40,10 +40,13 @@ policy rate, no capital or reserve rules and no lender of last resort.
 
 POLICY = ("min_wage", "min_rate", "labor_purchase", "capital_ratio", "tax_production", "tax_wage", "tax_profit",
           "benefit_rate", "balanced_budget", "reserve_requirement", "reserve_rate", "lender_of_last_resort",
-          "llr_penalty")
+          "llr_penalty", "bonds_enabled", "debt_limit", "bond_spread", "bond_days")
 TAXES = ("production", "wage", "profit")
 
+from .bonds import PublicDebt  # noqa: E402
 from .policies import AUDIENCES, DISTRIBUTIONS, KINDS, Policies  # noqa: E402
+
+SPENDING = ("public_works", "benefits", "reserve_interest", "transfers", "interest", "debt_repaid")
 
 POLICY_OPTIONS = {"kinds": KINDS, "audiences": AUDIENCES, "distributions": DISTRIBUTIONS}
 
@@ -60,7 +63,8 @@ class Government:
         self._policy = {"min_rate": min_rate, "labor_purchase": labor_purchase, "capital_ratio": capital_ratio,
                         "min_wage": 0.0, "tax_production": 0.0, "tax_wage": 0.0, "tax_profit": 0.0, "benefit_rate": 0.0,
                         "balanced_budget": False, "reserve_requirement": 0.0, "reserve_rate": 0.0,
-                        "lender_of_last_resort": False, "llr_penalty": 0.0}
+                        "lender_of_last_resort": False, "llr_penalty": 0.0,
+                        "bonds_enabled": False, "debt_limit": 0.0, "bond_spread": 0.0, "bond_days": 360}
         self._policy.update(policy)
         self.money_created = 0.0   # total new money paid out so far (public works the treasury couldn't pay)
         self.labor_bought = 0.0    # total labour bought so far
@@ -68,8 +72,9 @@ class Government:
         self.treasury = 0.0        # taxes collected and not yet spent
         self.revenue = {t: 0.0 for t in TAXES}           # taxes collected so far, by tax
         self.step_revenue = {t: 0.0 for t in TAXES}      # ... in the latest step
-        self.spent = {"public_works": 0.0, "benefits": 0.0, "reserve_interest": 0.0, "transfers": 0.0}
-        self.step_spent = {"public_works": 0.0, "benefits": 0.0, "reserve_interest": 0.0, "transfers": 0.0}
+        self.spent = {k: 0.0 for k in SPENDING}
+        self.step_spent = {k: 0.0 for k in SPENDING}
+        self.debt = PublicDebt()   # government bonds (bonds.py)
         self.llr_outstanding = 0.0   # central bank loans to banks not yet repaid (newly created money)
         self.llr_lent = 0.0          # all it has lent so far
         self.cb_income = 0.0         # interest banks paid on those loans (goes to the treasury)
@@ -89,7 +94,9 @@ class Government:
                    min_wage=rules.gov_min_wage, tax_production=rules.tax_production, tax_wage=rules.tax_wage, tax_profit=rules.tax_profit,
                    benefit_rate=rules.benefit_rate, balanced_budget=rules.balanced_budget,
                    reserve_requirement=rules.reserve_ratio, reserve_rate=rules.reserve_rate,
-                   lender_of_last_resort=rules.lender_of_last_resort, llr_penalty=rules.llr_penalty)
+                   lender_of_last_resort=rules.lender_of_last_resort, llr_penalty=rules.llr_penalty,
+                   bonds_enabled=rules.gov_bonds_enabled, debt_limit=rules.gov_debt_limit,
+                   bond_spread=rules.gov_bond_spread, bond_days=rules.gov_bond_days)
 
     # The policy in force: nothing while the government is switched off.
     min_wage = _policy("min_wage")
@@ -105,6 +112,10 @@ class Government:
     reserve_rate = _policy("reserve_rate")
     lender_of_last_resort = _policy("lender_of_last_resort")
     llr_penalty = _policy("llr_penalty")
+    bonds_enabled = _policy("bonds_enabled")
+    debt_limit = _policy("debt_limit")
+    bond_spread = _policy("bond_spread")
+    bond_days = _policy("bond_days")
 
     def set(self, name, value):
         if name not in POLICY:
@@ -121,7 +132,7 @@ class Government:
         self.revenue_days.append(sum(self.step_revenue.values()))
         del self.revenue_days[:-30]
         self.step_revenue = {t: 0.0 for t in TAXES}
-        self.step_spent = {"public_works": 0.0, "benefits": 0.0, "reserve_interest": 0.0, "transfers": 0.0}
+        self.step_spent = {k: 0.0 for k in SPENDING}
         self.last_spent = 0.0
 
     def tax(self, kind, base):
@@ -150,7 +161,13 @@ class Government:
         self.step_spent[kind] += amount
         return created
 
-    def to_dict(self):
+    def borrow_for(self, world, amount):
+        """Make sure the treasury holds ``amount``: sell bonds for what is missing (if allowed)."""
+        short = amount - self.treasury
+        if short > 1e-6 and self.bonds_enabled:
+            self.debt.borrow(world, short)
+
+    def to_dict(self, world=None):
         return {"enabled": self.enabled, **self._policy,
                 "money_created": self.money_created, "labor_bought": self.labor_bought,
                 "last_spent": self.last_spent, "treasury": round(self.treasury, 2),
@@ -160,6 +177,7 @@ class Government:
                 "llr_outstanding": round(self.llr_outstanding, 2), "llr_lent": round(self.llr_lent, 2),
                 "cb_income": round(self.cb_income, 2),
                 "policies": self.policies.to_dict(),
+                "debt": self.debt.to_dict(world) if world is not None else None,
                 "policy_options": POLICY_OPTIONS,
                 "revenue_month": round(sum(self.revenue_days) * 30 / max(1, len(self.revenue_days)), 2),
                 "step_spent": {k: round(v, 2) for k, v in self.step_spent.items()}}

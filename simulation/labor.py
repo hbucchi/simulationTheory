@@ -195,6 +195,9 @@ class LaborMarket:
         if gov.enabled and world.agents:
             # The player's spending policies (income support, give-aways, public services).
             gov.policies.run(world, offers, remaining, stats)
+        if gov.balanced_budget and gov.treasury > 1e-6 and gov.debt.bonds:
+            # Taxes left over repay government debt first (soonest due first).
+            gov.debt.repay_early(world, gov.treasury)
         if gov.balanced_budget and gov.treasury > 1e-6:
             # Whatever the treasury has left hires more idle labour: taxes go back into the economy.
             stats["gov_hired"] += self._public_works(world, offers, remaining, math.inf, stats, budget=gov.treasury)
@@ -289,6 +292,8 @@ class LaborMarket:
         wage = self.wage
         owed = {w: remaining[w] * wage * gov.benefit_rate for w in offers if remaining[w] > 1e-9}
         total = sum(owed.values())
+        if total > 0:
+            gov.borrow_for(world, total)      # short of taxes: sell bonds (if allowed)
         if total <= 0 or gov.treasury <= 0:
             return
         scale = min(1.0, gov.treasury / total)

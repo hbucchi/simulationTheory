@@ -193,7 +193,8 @@ class Simulation:
 POLICY_LIMITS = {"min_wage": (0, 1e9), "min_rate": (0, 10), "labor_purchase": (0, 1e6), "capital_ratio": (0, 1),
                  "tax_production": (0, 1), "tax_wage": (0, 1), "tax_profit": (0, 1), "benefit_rate": (0, 10),
                  "reserve_requirement": (0, 1), "reserve_rate": (0, 1), "llr_penalty": (0, 1),
-                 "enabled": bool, "balanced_budget": bool, "lender_of_last_resort": bool}
+                 "enabled": bool, "balanced_budget": bool, "lender_of_last_resort": bool,
+                 "bonds_enabled": bool, "debt_limit": (0, 10), "bond_spread": (0, 0.01), "bond_days": (1, 3600)}
 
 
 def parse_policy(body):

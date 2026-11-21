@@ -753,6 +753,7 @@ class World:
         self.update_price_level()
         self.update_sell_through()
         self.update_profitability()
+        self.government.debt.step(self)     # interest on government bonds, repayments
         self.labor.clear(self)
         seekers = {}
         for agent in self.agents:
@@ -1071,7 +1072,7 @@ class World:
                       if self.recorder.history else None),
             # Industries left out because their recipe needs a good that isn't in this game.
             "auto_excluded": list(self.rules.auto_excluded),
-            "government": self.government.to_dict(),
+            "government": self.government.to_dict(self),
             "market": {
                 "prices": self.current_prices(),
                 "base_prices": economy.market_prices(self.agents, self.rules),

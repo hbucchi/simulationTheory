@@ -149,7 +149,7 @@ class InvestTests(unittest.TestCase):
         if len(world.agents) == 15:   # nobody died (deaths remove money and assets)
             # Base money: agents' cash plus banks' cash (deposits and loans only move it).
             base = world.base_money()
-            self.assertAlmostEqual(base, money, places=6)
+            self.assertAlmostEqual(base, money + world.money_issued(), places=6)   # (+ new money: bond interest)
             for r in economy.RESOURCES:
                 self.assertAlmostEqual(sum(a.assets.get(r, 0) for a in world.agents), assets[r], places=6)
 
