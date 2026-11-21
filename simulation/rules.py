@@ -265,6 +265,9 @@ class Rules:
     # Government bonds (bonds.py): when taxes can't pay for its policies and the benefit, the
     # government borrows, up to gov_debt_limit x a year's GDP, at the policy rate + gov_bond_spread
     # (per day; 1% a year), for gov_bond_days days.
+    # Labour law: wages are paid "daily", "weekly" or "monthly" (earned every day, paid on payday,
+    # salary tax withheld when paid). Can be changed during the game in the Government tab.
+    pay_period: str = "daily"
     gov_bonds_enabled: bool = True
     gov_debt_limit: float = 0.6
     gov_bond_spread: float = (1.01 ** (1 / 360)) - 1
@@ -747,6 +750,7 @@ LIMITS = {
     "gov_min_rate": (0, 10, "float"),
     "gov_labor_purchase": (0, 1e6, "float"),
     "gov_bonds_enabled": (None, None, "bool"),
+    "pay_period": (("daily", "weekly", "monthly"), None, "choice"),
     "gov_debt_limit": (0, 10, "float"),
     "gov_bond_spread": (0, 0.01, "float"),
     "gov_bond_days": (1, 3600, "int"),

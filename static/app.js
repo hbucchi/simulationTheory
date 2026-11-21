@@ -757,6 +757,7 @@ function fillGovernment(force = false) {
   for (const el of ui.govForm.querySelectorAll("[data-policy]")) {
     const v = g[el.dataset.policy];
     if (el.type === "checkbox") el.checked = v;
+    else if (el.dataset.choice) el.value = v || "daily";
     else el.value = +((el.dataset.yearly ? perYear(v) : v) * Number(el.dataset.scale || 1)).toFixed(3);
   }
   ui.govBasel.value = +(g.capital_ratio * 100).toFixed(2);
@@ -947,6 +948,8 @@ function renderGovernment() {
     ["Labour used up", g.labor_bought.toFixed(1), "in public works so far"],
     ["Money in the economy", usd(m.money), "held by agents"],
     ["Labour price", usd(m.prices.labor), `food ${usd(m.prices.food)} · water ${usd(m.prices.water)}`],
+    ...(state.market.labor.wages_owed > 0.01 || g.pay_period !== "daily" ? [["Wages owed", usd(state.market.labor.wages_owed),
+      `paid ${g.pay_period}` + (state.market.labor.unpaid_last > 0.01 ? ` · ${usd(state.market.labor.unpaid_last)} unpaid on the last payday` : "")]] : []),
     ["Taxes today", usd(Object.values(g.step_revenue).reduce((a, v) => a + v, 0)),
       `production ${usd(g.step_revenue.production)} · salary ${usd(g.step_revenue.wage)} · profit ${usd(g.step_revenue.profit)}`],
     ["Spending today", usd(g.step_spent.benefits + g.step_spent.public_works + g.step_spent.transfers + (g.step_spent.interest || 0)),
@@ -997,7 +1000,7 @@ ui.govForm.onsubmit = async (e) => {
     const next = await api("/api/government", {
       enabled: ui.govEnabled.checked,
       ...Object.fromEntries([...ui.govForm.querySelectorAll("[data-policy]")].map(el =>
-        [el.dataset.policy, el.type === "checkbox" ? el.checked
+        [el.dataset.policy, el.type === "checkbox" ? el.checked : el.dataset.choice ? el.value
           : el.dataset.yearly ? perDay(Number(el.value) / Number(el.dataset.scale || 1)) : Number(el.value) / Number(el.dataset.scale || 1)])),
       min_rate: perDay(Number(ui.govRate.value) / 100),
       labor_purchase: Number(ui.govBuy.value),

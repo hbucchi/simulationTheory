@@ -40,7 +40,7 @@ policy rate, no capital or reserve rules and no lender of last resort.
 
 POLICY = ("min_wage", "min_rate", "labor_purchase", "capital_ratio", "tax_production", "tax_wage", "tax_profit",
           "benefit_rate", "balanced_budget", "reserve_requirement", "reserve_rate", "lender_of_last_resort",
-          "llr_penalty", "bonds_enabled", "debt_limit", "bond_spread", "bond_days")
+          "llr_penalty", "bonds_enabled", "debt_limit", "bond_spread", "bond_days", "pay_period")
 TAXES = ("production", "wage", "profit")
 
 from .bonds import PublicDebt  # noqa: E402
@@ -64,7 +64,8 @@ class Government:
                         "min_wage": 0.0, "tax_production": 0.0, "tax_wage": 0.0, "tax_profit": 0.0, "benefit_rate": 0.0,
                         "balanced_budget": False, "reserve_requirement": 0.0, "reserve_rate": 0.0,
                         "lender_of_last_resort": False, "llr_penalty": 0.0,
-                        "bonds_enabled": False, "debt_limit": 0.0, "bond_spread": 0.0, "bond_days": 360}
+                        "bonds_enabled": False, "debt_limit": 0.0, "bond_spread": 0.0, "bond_days": 360,
+                        "pay_period": "daily"}
         self._policy.update(policy)
         self.money_created = 0.0   # total new money paid out so far (public works the treasury couldn't pay)
         self.labor_bought = 0.0    # total labour bought so far
@@ -96,7 +97,7 @@ class Government:
                    reserve_requirement=rules.reserve_ratio, reserve_rate=rules.reserve_rate,
                    lender_of_last_resort=rules.lender_of_last_resort, llr_penalty=rules.llr_penalty,
                    bonds_enabled=rules.gov_bonds_enabled, debt_limit=rules.gov_debt_limit,
-                   bond_spread=rules.gov_bond_spread, bond_days=rules.gov_bond_days)
+                   bond_spread=rules.gov_bond_spread, bond_days=rules.gov_bond_days, pay_period=rules.pay_period)
 
     # The policy in force: nothing while the government is switched off.
     min_wage = _policy("min_wage")
@@ -116,6 +117,7 @@ class Government:
     debt_limit = _policy("debt_limit")
     bond_spread = _policy("bond_spread")
     bond_days = _policy("bond_days")
+    pay_period = _policy("pay_period")      # labour law: wages paid "daily", "weekly" or "monthly"
 
     def set(self, name, value):
         if name not in POLICY:

@@ -194,7 +194,8 @@ POLICY_LIMITS = {"min_wage": (0, 1e9), "min_rate": (0, 10), "labor_purchase": (0
                  "tax_production": (0, 1), "tax_wage": (0, 1), "tax_profit": (0, 1), "benefit_rate": (0, 10),
                  "reserve_requirement": (0, 1), "reserve_rate": (0, 1), "llr_penalty": (0, 1),
                  "enabled": bool, "balanced_budget": bool, "lender_of_last_resort": bool,
-                 "bonds_enabled": bool, "debt_limit": (0, 10), "bond_spread": (0, 0.01), "bond_days": (1, 3600)}
+                 "bonds_enabled": bool, "debt_limit": (0, 10), "bond_spread": (0, 0.01), "bond_days": (1, 3600),
+                 "pay_period": ("daily", "weekly", "monthly")}
 
 
 def parse_policy(body):
@@ -204,7 +205,11 @@ def parse_policy(body):
             continue
         if key not in POLICY_LIMITS:
             raise ValueError(f"unknown government setting: {key}")
-        if POLICY_LIMITS[key] is bool:
+        if isinstance(POLICY_LIMITS[key][0], str):
+            if value not in POLICY_LIMITS[key]:
+                raise ValueError(f"{key} must be one of {', '.join(POLICY_LIMITS[key])}")
+            changes[key] = value
+        elif POLICY_LIMITS[key] is bool:
             if not isinstance(value, bool):
                 raise ValueError(f"{key} must be true or false")
             changes[key] = value

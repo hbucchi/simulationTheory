@@ -72,6 +72,59 @@ class LaborMarket:
         self.multiplier = 1.0
         self.wage = 0.0
         self.stats = self._empty_stats()
+        # Wages earned and not yet paid (weekly or monthly pay): {(employer id, worker id): money}.
+        self.payroll = {}
+        self.paid_last = 0.0      # wages paid on the latest payday
+        self.unpaid_last = 0.0    # ... and what employers couldn't pay then (arrears)
+
+    @staticmethod
+    def pay_days(world):
+        """Days between paydays under the government's pay law (1 = paid every day)."""
+        period = world.government.pay_period
+        return {"weekly": 7, "monthly": world.rules.month_steps}.get(period, 1)
+
+    def owed_by(self, agent_id):
+        return sum(v for (e, _), v in self.payroll.items() if e == agent_id)
+
+    def owed_to(self, agent_id):
+        return sum(v for (_, w), v in self.payroll.items() if w == agent_id)
+
+    def payday(self, world):
+        """Employers pay the wages earned since the last payday; the salary tax is withheld from
+        each payment. What an employer can't pay stays owed (arrears) until the next payday. Wages
+        owed by or to an agent that died are lost."""
+        gov = world.government
+        by_employer = {}
+        for (e, w), owed in self.payroll.items():
+            by_employer.setdefault(e, []).append((w, owed))
+        self.payroll, paid, unpaid = {}, 0.0, 0.0
+        for e, lines in by_employer.items():
+            employer = world.agent_by_id(e)
+            if employer is None:
+                continue
+            total = sum(o for _, o in lines)
+            if employer.company_cash:
+                economy.draw_company_cash(employer, total)
+            if employer.deposits and employer.money < total:
+                world.banking.cash_up(employer, total)
+            for w, owed in lines:
+                worker = world.agent_by_id(w)
+                if worker is None:
+                    continue
+                pay = min(owed, max(0.0, employer.money))
+                if pay > 0:
+                    employer.money -= pay
+                    tax = gov.tax("wage", pay)
+                    gov.collect("wage", tax)
+                    worker.money += pay - tax
+                    economy.earn(worker, pay - tax, "wages")
+                    paid += pay
+                if owed - pay > 1e-9:
+                    self.payroll[(e, w)] = owed - pay
+                    unpaid += owed - pay
+        self.paid_last, self.unpaid_last = paid, unpaid
+        if unpaid > 0.01:
+            world.log(f"Payday: {paid:,.2f} of wages paid, {unpaid:,.2f} owed by employers short of cash")
 
     @staticmethod
     def _empty_stats():
@@ -96,6 +149,12 @@ class LaborMarket:
         rules = world.rules
         prices = world.current_prices(include_labor=False)
         stats = self._empty_stats()
+        period = self.pay_days(world)
+        if self.payroll and (period == 1 or world.tick % period == 0):
+            self.payday(world)                 # wages earned since the last payday
+        owed = {}
+        for (e, _), v in self.payroll.items():
+            owed[e] = owed.get(e, 0.0) + v
         offers, employers, jobs_by_good = [], [], {}
 
         for a in world.agents:
@@ -168,13 +227,14 @@ class LaborMarket:
             want = employer.labor_need - employer.labor_available
             need = cash_needed(employer, prices, rules)
             # Wages come out of company cash (retained earnings) first, then the owner's money.
-            budget = max(0.0, economy.money_of(employer) + employer.company_cash - need)
+            # Wages it already owes (weekly or monthly pay) aren't free to spend on more hiring.
+            budget = max(0.0, economy.money_of(employer) + employer.company_cash - need - owed.get(employer.id, 0.0))
             if budget > 0 and employer.company_cash:
                 economy.draw_company_cash(employer, min(budget, want * ref_wage * 2))
             if budget > 0 and employer.deposits:
                 # Wages are paid in cash: take what's needed out of the bank.
                 world.banking.cash_up(employer, need + min(budget, want * ref_wage * 2))
-            budget = min(budget, max(0.0, employer.money - need))
+            budget = min(budget, max(0.0, employer.money - need - owed.get(employer.id, 0.0)))
             for worker in offers:
                 if want <= 1e-9 or budget <= 1e-9:
                     break
@@ -182,7 +242,8 @@ class LaborMarket:
                     continue
                 affordable = budget / worker.asking_wage if worker.asking_wage > 0 else remaining[worker]
                 units = min(remaining[worker], want, affordable)
-                self._hire(employer, worker, units, worker.asking_wage, stats, world.government)
+                self._hire(employer, worker, units, worker.asking_wage, stats, world.government,
+                           self.payroll if period > 1 else None)
                 remaining[worker] -= units
                 want -= units
                 budget -= units * worker.asking_wage
@@ -307,15 +368,20 @@ class LaborMarket:
         stats["benefits"] = total * scale
 
     @staticmethod
-    def _hire(employer, worker, units, wage, stats, gov=None):
+    def _hire(employer, worker, units, wage, stats, gov=None, payroll=None):
         pay = units * wage
-        employer.money -= pay
-        employer.flow["wages_paid"] = employer.flow.get("wages_paid", 0.0) + pay
-        tax = gov.tax("wage", pay) if gov else 0.0     # salary tax, withheld from the pay
-        if tax:
-            gov.collect("wage", tax)
-        worker.money += pay - tax
-        economy.earn(worker, pay - tax, "wages")
+        employer.flow["wages_paid"] = employer.flow.get("wages_paid", 0.0) + pay   # a cost when worked
+        if payroll is not None:
+            # Weekly or monthly pay: earned today, paid (and taxed) on payday.
+            key = (employer.id, worker.id)
+            payroll[key] = payroll.get(key, 0.0) + pay
+        else:
+            employer.money -= pay
+            tax = gov.tax("wage", pay) if gov else 0.0     # salary tax, withheld from the pay
+            if tax:
+                gov.collect("wage", tax)
+            worker.money += pay - tax
+            economy.earn(worker, pay - tax, "wages")
         worker.labor_sold += units
         worker.employers[employer.name] = worker.employers.get(employer.name, 0) + units
         employer.labor_available += units
@@ -325,4 +391,6 @@ class LaborMarket:
         stats["hires"] += 1
 
     def to_dict(self):
-        return {"wage": self.wage, "multiplier": self.multiplier, **self.stats}
+        return {"wage": self.wage, "multiplier": self.multiplier, **self.stats,
+                "wages_owed": round(sum(self.payroll.values()), 2), "paid_last": round(self.paid_last, 2),
+                "unpaid_last": round(self.unpaid_last, 2)}
