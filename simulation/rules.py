@@ -428,6 +428,9 @@ class Rules:
     # labour: about enough to live on working at nothing else (an industry worker makes about 4).
     # Each day it makes whichever its most urgent need calls for. See labor.py.
     subsistence_enabled: bool = True
+    # However weak (penalties, low efficiency), an agent short of food or water can still put this
+    # share of its base labour capacity into making its own (enough for thirst alone at 0.6).
+    survival_effort: float = 0.6
     subsistence_rates: dict = field(default_factory=lambda: {"water": 0.5, "food": 0.35})
     depression_enabled: bool = True    # boredom at 1.00 depresses
     depression_factor: float = 0.5     # depressed speed and sleep recovery are multiplied by this
@@ -836,6 +839,7 @@ LIMITS = {
     "need_penalties_enabled": (None, None, "bool"),
     "need_priority": ((NEEDS, 0.1, 10, False), None, "map"),
     "subsistence_enabled": (None, None, "bool"),
+    "survival_effort": (0, 1, "float"),
     "asset_owner_share": (0.001, 1, "float"),
     "working_capital_days": (0, 3600, "int"),
     "luck_enabled": (None, None, "bool"),

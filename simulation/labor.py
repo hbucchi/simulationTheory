@@ -375,6 +375,11 @@ class LaborMarket:
             if not options:
                 continue
             spare = a.capacity_now - getattr(a, "own_labor", 0.0) - a.labor_sold
+            if rules.survival_effort > 0 and economy.alarmed(a, rules):
+                # However weak (hungry, ill, tired), an agent short of food or water can still put
+                # survival_effort of its base labour into fetching water or growing food.
+                spare = max(spare, a.labor_capacity * rules.survival_effort
+                            - getattr(a, "own_labor", 0.0) - a.labor_sold)
             if spare <= 1e-9:
                 continue
             # Most urgent need first; for a need it already has stock of, less so.
