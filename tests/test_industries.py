@@ -131,8 +131,9 @@ class PricingTests(unittest.TestCase):
         world.create_agent(needs=CALM, inventory={**NO_STOCK, "food": 1000, "water": 10, "games": 10, "grain": 1, "wood": 10})
         world.labor.wage = 5.0
         prices = world.current_prices()
-        # food is plentiful, grain scarce: the scarcity price alone would put food below grain.
-        self.assertAlmostEqual(prices["food"], prices["grain"] * 1)
+        # food is plentiful, grain scarce: the scarcity price alone would put food below grain. The
+        # floor is the unit cost (1 grain + labour: wage 5 / productivity 1) plus the 10% margin.
+        self.assertAlmostEqual(prices["food"], (prices["grain"] * 1 + 5.0 / world.productivity_now["food"]) * 1.1)
         world.rules.cost_floor = False
         self.assertLess(world.current_prices()["food"], prices["grain"])
 

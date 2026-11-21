@@ -147,7 +147,7 @@ class Simulation:
 
 
 # Government / central bank settings that can be changed live: name -> (low, high) or bool.
-POLICY_LIMITS = {"min_rate": (0, 10), "labor_purchase": (0, 1e6), "capital_ratio": (0, 1),
+POLICY_LIMITS = {"min_wage": (0, 1e9), "min_rate": (0, 10), "labor_purchase": (0, 1e6), "capital_ratio": (0, 1),
                  "tax_production": (0, 1), "tax_wage": (0, 1), "tax_profit": (0, 1), "benefit_rate": (0, 10),
                  "reserve_requirement": (0, 1), "reserve_rate": (0, 1), "llr_penalty": (0, 1),
                  "enabled": bool, "balanced_budget": bool, "lender_of_last_resort": bool}
@@ -222,7 +222,7 @@ def parse_agent_config(body):
     for key, low, high, whole in (("x", 0, world_size, False), ("y", 0, world_size, False),
                                   ("money", 0, 1e12, False), ("movement", 1, MAX_MOVEMENT, True),
                                   ("sleep_recovery", 0, 1, False), ("labor_capacity", 0, 1e6, False),
-                                  ("payout_ratio", 0, 1, False)):
+                                  ("payout_ratio", 0, 1, False), ("risk_appetite", 0, 1, False)):
         if body.get(key) is not None:
             config[key] = _number(body[key], key, low, high, whole)
     return {k: v for k, v in config.items() if v is not None}

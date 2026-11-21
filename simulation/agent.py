@@ -98,7 +98,7 @@ class Agent:
         self.deposits = {}       # bank id -> balance (kept in step by banking.py)
         # Personality traits (more to come): payout_ratio = share of company profits paid out
         # as dividends; the rest stays in the company (company_cash) to pay wages and reinvest.
-        self.personality = {"payout_ratio": 0.5}
+        self.personality = {"payout_ratio": 0.5, "risk_appetite": 0.0}
         self.company_cash = 0.0  # retained earnings of the companies it owns
         self.debt = 0.0          # what it owes the banks
         self.target_id = None

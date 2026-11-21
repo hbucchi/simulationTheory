@@ -21,6 +21,13 @@ from .rules import NEEDS, SPREADS, Rules
 AGENT_COLORS = ["#6c72f0", "#f08a6c", "#4fbf96", "#e9b949", "#a77de0", "#4aa3df", "#e77fa9", "#8cbf5f"]
 
 
+# Perishable output: owners hold at most this share of its shelf life before they stop producing.
+PERISHABLE_BUFFER = 0.5
+# Sell-through (share of output that doesn't expire) is measured over this many days and
+# never counts as less than MIN_SELL_THROUGH (so an industry can always restart).
+SELL_THROUGH_DAYS = 60
+MIN_SELL_THROUGH = 0.2
+
 # Games up to this many agents send every agent in full to the UI (bigger ones: only those asked for).
 FULL_DETAIL_AGENTS = 100
 
@@ -52,6 +59,7 @@ class World:
         self.government = Government.from_rules(self.rules)
         self.banking = Banking(self.rules, self.government)
         self.retained_total = 0.0
+        self.sell_through = {}        # good -> share of recent output that didn't expire
         self.price_level = 1.0        # scales every price (money_velocity: M x V = P x Y)
         self.price_level_set = False
         self.assets_depreciated = {}   # asset shares worn out so far, by industry   # company profits kept in companies so far
@@ -113,7 +121,7 @@ class World:
 
     def create_agent(self, *, inventory=None, money=None, labor_capacity=None,
                      rates=None, sleep_recovery=None, movement=None, needs=None, name=None,
-                     x=None, y=None, assets=None, payout_ratio=None):
+                     x=None, y=None, assets=None, payout_ratio=None, risk_appetite=None):
         """Create an agent with the standard modules. Anything omitted comes from the rules.
 
         ``inventory`` overrides per good; ``labor_capacity`` is the most labour it can give per step;
@@ -157,6 +165,8 @@ class World:
         agent.assets = {k: v for k, v in {**drawn, **(assets or {})}.items() if v and r.is_active(k)}
         agent.personality["payout_ratio"] = round(distributions.sample(
             r.payout_ratio, self.personality_rng, False, 0, 1), 3) if payout_ratio is None else payout_ratio
+        agent.personality["risk_appetite"] = round(distributions.sample(
+            r.risk_appetite, self.personality_rng, False, 0, 1), 3) if risk_appetite is None else risk_appetite
         return self.add_agent(agent)
 
     # A starting stock is spread over this many batches of different ages, so it doesn't all
@@ -185,10 +195,12 @@ class World:
 
     def update_agent(self, agent, *, name=None, x=None, y=None, needs=None, inventory=None,
                      money=None, movement=None, labor_capacity=None, rates=None, sleep_recovery=None,
-                     assets=None, payout_ratio=None):
+                     assets=None, payout_ratio=None, risk_appetite=None):
         """Change any of an existing agent's settings; omitted fields stay as they are."""
         if payout_ratio is not None:
             agent.personality["payout_ratio"] = payout_ratio
+        if risk_appetite is not None:
+            agent.personality["risk_appetite"] = risk_appetite
         for resource, count in (assets or {}).items():
             agent.assets[resource] = count
         if name:
@@ -359,22 +371,25 @@ class World:
             self.scarcity[r] = max(0.0, 1 - now / past) if full and past > 0 else 0.0
 
     def yearly_basket(self):
-        """{good: units} people consume in a year: last year's consumption once a month has been
-        recorded (scaled up to a year), before that what their needs call for (each need met
-        with its most effective good)."""
+        """{good: units} people consume in a year. It starts from what their needs call for (each
+        need met with its most effective good) and shifts to what they actually consumed (scaled
+        up to a year) over the first month, so the price level doesn't jump when the measured
+        figure takes over."""
         acc = self.recorder.national
         year = self.year_steps()
-        if len(acc.window) >= self.rules.month_steps:
-            scale = year / len(acc.window)
-            return {g: n * scale for g, n in acc.used.items() if n > 0}
-        basket = {}
+        expected = {}
         n = len(self.agents)
         for need in self.rules.consumer_needs:
-            goods = self.rules.goods_for(need)
-            best = goods[0]
+            best = self.rules.goods_for(need)[0]
             rate = distributions.mean(self.rules.rates[need])
-            basket[best] = basket.get(best, 0.0) + rate * n * year / self.rules.relief(best, need)
-        return basket
+            expected[best] = expected.get(best, 0.0) + rate * n * year / self.rules.relief(best, need)
+        days = len(acc.window)
+        if not days:
+            return expected
+        weight = min(1.0, days / self.rules.month_steps)   # how much the measured basket counts
+        measured = {g: u * year / days for g, u in acc.used.items() if u > 0}
+        return {g: weight * measured.get(g, 0.0) + (1 - weight) * expected.get(g, 0.0)
+                for g in set(measured) | set(expected)}
 
     def update_price_level(self):
         """Move the price level toward money supply x velocity / (a year's consumption at the
@@ -490,10 +505,17 @@ class World:
             # Capital goods are made so slowly that a few steps' output is less than one project
             # needs; their makers keep at least CAPITAL_STOCK units on hand for builders.
             least = self.CAPITAL_STOCK if good in CAPITAL_GOODS else 1.0
-            buffer = max(least, self.asset_output(good, shares) * rules.output_buffer_steps)
+            # A perishable good: hold at most half its shelf life of output (or it rots unsold).
+            days = rules.output_buffer_steps
+            life = rules.shelf_life.get(good, 0) if rules.expiry_enabled else 0
+            if life:
+                days = min(days, life * PERISHABLE_BUFFER)
+            buffer = max(least, self.asset_output(good, shares) * days)
             if held >= buffer + economy.input_target(agent, good, rules):
                 return 0.0
-        jobs = self.asset_jobs(good, shares)
+        # Owners of a good that goes to waste make less of it for a while (sell-through: the share
+        # of recent output that didn't expire).
+        jobs = self.asset_jobs(good, shares) * self.sell_through.get(good, 1.0)
         productivity = self.productivity_now[good]
         for item, per_unit in self.rules.inputs.get(good, {}).items():
             stock = agent.inventory.count(item) + agent.input_credit.get(item, 0.0)
@@ -514,6 +536,15 @@ class World:
         if not cost or any(not self.rules.is_active(k) for k in cost):
             return None
         return sum(units * prices[k] for k, units in cost.items())
+
+    def update_sell_through(self):
+        """Share of each good's output over the last SELL_THROUGH_DAYS that didn't go to waste:
+        1 - expired / produced (between MIN_SELL_THROUGH and 1; 1 when nothing was made)."""
+        recent = list(islice(reversed(self.recorder.history), SELL_THROUGH_DAYS))
+        for g in self.rules.active_goods:
+            made = sum(s["produced"].get(g, 0) for s in recent)
+            lost = sum(s["expired"].get(g, 0) for s in recent)
+            self.sell_through[g] = max(MIN_SELL_THROUGH, 1 - lost / made) if made > 0 else 1.0
 
     def update_profitability(self):
         """Which industries pay at current prices: value added by one unit of labour
@@ -569,7 +600,10 @@ class World:
         prices = prices or self.current_prices()
         out = {}
         for g in economy.GOODS:
-            profit = self.asset_output(g, 1) * self.value_added(g, prices) - self.asset_jobs(g, 1) * prices[economy.LABOR]
+            # Output that expires unsold earns nothing: value only what sells (sell-through).
+            sold = self.sell_through.get(g, 1.0)
+            profit = (self.asset_output(g, 1) * sold * self.value_added(g, prices)
+                      - self.asset_jobs(g, 1) * sold * prices[economy.LABOR])
             out[g] = max(0.0, profit) / self.government.effective_return(self.rules, g)
         return out
 
@@ -614,10 +648,12 @@ class World:
         level = self.price_level if self.rules.price_mode != "fixed" else 1.0
         prices = {r: base[r] * self.price_multiplier[r] * level for r in economy.RESOURCES}
         if self.rules.cost_floor and self.rules.price_mode != "fixed":
-            # Shallow layers first, so each good's inputs already carry their own floor.
+            # Nothing sells below what it costs to make (inputs + the labour per unit at the wage)
+            # plus a normal margin, so every industry can at least pay its way. Shallow layers
+            # first, so each good's inputs already carry their own floor.
             rules = self.rules
-            for g in sorted((g for g in rules.inputs if rules.is_active(g)), key=rules.layer):
-                prices[g] = max(prices[g], self.input_cost(g, prices))
+            for g in sorted(rules.active_goods, key=rules.layer):
+                prices[g] = max(prices[g], self.unit_cost(g, prices) * (1 + rules.cost_floor_margin))
         if include_labor:
             prices[economy.LABOR] = self.labor.wage
         return prices
@@ -663,6 +699,7 @@ class World:
         self.update_scarcity()
         self.update_demand()
         self.update_price_level()
+        self.update_sell_through()
         self.update_profitability()
         self.labor.clear(self)
         seekers = {}
@@ -1012,6 +1049,7 @@ class World:
                 "per_agent_history": {r: list(h) for r, h in self.per_agent_history.items()},
                 "scarcity": self.scarcity,
                 "price_level": round(self.price_level, 4),
+                "sell_through": {g: round(v, 3) for g, v in self.sell_through.items()},
                 "buyer_concentration": {r: round(v, 3) for r, v in self.buyer_concentration.items()},
                 # Per product: agents owning its industry, and those that made some this step.
                 "owners": {g: sum(1 for a in self.agents if a.assets.get(g, 0) > 0) for g in self.rules.active_goods},

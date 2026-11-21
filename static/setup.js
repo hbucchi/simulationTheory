@@ -83,6 +83,7 @@ const SETUP_SECTIONS = [
     { path: "money", label: "Money", kind: "spread", tiered: true, min: 0, step: 0.01 },
     { path: "movement", label: "Movement (px)", kind: "spread", whole: true, min: 1, max: 200 },
     { path: "start_needs", label: "Starting needs", kind: "spread", min: 0, max: 1, step: 0.05 },
+    { path: "risk_appetite", label: "Personality: risk appetite (0-1)", kind: "spread", min: 0, max: 1, step: 0.05 },
     { path: "payout_ratio", label: "Personality: pays out (share of profits)", kind: "spread", min: 0, max: 1, step: 0.05 },
   ]},
   { title: "Labour capacity", wide: true, hint: "Labour is the only thing agents make themselves, and it is never stored: " +
@@ -263,6 +264,8 @@ const SETUP_SECTIONS = [
       enabledWhen: v => v.government_enabled },
     { path: "llr_penalty", label: "… at the policy rate + (% a year)", kind: "float", min: 0, step: 0.1, yearly: true,
       enabledWhen: v => v.government_enabled && v.lender_of_last_resort },
+    { path: "gov_min_wage", label: "Minimum wage ($ per day's work; 0 = none)", kind: "float", min: 0, step: 5,
+      enabledWhen: v => v.government_enabled },
     { path: "tax_production", label: "Production tax (share of every sale)", kind: "float", min: 0, max: 1, step: 0.01,
       enabledWhen: v => v.government_enabled },
     { path: "tax_wage", label: "Salary tax (share of wages)", kind: "float", min: 0, max: 1, step: 0.01,

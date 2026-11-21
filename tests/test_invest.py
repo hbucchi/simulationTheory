@@ -120,13 +120,13 @@ class InvestTests(unittest.TestCase):
         self.assertAlmostEqual(full.assets["food"], 0.75)
         self.assertAlmostEqual(full.money, 525)
 
-    def test_only_buys_assets_of_what_it_lacks(self):
+    def test_considers_every_industry_not_only_what_it_uses(self):
         world = self.market()
         world.create_agent(money=500, needs=CALM, assets={"food": 1}, inventory={"food": 300})
-        for food in (300, 70):        # over the cap, or inside the band: not lacking food
-            investor = world.create_agent(money=200, needs=CALM, inventory={"food": food, "water": 60, "games": 60})
-            Invest().on_step(investor, world)
-            self.assertEqual(investor.assets, {})
+        # Plenty of food of its own: it still buys food assets when they are the best on offer.
+        investor = world.create_agent(money=200, needs=CALM, inventory={"food": 300, "water": 60, "games": 60})
+        Invest().on_step(investor, world)
+        self.assertGreater(investor.assets.get("food", 0), 0)
 
     def test_prefers_the_asset_with_the_best_return(self):
         world = world_with(liquidity_units=3, min_investment=10, asset_return={"food": 0.01, "water": 0.02, "games": 0.01},

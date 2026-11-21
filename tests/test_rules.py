@@ -90,7 +90,7 @@ class DistributionTests(unittest.TestCase):
 
 class RulesTests(unittest.TestCase):
     def test_partial_rules_keep_defaults(self):
-        rules = Rules.from_dict({"inventory": {"water": 5}, "rates": {"thirst": 0.02}})
+        rules = Rules.from_dict({"inventory": {"water": 5}, "rates": {"thirst": 0.02}, "max_stock_months": 0})
         self.assertEqual(rules.inventory, {**Rules().inventory, "water": 5})
         self.assertEqual(rules.rates["hunger"], 0.01)
 

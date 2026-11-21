@@ -60,7 +60,7 @@ class RetainedEarningsTests(unittest.TestCase):
         w = world()
         a = owner_with_profit(w, payout=0.0, sales=0)
         a.wage_avg = 0.0
-        a.company_cash = 50000
+        a.company_cash = 10 * w.company_cash_cap(a, w.current_prices())
         w.retain_earnings()
         self.assertAlmostEqual(a.company_cash, w.company_cash_cap(a, w.current_prices()), places=6)
 

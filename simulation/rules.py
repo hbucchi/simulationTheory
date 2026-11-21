@@ -8,6 +8,7 @@ Per-agent values (marked "spread") are either a number or a distribution that
 each new agent is drawn from; see distributions.py.
 """
 
+import math
 from dataclasses import asdict, dataclass, field, fields
 
 from . import distributions
@@ -138,6 +139,9 @@ class Rules:
     # is retained by the company (company cash) to pay wages and build new capacity in its own
     # industries. Banks retain the rest as equity, which lets them lend more. (spread)
     payout_ratio: object = field(default_factory=lambda: {"dist": "uniform", "min": 0.2, "max": 0.8})
+    # Personality: risk appetite (0 = cautious, 1 = entrepreneur): how big it builds and whether it
+    # borrows to invest (from 0.3 up). (spread)
+    risk_appetite: object = field(default_factory=lambda: {"dist": "uniform", "min": 0.0, "max": 1.0})
 
     # Trading: a buyer buys a random multiple of what it needs, in [purchase_min, purchase_max]
     purchase_min: float = 1.0
@@ -222,6 +226,7 @@ class Rules:
     # it is made from, at current prices. (Labour isn't included: the wage itself is set from the
     # value labour adds, so including it would let wages and prices push each other up.)
     cost_floor: bool = True
+    cost_floor_margin: float = 0.1     # floor = (inputs + labour per unit at the wage) x (1 + this)
     # An industry stops working while its owner holds this many units of what it makes, or more
     # than output_buffer_steps steps of its output (beyond its own input buffer): produce to demand
     # (0 = no limit).
@@ -257,6 +262,7 @@ class Rules:
     government_enabled: bool = True
     gov_min_rate: float = 0.0
     gov_labor_purchase: float = 0.0
+    gov_min_wage: float = 0.0          # lowest wage per unit of labour (a day's work); 0 = none
     capital_ratio: float = 0.12
     # Central bank: banks keep reserve_ratio x deposits in an account at the central bank, which
     # pays reserve_rate on it; as lender of last resort it lends to solvent banks that run out of
@@ -302,6 +308,9 @@ class Rules:
     # of its monthly income (income per step x month_steps) in total, for any purpose; loans for
     # building also need collateral (max_loan_to_value). Can be changed in the game.
     month_steps: int = 30
+    # Starting stock of each good is at most this many months of an average agent's use of it
+    # (0 = no cap): scarce goods then get dearer, which makes their industries worth building.
+    max_stock_months: float = 6
     loan_income_share: float = 0.4
 
     # Prices
@@ -312,7 +321,7 @@ class Rules:
     # average agent's cash lasts about a quarter of a year. 0 = off (the plain scarcity formula,
     # where money is valued against every unit held, so agents hold years of living in cash).
     money_velocity: float = 4.0
-    price_level_speed: float = 0.05    # share of the gap to the target level closed each day
+    price_level_speed: float = 0.02    # share of the gap to the target level closed each day
     fixed_prices: dict = field(default_factory=lambda: {r: 50.0 for r in PRICED})
 
     # Market adjustment on top of the base price, per resource:
@@ -517,6 +526,14 @@ class Rules:
                 stock[best] += round(spec * default_relief / rules.relief(best, need))
             stock[g] = 0
         rules.inventory = stock
+        if rules.max_stock_months > 0:
+            # Nobody starts with more than max_stock_months of what an average agent uses of each
+            # good (needs + industry inputs), so stocks run down and production matters early.
+            use = daily_use(rules)
+            days = rules.max_stock_months * rules.month_steps
+            rules.inventory = {g: (min(spec, math.ceil(use.get(g, 0.0) * days))
+                                   if isinstance(spec, (int, float)) else spec)
+                               for g, spec in rules.inventory.items()}
         if "assets" not in data:
             # No starting industries given: size them for this game (its layers, recipes, rates).
             sized = demand_sized_shares(rules)
@@ -595,6 +612,7 @@ SPREADS = {
     "rates": (NEEDS, 0, 1, False, False),
     "sleep_recovery": (None, 0, 1, False, False),
     "payout_ratio": (None, 0, 1, False, False),
+    "risk_appetite": (None, 0, 1, False, False),
 }
 
 
@@ -672,6 +690,7 @@ LIMITS = {
     "budget_steps": (0, 100000, "int"),
     "consumer_credit": (None, None, "bool"),
     "month_steps": (1, 100000, "int"),
+    "max_stock_months": (0, 1200, "float"),
     "loan_income_share": (0, 100, "float"),
     "excluded_industries": (None, None, "goods"),
     "building_enabled": (None, None, "bool"),
@@ -690,6 +709,8 @@ LIMITS = {
     "labor_priority": (("value", "even"), None, "choice"),
     "gov_min_rate": (0, 10, "float"),
     "gov_labor_purchase": (0, 1e6, "float"),
+    "gov_min_wage": (0, 1e9, "float"),
+    "cost_floor_margin": (0, 10, "float"),
     "purchase_min": (1, 10, "float"),
     "purchase_max": (1, 10, "float"),
     "price_mode": (PRICE_MODES, None, "choice"),
@@ -740,14 +761,10 @@ CAPITAL_DEFAULT_SHARES = 0.1
 INPUT_LEAKAGE = 2.0   # capital industries: no consumers, but new capacity is built from them
 
 
-def demand_sized_shares(rules):
-    """Asset shares per agent for each industry in this game, sized to what agents consume.
-
-    Each need's growth (average of its spread) is split over the goods that exist in this game
-    by the catalog's plan (renormalised); a need whose planned goods are all missing (e.g. a game
-    with fewer layers) is split evenly over the goods that can still relieve it. The inputs those
-    goods take are added down the layers, and every industry gets SIZING_HEADROOM times the
-    capacity that takes (at least MIN_DEFAULT_SHARES). Inactive industries get 0."""
+def daily_use(rules, leak=1.0):
+    """Units per agent per day of each good in this game: what needs call for (each need split
+    over its goods by the catalog's plan) plus the inputs those goods take, down the layers.
+    ``leak``: extra weight on inputs people can also consume (see INPUT_LEAKAGE)."""
     active = rules.active_goods
     units = {g: 0.0 for g in active}
     for need in rules.consumer_needs:
@@ -762,10 +779,21 @@ def demand_sized_shares(rules):
     for g in sorted(active, key=rules.layer, reverse=True):   # deepest first: inputs flow down
         for item, per_unit in rules.inputs.get(g, {}).items():
             if item in units:
-                # An input people can also consume (grain, livestock, water) gets eaten directly
-                # too, which would starve the industries made from it: give it extra capacity.
-                leak = INPUT_LEAKAGE if rules.need_of(item) else 1.0
-                units[item] += units[g] * per_unit * leak
+                units[item] += units[g] * per_unit * (leak if rules.need_of(item) else 1.0)
+    return units
+
+
+def demand_sized_shares(rules):
+    """Asset shares per agent for each industry in this game, sized to what agents consume.
+
+    Each need's growth (average of its spread) is split over the goods that exist in this game
+    by the catalog's plan (renormalised); a need whose planned goods are all missing (e.g. a game
+    with fewer layers) is split evenly over the goods that can still relieve it. The inputs those
+    goods take are added down the layers, and every industry gets SIZING_HEADROOM times the
+    capacity that takes (at least MIN_DEFAULT_SHARES). Inactive industries get 0."""
+    # An input people can also consume (grain, livestock, water) gets eaten directly too, which
+    # would starve the industries made from it: it gets INPUT_LEAKAGE x the capacity they use.
+    units = daily_use(rules, INPUT_LEAKAGE)
     shares = {}
     for g in GOODS:
         per_share = rules.asset_labor[g] * rules.productivity[g]

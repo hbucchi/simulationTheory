@@ -150,7 +150,9 @@ const FIELD_GROUPS = [
     { path: "labor_capacity", label: "Labour capacity per day", min: 0, step: 0.05, get: a => a.labor.capacity }]},
   { legend: "Personality", fields: [
     { path: "payout_ratio", label: "Pays out as dividends (share of profits)", min: 0, max: 1, step: 0.05,
-      get: a => a.personality.payout_ratio, placeholder: "from rules" }]},
+      get: a => a.personality.payout_ratio, placeholder: "from rules" },
+    { path: "risk_appetite", label: "Risk appetite (0 cautious, 1 entrepreneur)", min: 0, max: 1, step: 0.05,
+      get: a => a.personality.risk_appetite ?? 0, placeholder: "from rules" }]},
   { legend: "Industries owned (asset shares; 1 = one whole asset)", collapsed: true, fields: GOODS.map(r => (
     { path: `assets.${r}`, label: label(r), min: 0, step: 0.01, get: a => +(a.assets[r] ?? 0).toFixed(4) }))},
 ];
@@ -1298,7 +1300,7 @@ function refreshForm(force = false) {
 
 // New agents start from the game's rules (set on the setup screen). A rule that is a
 // distribution shows blank: the server draws a value from it.
-const RULE_BACKED = ["inventory", "assets", "labor_capacity", "rates", "money", "sleep_recovery", "movement", "payout_ratio"];
+const RULE_BACKED = ["inventory", "assets", "labor_capacity", "rates", "money", "sleep_recovery", "movement", "payout_ratio", "risk_appetite"];
 function defaultValue(path) {
   if (!RULE_BACKED.includes(path.split(".")[0])) return "";  // name, x, y, needs: server picks
   const spec = getPath(state.rules, path);

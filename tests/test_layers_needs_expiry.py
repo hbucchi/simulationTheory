@@ -77,7 +77,7 @@ class GameSizingTests(unittest.TestCase):
         self.assertEqual(Rules.from_dict({"industry_layers": 1, "assets": {"grain": 5}}).assets["grain"], 5)
 
     def test_starting_stock_of_missing_goods_becomes_the_same_relief(self):
-        one = Rules.from_dict({"industry_layers": 1})
+        one = Rules.from_dict({"industry_layers": 1, "max_stock_months": 0})   # (no stock cap here)
         # 30 food (0.15 each = 4.5 of hunger relief) -> 75 grain (0.06 each), on top of 30 grain.
         self.assertEqual(one.inventory["food"], 0)
         self.assertEqual(one.inventory["grain"], 105)

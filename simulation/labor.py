@@ -147,12 +147,14 @@ class LaborMarket:
             self.multiplier += rules.price_adjust_speed * (target - self.multiplier)
         else:
             self.multiplier = 1.0
-        self.wage = base * self.multiplier
+        # A minimum wage (government policy) is a floor: nobody works for less.
+        self.wage = max(base * self.multiplier, world.government.min_wage)
         stats["base_wage"], stats["pressure"] = base, pressure
 
         # Each worker's asking wage; the cheapest are hired first.
         for a in offers:
-            a.asking_wage = self.wage * min(3.0, max(0.1, 1 + rules.bargaining_spread * (a.wellbeing - a.job_need)))
+            a.asking_wage = max(world.government.min_wage,
+                                self.wage * min(3.0, max(0.1, 1 + rules.bargaining_spread * (a.wellbeing - a.job_need))))
         offers.sort(key=lambda a: a.asking_wage)
         remaining = {a: a.offered for a in offers}
         # Employers whose labour creates the most value hire first (as if they outbid the

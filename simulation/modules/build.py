@@ -8,6 +8,10 @@ from .invest import asset_yield, budget_needed, cash_needed, purchase_limit
 MIN_PROJECT_SHARES = 0.05
 # Largest project an agent takes on at once (asset shares).
 MAX_PROJECT_SHARES = 1.0
+# The most adventurous agents (risk appetite 1) build up to 1 + ENTREPRENEUR_SCALE times as much,
+# and agents with at least BORROW_APPETITE borrow for what their own money doesn't cover.
+ENTREPRENEUR_SCALE = 4.0
+BORROW_APPETITE = 0.3
 
 
 def claimed_capital_goods(world):
@@ -123,12 +127,18 @@ class Build(Module):
         if best == "banking" and not owns_bank:
             budget = min(budget, spare - banking.min_capital)
         # Borrow what its own money doesn't cover, when the asset earns more than the loan costs.
-        wanted = MAX_PROJECT_SHARES * best_cost
+        # Personality: risk appetite (0-1) sets how big it builds (up to 1 + 4 x appetite shares)
+        # and whether it borrows for it: only agents with at least BORROW_APPETITE take a loan,
+        # and only when the asset earns more than the loan costs.
+        appetite = agent.personality.get("risk_appetite", 0.0)
+        most = MAX_PROJECT_SHARES * (1 + ENTREPRENEUR_SCALE * appetite)
+        wanted = most * best_cost
         borrowed = 0.0
-        if budget < wanted and banking.available(world) and asset_yield(best, world) > banking.loan_rate_now(world):
+        if (budget < wanted and appetite >= BORROW_APPETITE and banking.available(world)
+                and asset_yield(best, world) > banking.loan_rate_now(world)):
             borrowed = banking.borrow(world, agent, wanted - budget, f"building {best}",
-                                      extra_collateral=asset_prices[best] * MAX_PROJECT_SHARES)
-        shares = min(MAX_PROJECT_SHARES, (budget + borrowed) / best_cost)
+                                      extra_collateral=asset_prices[best] * most)
+        shares = min(most, (budget + borrowed) / best_cost)
         if shares < MIN_PROJECT_SHARES:
             return
         banking.cash_up(agent, cash_needed(agent, prices, rules) + shares * best_cost)

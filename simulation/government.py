@@ -14,6 +14,9 @@ Fiscal policy (the government):
        is still left (nobody idle) is paid out equally to every agent (transfers), so taxes go
        back into the economy instead of sitting in the treasury.
 
+- ``min_wage``: the lowest wage per unit of labour (a day's work) anyone may be paid; workers
+  never ask for less and employers pay at least this. 0 = no minimum wage.
+
 Monetary policy (the central bank):
 - ``min_rate``: no asset may be valued at a return below this rate. The effective return of an
   asset is max(its own asset_return, min_rate), so raising the rate lowers every asset's price
@@ -33,7 +36,7 @@ government switched off (``enabled`` False) none of this applies: no taxes, no s
 policy rate, no capital or reserve rules and no lender of last resort.
 """
 
-POLICY = ("min_rate", "labor_purchase", "capital_ratio", "tax_production", "tax_wage", "tax_profit",
+POLICY = ("min_wage", "min_rate", "labor_purchase", "capital_ratio", "tax_production", "tax_wage", "tax_profit",
           "benefit_rate", "balanced_budget", "reserve_requirement", "reserve_rate", "lender_of_last_resort",
           "llr_penalty")
 TAXES = ("production", "wage", "profit")
@@ -49,7 +52,7 @@ class Government:
     def __init__(self, min_rate=0.0, labor_purchase=0.0, capital_ratio=0.12, enabled=True, **policy):
         self.enabled = enabled
         self._policy = {"min_rate": min_rate, "labor_purchase": labor_purchase, "capital_ratio": capital_ratio,
-                        "tax_production": 0.0, "tax_wage": 0.0, "tax_profit": 0.0, "benefit_rate": 0.0,
+                        "min_wage": 0.0, "tax_production": 0.0, "tax_wage": 0.0, "tax_profit": 0.0, "benefit_rate": 0.0,
                         "balanced_budget": False, "reserve_requirement": 0.0, "reserve_rate": 0.0,
                         "lender_of_last_resort": False, "llr_penalty": 0.0}
         self._policy.update(policy)
@@ -74,12 +77,13 @@ class Government:
     @classmethod
     def from_rules(cls, rules):
         return cls(rules.gov_min_rate, rules.gov_labor_purchase, rules.capital_ratio, rules.government_enabled,
-                   tax_production=rules.tax_production, tax_wage=rules.tax_wage, tax_profit=rules.tax_profit,
+                   min_wage=rules.gov_min_wage, tax_production=rules.tax_production, tax_wage=rules.tax_wage, tax_profit=rules.tax_profit,
                    benefit_rate=rules.benefit_rate, balanced_budget=rules.balanced_budget,
                    reserve_requirement=rules.reserve_ratio, reserve_rate=rules.reserve_rate,
                    lender_of_last_resort=rules.lender_of_last_resort, llr_penalty=rules.llr_penalty)
 
     # The policy in force: nothing while the government is switched off.
+    min_wage = _policy("min_wage")
     min_rate = _policy("min_rate")
     labor_purchase = _policy("labor_purchase")
     capital_ratio = _policy("capital_ratio")

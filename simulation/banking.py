@@ -300,9 +300,9 @@ class Banking:
         the agent's income can repay."""
         if not self.available(world) or amount <= 0:
             return 0.0
-        limit = self.income_limit(world, agent)
-        if not unsecured:
-            limit = min(limit, self.credit_limit(world, agent, extra_collateral))
+        # Consumer loans (no collateral) are limited by income; business loans by collateral (the
+        # assets it owns and the plant it builds).
+        limit = self.income_limit(world, agent) if unsecured else self.credit_limit(world, agent, extra_collateral)
         amount = min(amount, limit)
         if amount < MIN_DEPOSIT:
             return 0.0

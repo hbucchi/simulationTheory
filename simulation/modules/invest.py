@@ -55,14 +55,10 @@ class Invest(Module):
         # Owners short of cash: {agent: shortfall}, most short first (worked out once per step).
         short = {o: gap for o, gap in cash_short_owners(world, prices).items() if o is not agent}
         for resource in ranked_assets(world):
+            # Every industry is a candidate, best yield first (not only goods the investor uses).
             price = asset_prices[resource]
-            # Who wants each good is worked out once per step (World.update_demand); ask directly
-            # if that hasn't run yet.
-            buyers = world.buyer_sets.get(resource)
-            wants = agent in buyers if buyers is not None else economy.wants_to_buy(agent, resource, rules, world.scarcity)
-            lacks = wants or not rules.selling_enabled
-            if price <= 0 or not lacks:
-                continue   # worthless, or it isn't short of this resource
+            if price <= 0:
+                continue   # worthless
             # Cash-short owners first (they need the money most), then owners over the cap.
             owners = world.owners_of(resource)
             limits = {o: short[o] for o in owners if o in short}

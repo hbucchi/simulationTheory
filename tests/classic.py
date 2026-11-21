@@ -23,4 +23,6 @@ CLASSIC = {
     "depreciation": {g: 0 for g in GOODS},
     # no taxes or government spending (mechanics are tested on their own)
     "tax_production": 0, "tax_wage": 0, "tax_profit": 0, "benefit_rate": 0,
+    # the plain scarcity formula (no price level from velocity)
+    "money_velocity": 0,
 }
