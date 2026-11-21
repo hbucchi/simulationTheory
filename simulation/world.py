@@ -60,6 +60,10 @@ class World:
         self.events = []  # newest last; trimmed to keep the payload small
         self.cooldowns = {}  # frozenset({id_a, id_b}) -> (tick until which they ignore each other, after a deal?)
         self.labor = LaborMarket()
+        # Sticky prices (0 = perfectly flexible): each day posted prices move only (1 - stickiness)
+        # of the way to what the market says. Changeable in game (Products tab).
+        self.price_stickiness = self.rules.price_stickiness
+        self.posted_prices = {}
         self.housing = HousingMarket(self.rules)
         self.government = Government.from_rules(self.rules)
         self.banking = Banking(self.rules, self.government)
@@ -706,6 +710,12 @@ class World:
         trades only move goods and money between agents, so the totals behind them barely change
         within a step. Outside a step they are always worked out fresh."""
         cache = self._step_cache
+        if not cache and self.price_stickiness > 0 and self.posted_prices:
+            # Between steps, sticky prices are the ones posted today.
+            prices = dict(self.posted_prices)
+            if include_labor:
+                prices[economy.LABOR] = self.labor.wage
+            return prices
         if cache and "prices" in cache:
             # The same dict for every caller while the wage is unchanged (callers never modify
             # it), so per-price memos such as economy.liquidity_cost hit.
@@ -730,6 +740,16 @@ class World:
         if include_labor:
             prices[economy.LABOR] = self.labor.wage
         return prices
+
+    def post_prices(self, market):
+        """Today's posted prices given what the ``market`` says: the same with flexible prices;
+        with sticky ones, yesterday's posted prices moved (1 - stickiness) of the way."""
+        stick = self.price_stickiness
+        if stick > 0 and self.posted_prices:
+            market = {g: self.posted_prices.get(g, p) + (1 - stick) * (p - self.posted_prices.get(g, p))
+                      for g, p in market.items()}
+        self.posted_prices = market
+        return market
 
     def unit_markups(self):
         """Per-unit price rise inside a deal: only where buyers outnumber sellers."""
@@ -774,6 +794,8 @@ class World:
         self.update_price_level()
         self.update_sell_through()
         self.update_profitability()
+        if self.tick % self.rules.month_steps == 0:
+            self.government.monthly(self)       # the central bank resets its rate (Taylor rule)
         self.government.debt.step(self)     # interest on government bonds, repayments
         self.labor.clear(self)
         seekers = {}
@@ -783,7 +805,7 @@ class World:
             if agent.target_id is not None:
                 seekers.setdefault(agent.target_id, []).append(agent)
         self._step_cache = {"seekers": seekers}
-        self._step_cache["prices"] = self.current_prices(include_labor=False)
+        self._step_cache["prices"] = self.post_prices(self.current_prices(include_labor=False))
         self._rebuild_grid()
         try:
             for agent in list(self.agents):
@@ -1100,6 +1122,7 @@ class World:
             "government": self.government.to_dict(self),
             "housing": self.housing.to_dict(self) if self.rules.housing_enabled else None,
             "market": {
+                "price_stickiness": self.price_stickiness,
                 "prices": self.current_prices(),
                 "base_prices": economy.market_prices(self.agents, self.rules),
                 "multiplier": self.price_multiplier,

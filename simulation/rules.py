@@ -261,6 +261,14 @@ class Rules:
     # assets). Off with the government.
     government_enabled: bool = True
     gov_min_rate: float = 0.0
+    # Central bank rule (Taylor rule): once a month it sets the policy rate (per year) to
+    # neutral real rate + inflation + 0.5 x (inflation - target) + 0.5 x output gap, the gap read
+    # from unemployment (Okun's law: 2% of output per point above taylor_unemployment), within
+    # 0-20% a year. Off: the policy rate stays where the player puts it (gov_min_rate).
+    taylor_enabled: bool = True
+    inflation_target: float = 0.02
+    neutral_rate: float = 0.02
+    taylor_unemployment: float = 0.05
     gov_labor_purchase: float = 0.0
     # Government bonds (bonds.py): when taxes can't pay for its policies and the benefit, the
     # government borrows, up to gov_debt_limit x a year's GDP, at the policy rate + gov_bond_spread
@@ -354,6 +362,9 @@ class Rules:
     concentration_weight: dict = field(default_factory=lambda: {r: 1.0 for r in PRICED})
     buyer_power_weight: dict = field(default_factory=lambda: {r: 1.0 for r in PRICED})
     price_adjust_speed: float = 0.2
+    # Sticky prices: 0 = perfectly flexible (default); 0.9 = posted prices close only 10% of the gap
+    # to the market price each day (menu costs: why real inflation is slow). Changeable in game.
+    price_stickiness: float = 0.0
     price_floor: float = 0.25
     price_cap: float = 4.0
     unit_markup: float = 0.05
@@ -696,6 +707,7 @@ LIMITS = {
     "money_velocity": (0, 1000, "float"),
     "price_level_speed": (0.001, 1, "float"),
     "price_adjust_speed": (0.01, 1, "float"),
+    "price_stickiness": (0, 0.99, "float"),
     "price_floor": (0.01, 1, "float"),
     "price_cap": (1, 100, "float"),
     "unit_markup": (0, 1, "float"),
@@ -770,6 +782,10 @@ LIMITS = {
     "profit_check": (None, None, "bool"),
     "labor_priority": (("value", "even"), None, "choice"),
     "gov_min_rate": (0, 10, "float"),
+    "taylor_enabled": (None, None, "bool"),
+    "inflation_target": (-0.5, 1, "float"),
+    "neutral_rate": (-0.5, 1, "float"),
+    "taylor_unemployment": (0, 1, "float"),
     "gov_labor_purchase": (0, 1e6, "float"),
     "gov_bonds_enabled": (None, None, "bool"),
     "pay_period": (("daily", "weekly", "monthly"), None, "choice"),

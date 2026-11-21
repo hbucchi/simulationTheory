@@ -40,7 +40,8 @@ policy rate, no capital or reserve rules and no lender of last resort.
 
 POLICY = ("min_wage", "min_rate", "labor_purchase", "capital_ratio", "tax_production", "tax_wage", "tax_profit",
           "benefit_rate", "balanced_budget", "reserve_requirement", "reserve_rate", "lender_of_last_resort",
-          "llr_penalty", "bonds_enabled", "debt_limit", "bond_spread", "bond_days", "pay_period")
+          "llr_penalty", "bonds_enabled", "debt_limit", "bond_spread", "bond_days", "pay_period",
+          "taylor_enabled", "inflation_target", "neutral_rate", "taylor_unemployment")
 TAXES = ("production", "wage", "profit")
 
 from .bonds import PublicDebt  # noqa: E402
@@ -65,7 +66,8 @@ class Government:
                         "balanced_budget": False, "reserve_requirement": 0.0, "reserve_rate": 0.0,
                         "lender_of_last_resort": False, "llr_penalty": 0.0,
                         "bonds_enabled": False, "debt_limit": 0.0, "bond_spread": 0.0, "bond_days": 360,
-                        "pay_period": "daily"}
+                        "pay_period": "daily", "taylor_enabled": False, "inflation_target": 0.02,
+                        "neutral_rate": 0.02, "taylor_unemployment": 0.05}
         self._policy.update(policy)
         self.money_created = 0.0   # total new money paid out so far (public works the treasury couldn't pay)
         self.labor_bought = 0.0    # total labour bought so far
@@ -80,6 +82,7 @@ class Government:
         self.llr_lent = 0.0          # all it has lent so far
         self.cb_income = 0.0         # interest banks paid on those loans (goes to the treasury)
         self.revenue_days = []      # taxes collected on each of the last 30 days
+        self.taylor_last = None     # the latest Taylor-rule decision and its inputs
         self.policies = Policies(policies or ())   # public spending the player designed (policies.py)
 
     def receive(self, amount):
@@ -97,7 +100,9 @@ class Government:
                    reserve_requirement=rules.reserve_ratio, reserve_rate=rules.reserve_rate,
                    lender_of_last_resort=rules.lender_of_last_resort, llr_penalty=rules.llr_penalty,
                    bonds_enabled=rules.gov_bonds_enabled, debt_limit=rules.gov_debt_limit,
-                   bond_spread=rules.gov_bond_spread, bond_days=rules.gov_bond_days, pay_period=rules.pay_period)
+                   bond_spread=rules.gov_bond_spread, bond_days=rules.gov_bond_days, pay_period=rules.pay_period,
+                   taylor_enabled=rules.taylor_enabled, inflation_target=rules.inflation_target,
+                   neutral_rate=rules.neutral_rate, taylor_unemployment=rules.taylor_unemployment)
 
     # The policy in force: nothing while the government is switched off.
     min_wage = _policy("min_wage")
@@ -117,7 +122,11 @@ class Government:
     debt_limit = _policy("debt_limit")
     bond_spread = _policy("bond_spread")
     bond_days = _policy("bond_days")
-    pay_period = _policy("pay_period")      # labour law: wages paid "daily", "weekly" or "monthly"
+    pay_period = _policy("pay_period")
+    taylor_enabled = _policy("taylor_enabled")
+    inflation_target = _policy("inflation_target")
+    neutral_rate = _policy("neutral_rate")
+    taylor_unemployment = _policy("taylor_unemployment")      # labour law: wages paid "daily", "weekly" or "monthly"
 
     def set(self, name, value):
         if name not in POLICY:
@@ -163,6 +172,34 @@ class Government:
         self.step_spent[kind] += amount
         return created
 
+    def taylor_rate(self, world):
+        """The yearly rate the Taylor rule asks for now, and its inputs: (rate, inflation,
+        unemployment, output gap); None before a quarter of national accounts exists."""
+        hist = world.recorder.history
+        if not hist or hist[-1].get("accounts_steps", 0) < 3 * world.rules.month_steps:
+            return None
+        inflation = hist[-1]["inflation"]
+        recent = list(hist)[-world.rules.month_steps:]
+        unemployment = sum(s["unemployment"] for s in recent) / len(recent)
+        gap = -2.0 * (unemployment - self.taylor_unemployment)              # Okun's law
+        rate = self.neutral_rate + inflation + 0.5 * (inflation - self.inflation_target) + 0.5 * gap
+        return max(0.0, min(0.20, rate)), inflation, unemployment, gap
+
+    def monthly(self, world):
+        """Once a month: the central bank resets its rate by the Taylor rule (when on)."""
+        if not (self.enabled and self.taylor_enabled):
+            return
+        found = self.taylor_rate(world)
+        if found is None:
+            return
+        rate, inflation, unemployment, gap = found
+        before = (1 + self.min_rate) ** world.year_steps() - 1
+        self.set("min_rate", (1 + rate) ** (1 / world.year_steps()) - 1)
+        self.taylor_last = {"rate": rate, "inflation": inflation, "unemployment": unemployment, "gap": gap}
+        if abs(rate - before) >= 0.0025:
+            world.log(f"Central bank {'raised' if rate > before else 'cut'} its rate to {rate:.2%} a year "
+                      f"(inflation {inflation:.1%}, unemployment {unemployment:.0%})")
+
     def borrow_for(self, world, amount):
         """Make sure the treasury holds ``amount``: sell bonds for what is missing (if allowed)."""
         short = amount - self.treasury
@@ -179,6 +216,7 @@ class Government:
                 "llr_outstanding": round(self.llr_outstanding, 2), "llr_lent": round(self.llr_lent, 2),
                 "cb_income": round(self.cb_income, 2),
                 "policies": self.policies.to_dict(),
+                "taylor": self.taylor_last,
                 "debt": self.debt.to_dict(world) if world is not None else None,
                 "policy_options": POLICY_OPTIONS,
                 "revenue_month": round(sum(self.revenue_days) * 30 / max(1, len(self.revenue_days)), 2),

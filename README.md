@@ -482,6 +482,24 @@ then the player's **public spending policies** (below), and with **balanced budg
 public works with what is left and finally an equal transfer to everyone, so taxes return to
 the economy instead of piling up.
 
+**Government bonds** (`gov_bonds_enabled`, on by default). When taxes can't pay for its
+spending policies, the unemployment benefit or the interest on its debt, the government
+**borrows** by selling bonds, as long as its debt stays under `gov_debt_limit` (60%) × a year's
+GDP. Banks with spare vault cash buy first (a bond counts in a bank's equity and needs no
+capital under the Basel rule), then agents with money beyond their monthly budget. The **bond
+rate = the central bank's policy rate + `gov_bond_spread`** (1% a year), fixed for the bond's
+life: the central bank's rate sets what the government pays. Interest is paid daily. After
+`gov_bond_days` (360) a bond is repaid, or rolled over at today's rate if the treasury can't.
+Leftover taxes repay debt early before buying more public works. Selling bonds only moves money;
+a dead holder's bonds are cancelled. The Government tab shows public debt (and debt / GDP), the
+bond rate, the interest paid and who lent.
+
+**Taylor rule** (`taylor_enabled`, on by default). Once a month the central bank sets its policy
+rate to: neutral real rate (2%) + inflation + 0.5 × (inflation − target, 2%) + 0.5 × output gap.
+The output gap comes from unemployment (Okun's law: about 2% of output lost per point of
+unemployment above its normal 5%). The rate stays within 0–20% a year, and starts once there is a
+quarter of data. Off: the rate stays where the player sets it.
+
 **Public spending policies** (Government tab, *Public spending*; `gov_policies` in the rules).
 The player decides where the money goes: **+ Add policy** creates one, **×** ends it, and every
 field applies from the next day. Each policy has:
@@ -686,6 +704,65 @@ An average agent's cash then lasts about 1/V of a year: in a 100-agent test the 
 held about 5 months of living costs after a year and the poorest tenth about 1.5 months, and
 banks lent. The starting money (default $3,000 per agent) only sets the scale: a day's wage is
 roughly 6% of it. Velocity 0 switches the price level off (the plain formula).
+
+### Who owns what at the start
+
+Only **10% of agents** start owning assets (`asset_owner_share`): industry shares and houses.
+The other 90% own nothing but their labour, their starting money and a few goods. This is
+only the starting point: after that, ownership moves with the market (trading shares,
+investing, building, estates). Companies start with **working capital** (`working_capital_days`,
+30): company cash for a month of their full wage bill, so owners can hire before their first
+sales come in.
+
+**Wages follow what firms sell.** The base wage is a share (`labor_share`, 60%) of what a unit
+of labour is worth, capped by actual **sales revenue per unit of labour worked** over the last
+30 days. Before, it was the theoretical value of the output, far above what firms could sell, so
+wages ran away from what employers could pay.
+
+### Labour law: when wages are paid
+
+`pay_period` (Government tab, live): **daily**, **weekly** or **monthly**. Labour is hired every
+day; with weekly or monthly pay the wages are owed until payday, when the employer pays them
+and the **salary tax is withheld from each payment**. An employer short of cash on payday pays
+what it can and owes the rest; wages it owes aren't free for more hiring. Monthly pay means
+workers must live a month on savings or credit.
+
+### Housing market
+
+(`housing_enabled`, module *Housing market*; **Housing** tab.)
+
+- **Houses are whole assets**: each houses exactly one agent. Living in one meets the shelter
+  need every day; a **homeless** agent's shelter need grows at `homeless_shelter_rate` (0.01 a
+  day), and then the shelter penalties follow (health worsens twice as fast, sleep worse).
+- **New houses**: the homebuilders (the housing industry) turn every `house_units` (20) units of
+  housing they make into a house and put it up for sale. The housing good no longer relieves
+  shelter on its own.
+- **Price**: at least `house_min_multiple` (50) × the average price of goods, so the floor
+  follows the price level; above it, the build cost × demand pressure (agents without a home of
+  their own vs houses free to move into).
+- **Rent** = price × `rent_yield` (6% a year), paid daily to the landlord (to the treasury for
+  public housing). A tenant who can't pay for `eviction_days` (30) days in a row is evicted.
+- **Buying a home**: an agent buys a vacant house for sale when the price fits on top of its
+  monthly budget, and moves in.
+- **Buying to let**: only an agent living in its own house may buy more, paying cash beyond its
+  budget, when the rent yield beats the bank deposit rate; it rents them out. Owners short of cash
+  put a house they don't live in up for sale.
+- **Estates**: a dead owner's houses go to the nearest agent who can pay; otherwise they become
+  public housing.
+- **Start**: owners live in their own house and own the rest as rentals; most others rent; 5%
+  start homeless (`starting_houses` 0.95 per agent).
+
+The tab shows houses, homeless, owners vs renters, empty and for-sale houses, the price and its
+minimum, the rent, sales and the biggest landlords, and lets the player change the minimum price,
+the rent yield and the eviction period while playing.
+
+### Prices: flexible or sticky
+
+By default prices are **perfectly flexible**: every day they are what the market says
+(`price_stickiness` 0). Players can make them sticky, before the game or in the Products tab:
+each day posted prices then close only part of the gap to the market price (0.8: 20% a day).
+Firms change prices slowly in real life ("menu costs"), which is why real inflation moves a few
+percent a year rather than jumping around.
 
 ### Needs: priority and penalties
 

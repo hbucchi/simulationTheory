@@ -242,6 +242,7 @@ function render(next) {
     renderAgents();
     renderEvents();
   } else if (activeTab === "products") {
+    fillStickiness();
     renderProducts();
   } else if (activeTab === "banks") {
     renderBanking();
@@ -749,6 +750,20 @@ function showTab(name) {
 }
 for (const t of ui.tabs) t.onclick = () => showTab(t.dataset.tab);
 
+// ---------- Price stickiness (Products tab) ----------
+
+$("price-stickiness").onchange = async (e) => {
+  render(await api("/api/market", { price_stickiness: Number(e.target.value) }));
+};
+
+function fillStickiness() {
+  const sel = $("price-stickiness");
+  if (document.activeElement === sel) return;
+  const s = state.market.price_stickiness ?? 0;
+  if (![...sel.options].some(o => Number(o.value) === s)) sel.append(new Option(`custom (${s})`, String(s)));
+  sel.value = String([...sel.options].find(o => Number(o.value) === s).value);
+}
+
 // ---------- Housing tab ----------
 
 function statCards(box, stats) {
@@ -1014,7 +1029,10 @@ function renderGovernment() {
   const g = state.government;
   const m = state.market;
   const stats = [
-    ["Policy rate", pctYear(g.min_rate, 2), "minimum return on assets"],
+    ["Policy rate", pctYear(g.min_rate, 2), g.taylor_enabled
+      ? (g.taylor ? `Taylor rule: inflation ${(g.taylor.inflation * 100).toFixed(1)}%, unemployment ${(g.taylor.unemployment * 100).toFixed(0)}%`
+                  : "Taylor rule: from month 3 (needs a quarter of data)")
+      : "set by you · minimum return on assets"],
     ["Labour hired", `${g.labor_purchase} /day`, "with newly created money"],
     ["Money created", usd(g.money_created), `${usd(g.last_spent)} yesterday`],
     ["Labour used up", g.labor_bought.toFixed(1), "in public works so far"],

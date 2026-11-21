@@ -152,6 +152,15 @@ class Simulation:
                 raise ValueError('action must be "add", "update" or "remove"')
             return world.to_dict(self.detail)
 
+    def set_market(self, changes):
+        """Change how markets work while the game runs (price stickiness)."""
+        with self.lock:
+            self.world.price_stickiness = changes.get("price_stickiness", self.world.price_stickiness)
+            s = self.world.price_stickiness
+            self.world.log("Prices are now perfectly flexible" if s == 0 else
+                           f"Prices are sticky: each day they close {1 - s:.0%} of the gap to the market price")
+            return self.world.to_dict(self.detail)
+
     def set_housing(self, changes):
         """Change the housing market's rules while the game runs."""
         with self.lock:
@@ -205,7 +214,9 @@ POLICY_LIMITS = {"min_wage": (0, 1e9), "min_rate": (0, 10), "labor_purchase": (0
                  "reserve_requirement": (0, 1), "reserve_rate": (0, 1), "llr_penalty": (0, 1),
                  "enabled": bool, "balanced_budget": bool, "lender_of_last_resort": bool,
                  "bonds_enabled": bool, "debt_limit": (0, 10), "bond_spread": (0, 0.01), "bond_days": (1, 3600),
-                 "pay_period": ("daily", "weekly", "monthly")}
+                 "pay_period": ("daily", "weekly", "monthly"),
+                 "taylor_enabled": bool, "inflation_target": (-0.5, 1), "neutral_rate": (-0.5, 1),
+                 "taylor_unemployment": (0, 1)}
 
 
 def parse_policy(body):
@@ -357,6 +368,15 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.sim.set_banking(changes)
             if self.path == "/api/government":
                 return self.sim.set_policy(parse_policy(body))
+            if self.path == "/api/market":
+                changes = {}
+                for key, value in body.items():
+                    if key == "detail":
+                        continue
+                    if key != "price_stickiness":
+                        raise ValueError(f"unknown market setting: {key}")
+                    changes[key] = _number(value, key, 0, 0.99)
+                return self.sim.set_market(changes)
             if self.path == "/api/housing":
                 limits = {"min_multiple": (0, 1e6), "rent_yield": (0, 0.01), "eviction_days": (1, 3600)}
                 changes = {}
