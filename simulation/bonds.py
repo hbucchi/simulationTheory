@@ -57,11 +57,12 @@ class PublicDebt:
 
     @staticmethod
     def yearly_gdp(world):
-        """Nominal GDP over a year (annualised before a year has passed)."""
+        """Real GDP over a year (at year-ago prices, annualised before a year has passed): the
+        debt limit doesn't grow with inflation."""
         h = world.recorder.history
         if not h or not h[-1].get("accounts_steps"):
             return 0.0
-        return h[-1]["gdp_nominal"] * world.year_steps() / h[-1]["accounts_steps"]
+        return h[-1]["gdp_real"] * world.year_steps() / h[-1]["accounts_steps"]
 
     def room(self, world):
         """How much more the government may borrow under its debt limit."""

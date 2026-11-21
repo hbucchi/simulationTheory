@@ -27,21 +27,21 @@ def price_at(w, price):
 
 
 class OfferTests(unittest.TestCase):
-    def test_the_bank_lends_80_percent_if_the_installment_fits_35_percent_of_income(self):
+    def test_the_bank_lends_90_percent_if_the_installment_fits_35_percent_of_income(self):
         w, _ = world()
         buyer = w.create_agent(needs=CALM, money=0, inventory=EMPTY)
         rate = w.banking.mortgage_rate(w)
-        installment = annuity(80_000, rate, 25 * 360)
+        installment = annuity(90_000, rate, 30 * 360)
         buyer.income_avg = installment / 0.35 * 1.01
         bank, amount = w.banking.mortgage_offer(w, buyer, 100_000)
-        self.assertAlmostEqual(amount, 80_000)
+        self.assertAlmostEqual(amount, 90_000)
         buyer.income_avg = installment / 0.35 * 0.99          # a little too little income
         self.assertIsNone(w.banking.mortgage_offer(w, buyer, 100_000))
 
     def test_other_loans_count_against_the_income(self):
         w, _ = world()
         buyer = w.create_agent(needs=CALM, money=0, inventory=EMPTY)
-        buyer.income_avg = annuity(80_000, w.banking.mortgage_rate(w), 9000) / 0.35 * 1.01
+        buyer.income_avg = annuity(90_000, w.banking.mortgage_rate(w), 30 * 360) / 0.35 * 1.01
         w.banking.payments_of = lambda agent: 1.0              # already paying a loan
         self.assertIsNone(w.banking.mortgage_offer(w, buyer, 100_000))
 
@@ -58,7 +58,7 @@ class BuyingWithAMortgageTests(unittest.TestCase):
         w.housing.step(w)
         self.assertIs(buyer.home, house)
         self.assertAlmostEqual(seller.money, 100_000)
-        self.assertAlmostEqual(buyer.debt, 80_000)
+        self.assertAlmostEqual(buyer.debt, 90_000)
         self.assertIs(w.banking.mortgage_on(house).house, house)
 
     def test_selling_a_mortgaged_house_repays_the_bank_first(self):

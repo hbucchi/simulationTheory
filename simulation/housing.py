@@ -118,13 +118,16 @@ class HousingMarket:
     def price(self, world):
         """Price of a house today (the same for every house): what its rent is worth, a year's
         rent / rent_yield, never below min_price. The rent people can pay is rent_income_share of
-        the median income, x demand pressure (agents without a home of their own vs houses free
+        the typical worker's income (median of agents without assets), x demand pressure (agents without a home of their own vs houses free
         to move into, between 0.5 and 3). With a 6% yield and 30% of income, a house costs about
         five years of the median income."""
         if self._price and self._price[0] == world.tick:
             return self._price[1]
         prices = world.current_prices()
-        incomes = sorted(a.income_avg for a in world.agents if a.income_avg > 0)
+        # The typical worker's income: the median among agents who own no assets (all agents if
+        # nobody is without assets).
+        workers = [a for a in world.agents if not a.assets] or world.agents
+        incomes = sorted(a.income_avg for a in workers if a.income_avg > 0)
         wanting = sum(1 for a in world.agents if a.home is None or a.home.owner is not a)
         free = sum(1 for h in self.houses if h.occupant is None or h.for_sale)
         pressure = min(3.0, max(0.5, (0.25 * wanting + 1) / (free + 1)))

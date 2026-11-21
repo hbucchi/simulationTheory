@@ -85,6 +85,7 @@ class LaborMarket:
         # Wages earned and not yet paid (weekly or monthly pay): {(employer id, worker id): money}.
         self.payroll = {}
         self.paid_last = 0.0      # wages paid on the latest payday
+        self.reservation = 0.0    # the reservation wage (see reservation_wage)
         self.unpaid_last = 0.0    # ... and what employers couldn't pay then (arrears)
 
     @staticmethod
@@ -161,6 +162,14 @@ class LaborMarket:
             value = min(value, sum(s["income_sources"]["goods"] for s in h) / worked)
         return rules.labor_share * value
 
+    def reservation_wage(self, world, prices):
+        """What a unit of labour makes in autonomous production (the best of its goods at today's
+        prices): the least anyone works for. 0 without autonomous production."""
+        rules = world.rules
+        if not (rules.subsistence_enabled and rules.industries_enabled):
+            return 0.0
+        return max((rate * prices.get(g, 0.0) for g, rate in self.subsistence_options(rules)), default=0.0)
+
     def clear(self, world):
         """Run this step's labour market. Sets agent.labor_available and labour flows."""
         from .modules.invest import cash_needed  # local import: invest imports economy, not labor
@@ -234,13 +243,25 @@ class LaborMarket:
             self.multiplier += rules.price_adjust_speed * (target - self.multiplier)
         else:
             self.multiplier = 1.0
-        # A minimum wage (government policy) is a floor: nobody works for less.
-        self.wage = max(base * self.multiplier, world.government.min_wage)
+        if rules.wage_adjust_speed > 0 and self.wage > 0 and rules.price_mode != "fixed":
+            # Wages follow the labour market (excess demand): up when employers want more paid
+            # labour than is offered, down when workers outnumber jobs, by at most
+            # wage_adjust_speed a day. Not tied to output prices, so prices and wages can't chase
+            # each other upwards (the value of output only sets the first day's wage).
+            gap = (stats["wanted"] - stats["offered"]) / max(stats["offered"], stats["wanted"], 1e-9)
+            wage = self.wage * (1 + rules.wage_adjust_speed * max(-1.0, min(1.0, gap)))
+        else:
+            wage = base * self.multiplier
+        # Floors: the minimum wage (government policy) and the reservation wage (nobody works for
+        # less than its labour would make it on its own, in autonomous production).
+        self.reservation = self.reservation_wage(world, prices)
+        self.wage = max(wage, world.government.min_wage, self.reservation)
         stats["base_wage"], stats["pressure"] = base, pressure
+        stats["reservation_wage"] = self.reservation
 
         # Each worker's asking wage; the cheapest are hired first.
         for a in offers:
-            a.asking_wage = max(world.government.min_wage,
+            a.asking_wage = max(world.government.min_wage, self.reservation,
                                 self.wage * min(3.0, max(0.1, 1 + rules.bargaining_spread * (a.wellbeing - a.job_need))))
         offers.sort(key=lambda a: a.asking_wage)
         remaining = {a: a.offered for a in offers}

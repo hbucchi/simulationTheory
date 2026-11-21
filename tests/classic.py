@@ -30,4 +30,5 @@ CLASSIC = {
     "housing_enabled": False,
     "trade_radius": 0,
     "luck_enabled": False,
+    "wage_adjust_speed": 0,
 }

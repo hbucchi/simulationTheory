@@ -105,6 +105,11 @@ class Rules:
     # participation_floor + (1 - participation_floor) x need of its free capacity and asks
     # wage x (1 + bargaining_spread x (wellbeing - need)).
     labor_share: float = 0.6
+    # After the first day the wage moves with the labour market: by up to this share a day, up when
+    # employers want more paid labour than is offered, down when workers outnumber jobs; never
+    # below the reservation wage (what labour makes in autonomous production). 0 = the old rule
+    # (labor_share x value of output x the demand multiplier).
+    wage_adjust_speed: float = 0.05
     money_weight: float = 0.5
     comfort_steps: int = 50
     participation_floor: float = 0.2
@@ -322,9 +327,9 @@ class Rules:
     # mortgage_years, at its loan rate + mortgage_premium (per day), only if the installment plus the
     # borrower's other loan payments are at most mortgage_dti of its income; after
     # mortgage_default_days of missed payments the bank forecloses. Changeable in the Banks tab.
-    mortgage_years: float = 25
+    mortgage_years: float = 30
     mortgage_dti: float = 0.35
-    mortgage_ltv: float = 0.8
+    mortgage_ltv: float = 0.9
     mortgage_premium: float = 0.0
     mortgage_default_days: int = 90
     deposit_share: float = 0.5         # share of spare cash agents deposit each step
@@ -750,6 +755,7 @@ LIMITS = {
     "depreciation": ((GOODS, 0, 1, False), None, "map"),
     "labor_saving": ((GOODS, -1, 0.99, False), None, "map"),
     "labor_share": (0, 1, "float"),
+    "wage_adjust_speed": (0, 1, "float"),
     "money_weight": (0, 1, "float"),
     "comfort_steps": (0, 100000, "int"),
     "participation_floor": (0, 1, "float"),

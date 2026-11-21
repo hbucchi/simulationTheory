@@ -1051,7 +1051,7 @@ function renderGovernment() {
     ["Central bank loans", usd(g.llr_outstanding), `to banks · ${usd(g.llr_lent)} lent so far`],
     ...(g.debt ? [
       ["Public debt", usd(g.debt.debt), g.debt.gdp_year > 0
-        ? `${(g.debt.debt_to_gdp * 100).toFixed(1)}% of a year's GDP (limit ${Math.round(g.debt_limit * 100)}%)`
+        ? `${(g.debt.debt_to_gdp * 100).toFixed(1)}% of a year's real GDP (limit ${Math.round(g.debt_limit * 100)}%)`
         : `limit ${Math.round(g.debt_limit * 100)}% of GDP`],
       ["Bond rate", `${(g.debt.rate_year * 100).toFixed(2)}% a year`,
         `central bank rate + ${(perYear(g.bond_spread) * 100).toFixed(2)}% · ${g.debt.bonds} bonds`],

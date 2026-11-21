@@ -124,6 +124,8 @@ class Navigate(Module):
         agent.target_id = partner.id
         world.note_target(agent, partner)
         radius = world.rules.trade_radius
+        if activity in ("sourcing", "building") and radius > 0:
+            radius = math.inf               # firms buy inputs and materials from anywhere
         if (activity in REMOTE_TRADES and radius > 0 and agent.distance_to(partner) <= radius
                 and not world.in_cooldown(agent, partner)):
             # Within the trading radius: buy (or sell) without walking there, like a shop or an

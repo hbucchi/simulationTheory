@@ -485,7 +485,8 @@ the economy instead of piling up.
 **Government bonds** (`gov_bonds_enabled`, on by default). When taxes can't pay for its
 spending policies, the unemployment benefit or the interest on its debt, the government
 **borrows** by selling bonds, as long as its debt stays under `gov_debt_limit` (60%) × a year's
-GDP. Banks with spare vault cash buy first (a bond counts in a bank's equity and needs no
+**real** GDP (so inflation doesn't raise the limit). A policy paid "as needed" (budget 0, like the
+default safety net) spends only what taxes bring in and never borrows. Banks with spare vault cash buy first (a bond counts in a bank's equity and needs no
 capital under the Basel rule), then agents with money beyond their monthly budget. The **bond
 rate = the central bank's policy rate + `gov_bond_spread`** (1% a year), fixed for the bond's
 life: the central bank's rate sets what the government pays. Interest is paid daily. After
@@ -716,15 +717,21 @@ investing, building, estates). Companies start with **working capital** (`workin
 30): company cash for a month of their full wage bill, so owners can hire before their first
 sales come in.
 
-**Wages follow what firms sell.** The base wage is a share (`labor_share`, 60%) of what a unit
-of labour is worth, capped by actual **sales revenue per unit of labour worked** over the last
-30 days. Before, it was the theoretical value of the output, far above what firms could sell, so
-wages ran away from what employers could pay.
+**Wages follow the labour market.** On the first day the wage is a share (`labor_share`, 60%) of
+what a unit of labour produces. After that it moves by at most `wage_adjust_speed` (5%) a day:
+up when employers want more paid labour than is offered, down when workers outnumber jobs. It is
+not tied to output prices, so wages and prices can't chase each other upwards (a wage-price spiral
+drove 200–1,200% inflation before). It never falls below the minimum wage or the **reservation
+wage**: what a unit of labour makes in autonomous production (nobody works for less than it
+would make on its own). Autonomous production is far less productive than a job (0.5 water or
+0.35 food per unit of labour vs about 4 units in industry) and only uses labour nobody hired, so
+agents sell their labour first.
 
 ### Buying at a distance
 
 Buyers trade with sellers up to `trade_radius` (600 px of the 1024 px map) away without
-walking to them, like shops and deliveries; 0 = only when they touch.
+walking to them, like shops and deliveries; 0 = only when they touch. Firms buying inputs or
+building materials buy from anywhere on the map.
 
 ### Labour law: when wages are paid
 
@@ -745,14 +752,14 @@ workers must live a month on savings or credit.
   housing they make into a house and put it up for sale. The housing good no longer relieves
   shelter on its own.
 - **Price**: what the rent is worth: a year's rent ÷ `rent_yield` (6%), the rent being
-  `rent_income_share` (30%) of the median income × demand pressure (agents without a home of
+  `rent_income_share` (30%) of the typical worker's income (median of agents without assets) × demand pressure (agents without a home of
   their own vs houses free to move into). That makes a house about five years of the median
   income, as in real housing markets. Never below `house_min_multiple` (100) × the price of food.
 - **Rent** = price × `rent_yield`, paid daily to the landlord (to the treasury for public
   housing). A tenant who can't pay for `eviction_days` (30) days in a row is evicted.
 - **Buying a home**: an agent buys a vacant house for sale when the price fits on top of its
-  monthly budget, or with a **mortgage**: a bank lends up to `mortgage_ltv` (80%) of the price
-  over `mortgage_years` (25), at its loan rate + `mortgage_premium`, with a fixed installment, only
+  monthly budget, or with a **mortgage**: a bank lends up to `mortgage_ltv` (90%) of the price
+  over `mortgage_years` (30), at its loan rate + `mortgage_premium`, with a fixed installment, only
   if that installment plus its other loan payments are at most `mortgage_dti` (35%) of its
   income; the buyer pays the rest (the deposit) from money beyond its budget. After
   `mortgage_default_days` (90) unpaid the bank forecloses: its owner takes the house and pays the
