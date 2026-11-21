@@ -40,6 +40,8 @@ class Invest(Module):
         rules = world.rules
         if not rules.investing_enabled or agent.project:   # its money is going into a building project
             return
+        if economy.is_needy(agent, rules):    # its needs come first
+            return
         prices = world.current_prices()
         # Same cash rule as sellers use, so an agent never invests money it then has to sell back for.
         # Bank deposits count as its money (it takes them out to pay).

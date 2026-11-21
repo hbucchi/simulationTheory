@@ -352,9 +352,11 @@ class Rules:
 
     # Meetings
     contact_distance: float = 12       # px between centres to count as touching
-    depart_steps: int = 15             # steps two traders walk apart
-    cooldown_steps: int = 60           # steps a pair ignores each other after a deal
-    retry_steps: int = 10              # ... and after a meeting where nothing could be traded
+    # (Steps are days: walking apart for weeks after every deal, or ignoring the only water
+    # seller nearby for two months, let agents die of thirst next to plenty of water.)
+    depart_steps: int = 2              # days two traders walk apart
+    cooldown_steps: int = 7            # days a pair ignores each other after a deal
+    retry_steps: int = 2               # ... and after a meeting where nothing could be traded
 
     # ---- derived tables (layers, relief per unit, which goods relieve which need) ----
     # Cached; assigning any field clears the cache. Change dicts by assigning a new dict.

@@ -27,6 +27,9 @@ PERISHABLE_BUFFER = 0.5
 # never counts as less than MIN_SELL_THROUGH (so an industry can always restart).
 SELL_THROUGH_DAYS = 60
 MIN_SELL_THROUGH = 0.2
+# A seeking agent drops the seller it is walking to for a new one only if that one is under
+# this share of the distance away (see World._committed_seller).
+SWITCH_DISTANCE = 0.5
 
 # Games up to this many agents send every agent in full to the UI (bigger ones: only those asked for).
 FULL_DETAIL_AGENTS = 100
@@ -330,12 +333,14 @@ class World:
                       or economy.restock_shortfall(agent, r, self.rules) > 0
                       or economy.input_shortfall(agent, r, self.rules) > 0
                       or economy.project_shortfall(agent, r) > 0]
-            wanted.sort(key=lambda r: self.scarcity[r], reverse=True)
+            # Goods for its most pressing need first (water before herbs for a thirsty agent),
+            # then the ones getting scarcer.
+            wanted.sort(key=lambda r: (economy.need_urgency(agent, r, self.rules), self.scarcity[r]), reverse=True)
         else:
-            # Most pressing need first; any good that relieves it will do, so the nearest agent
+            # Most pressing need first (hunger and thirst count double); any good that relieves it will do, so the nearest agent
             # with spare of any of them is chosen (and the most effective good it has is named).
             rules = self.rules
-            for need in sorted(rules.consumer_needs, key=lambda n: getattr(agent, n), reverse=True):
+            for need in sorted(rules.consumer_needs, key=lambda n: economy.urgency(agent, n, rules), reverse=True):
                 goods = [g for g in rules.goods_for(need) if economy.demand(agent, g, rules) > 0]
                 if not goods:
                     continue
@@ -352,7 +357,7 @@ class World:
                     if d < best_d:
                         best, best_d = (o, have), d
                 if best:
-                    return best
+                    return self._committed_seller(agent, best)
             return None, None
         for resource in wanted:
             sellers = [o for o in self.spare_table.get(resource, {}) if o is not agent and o in self.alive
@@ -360,6 +365,27 @@ class World:
             if sellers:
                 return min(sellers, key=agent.distance_to), resource
         return None, None
+
+    def _committed_seller(self, agent, best):
+        """Keep walking to the seller it was already seeking while that seller still has spare
+        of a good for one of its pressing needs, unless ``best`` is under SWITCH_DISTANCE of the
+        way. Without this an agent whose hunger and thirst take turns at the top heads for a
+        food seller, then a water seller, then back, and never arrives anywhere."""
+        if agent.activity != "seeking" or agent.target_id is None:
+            return best
+        current = self.agent_by_id(agent.target_id)
+        if current is None or current is best[0] or current not in self.alive or self.in_cooldown(agent, current):
+            return best
+        rules = self.rules
+        for need in rules.consumer_needs:
+            if getattr(agent, need) <= rules.seek_threshold:
+                continue
+            for g in rules.goods_for(need):
+                if current in self.spare_table.get(g, {}) and economy.demand(agent, g, rules) > 0:
+                    if agent.distance_to(best[0]) < SWITCH_DISTANCE * agent.distance_to(current):
+                        return best
+                    return current, g
+        return best
 
     def update_scarcity(self):
         """Record average units per agent and how much it fell over the scarcity window."""

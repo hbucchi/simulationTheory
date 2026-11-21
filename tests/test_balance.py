@@ -101,5 +101,54 @@ class RiskAppetiteTests(unittest.TestCase):
         self.assertGreater(results[1.0]["shares"], results[0.0]["shares"])
 
 
+
+class SurvivalFirstTests(unittest.TestCase):
+    """Steps are days: agents don't spend weeks walking away from deals, and they drink before
+    they go after games, so nobody dies of thirst next to plenty of water."""
+
+    def world(self, **rules):
+        return World(seed=1, rules=Rules.from_dict({"assets": NO_ASSETS, "starting_banks": 0, **rules}))
+
+    def test_meeting_timings_are_in_days(self):
+        r = Rules()
+        self.assertLessEqual(r.depart_steps, 3)
+        self.assertLessEqual(r.cooldown_steps, 7)
+
+    def test_thirst_beats_boredom(self):
+        from simulation import economy
+        w = self.world()
+        a = w.create_agent(needs={**CALM, "thirst": 0.6, "boredom": 1.0}, money=0)
+        self.assertGreater(economy.urgency(a, "thirst", w.rules), economy.urgency(a, "boredom", w.rules))
+        w2 = self.world(death_enabled=False)
+        b = w2.create_agent(needs={**CALM, "thirst": 0.6, "boredom": 1.0}, money=0)
+        self.assertLess(economy.urgency(b, "thirst", w2.rules), economy.urgency(b, "boredom", w2.rules))
+
+    def test_a_thirsty_agent_stops_walking_away_from_its_last_deal(self):
+        w = self.world()
+        a = w.create_agent(needs={**CALM, "thirst": 0.7}, money=0, x=100, y=100, inventory=NO_ASSETS)
+        a.depart(0.0, 10)
+        w.step()
+        self.assertNotEqual(a.activity, "leaving")
+        self.assertEqual(a.depart_steps, 0)
+
+    def test_a_seller_stops_for_a_buyer_about_to_reach_it(self):
+        w = self.world()
+        seller = w.create_agent(needs={**CALM, "hunger": 0.6}, money=0, x=100, y=100, inventory={"water": 50})
+        buyer = w.create_agent(needs={**CALM, "thirst": 0.7}, money=1000, x=140, y=100)
+        buyer.activity, buyer.target_id = "seeking", seller.id
+        from simulation.modules.navigate import Navigate
+        Navigate().on_step(seller, w)
+        self.assertEqual((seller.activity, seller.target_id), ("meeting", buyer.id))
+
+    def test_no_investing_while_in_need(self):
+        from simulation.modules.invest import Invest
+        w = self.world(investing_enabled=True, min_investment=10)
+        owner = w.create_agent(needs=CALM, money=0, assets={"water": 1})
+        a = w.create_agent(needs={**CALM, "thirst": 0.8}, money=1e6)
+        owner.money = -1e6           # desperate to sell
+        Invest().on_step(a, w)
+        self.assertNotIn("water", a.assets)
+
+
 if __name__ == "__main__":
     unittest.main()

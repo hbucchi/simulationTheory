@@ -162,10 +162,36 @@ def is_needy(agent, rules=DEFAULT_RULES):
     return any(getattr(agent, need) > rules.seek_threshold for need in rules.consumer_needs)
 
 
+# Needs that kill at 1.00 (with death on). They count FATAL_WEIGHT times as urgent as the
+# others, so a thirsty agent drinks before it goes looking for games however bored it is.
+FATAL_NEEDS = ("hunger", "thirst")
+FATAL_WEIGHT = 2.0
+# A fatal need above this is close to killing: the agent drops everything else to meet it.
+DESPERATE_LEVEL = 0.85
+
+
+def urgency(agent, need, rules=DEFAULT_RULES):
+    """How urgent ``need`` is for ``agent``: its level, x FATAL_WEIGHT for needs that kill."""
+    level = getattr(agent, need)
+    return level * FATAL_WEIGHT if rules.death_enabled and need in FATAL_NEEDS else level
+
+
+def is_desperate(agent, rules=DEFAULT_RULES):
+    """True when a need that kills is above DESPERATE_LEVEL."""
+    return rules.death_enabled and any(getattr(agent, n) > DESPERATE_LEVEL for n in FATAL_NEEDS
+                                       if n in rules.consumer_needs)
+
+
 def need_level(agent, resource, rules=DEFAULT_RULES):
     """How strong the need behind ``resource`` is (0 for goods that relieve none, and labour)."""
     need = rules.need_of(resource)
     return getattr(agent, need) if need else 0.0
+
+
+def need_urgency(agent, resource, rules=DEFAULT_RULES):
+    """urgency() of the need behind ``resource`` (0 for goods that relieve none, and labour)."""
+    need = rules.need_of(resource)
+    return urgency(agent, need, rules) if need else 0.0
 
 
 def demand(agent, resource, rules=DEFAULT_RULES):
@@ -531,16 +557,17 @@ def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, mar
     bought, paid, stocked, unit_prices = {}, {}, {}, {}
     budget = buyer.money * rules.stockpile_budget
     spent_on_reserve = 0.0
-    # Most pressing need first; for each need the good that does the buyer most good per dollar
+    # Most pressing need first (hunger and thirst count double, see urgency); for each need the
+    # good that does the buyer most good per dollar
     # first (relief plus side effects, see benefit). Goods relieving no need (inputs) come last.
     def order(r):
         helped = [n for n, change in rules.effects_of(r).items() if change > 0]
         if not helped:
             return (0.0, math.inf)
-        target = max(helped, key=lambda n: getattr(buyer, n))
+        target = max(helped, key=lambda n: urgency(buyer, n, rules))
         good = benefit(buyer, r, rules, target)
         value = -good / prices[r] if prices.get(r, 0) > 0 else -good * 1e9
-        return (-getattr(buyer, target), value)
+        return (-urgency(buyer, target, rules), value)
     # Only goods it wants can have a goal above its stock (see wanted_goods). Paying with a good
     # (barter) can make it wanted mid-deal, so goods it holds stay in the running.
     wanted = wanted_goods(buyer, rules, scarcity)

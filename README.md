@@ -114,9 +114,16 @@ Every step each agent runs its modules in this order:
    - *seeking*: a need is still above 0.5 because stock ran out. Every step,
      find the closest agent that has spare of what it needs (most urgent need
      first, skipping agents it has just met) and walk straight at that agent's
-     current position (re-aiming as everyone moves).
+     current position (re-aiming as everyone moves). **Survival first**: hunger and
+     thirst (the needs that kill) count double, so a thirsty agent drinks before it
+     goes looking for games however bored it is. It sticks with the seller it chose
+     while that seller still has some, unless another is under half the distance away
+     (otherwise an agent whose hunger and thirst take turns at the top walks to a food
+     seller, then a water seller, then back, and arrives nowhere).
    - *searching*: same, but nobody has any to sell: keep wandering.
-   - *meeting*: another agent is seeking this one, walk toward that seeker.
+   - *meeting*: another agent is seeking this one, walk toward that seeker. A buyer
+     within 60 px beats the seller's own errands (unless the seller's own hunger or
+     thirst is above 0.85): a seller walking off at the buyer's speed is never caught.
    - *wandering*: random walk.
 
    Because the sought agent walks back toward its seeker, the gap shrinks by
@@ -131,11 +138,14 @@ the seller needs (barter, with the price difference settled in money),
 otherwise money, otherwise any other spare resource. If a need can't be met
 the log says why (e.g. *"No trade: Agent 4 still needs 7 water: Agent 2 has
 none"*). After a trade both walk **away from each other**, turned by a random
-angle in ±90° (a 180° window that never points back), for 15 steps, unless
+angle in ±90° (a 180° window that never points back), for 2 days, unless
 someone is coming to buy from them (then they go and meet that buyer) or they
-are still in need themselves. The pair then ignores each other for 60 steps
-after a deal, or 10 steps when nothing could be traded, so a needy agent moves
-on to the next-closest agent instead of retrying the same one. Sellers never
+are (or become) in need themselves. The pair then ignores each other for a week
+after a deal, or 2 days when nothing could be traded, so a needy agent moves
+on to the next-closest agent instead of retrying the same one. (These used to be
+15, 60 and 10 *steps*; once a step became a day, agents spent half their time walking
+away from deals and could not go back to the only water seller nearby for two months,
+and about 40% of a 1000-agent game died of thirst next to plenty of water.) Sellers never
 sell below their stock floor, even to an agent in need. Agents that bump into
 each other without needing anything just carry on.
 
@@ -386,10 +396,13 @@ at once (say livestock and crude oil) makes a tighter economy that can lose agen
   `capital_cash_ratio` (0.2) × the value of all its assets in cash, so it can pay
   the labour those assets need (it spends at most (cash − r × assets) / (1 + r)).
   Then it buys shares
-  of the best-returning asset of a good it **lacks**, from owners that:
+  of the best-returning asset of **any industry** (every option is weighed, not only
+  goods it uses), from owners that:
   - are **short of cash**: just enough shares to cover the gap, or
   - hold **more than the stock cap** of that good: up to a quarter of those
     assets per deal.
+
+Nobody invests while one of its needs is above 0.5: it buys what it needs first.
 
 **Funded labour demand.** Employers only *want* the labour they can pay for
 (their spare cash ÷ the last wage), not everything their assets could employ.
@@ -599,6 +612,25 @@ The living cost is the cheapest way to keep each need from growing (food, water,
 energy, ...), net of what the agent's own industries make. Investing and building only use
 money (cash + deposits) **above** the budget. Agent cards show the budget and what's left
 to invest (or how short it is).
+
+### Balance rules (from the 1000-agent review)
+
+- **Minimum wage** (Government tab, `gov_min_wage`, 0 = none): no wage, and no worker's
+  asking wage, goes below it. With more people offering work than jobs, wages would
+  otherwise fall to almost nothing.
+- **Waste counts.** Each industry's *sell-through* is the share of its output over the
+  last 60 days that was not thrown away expired (never below 20%). Owners staff their
+  assets only for that share, so an industry whose goods rot runs under capacity for a
+  while, and its assets are worth that share of their full value. Perishable output is
+  held for at most half its shelf life.
+- **Starting stocks are at most 6 months** (`max_stock_months`) of what an agent uses of
+  each good, so starting piles run out and production has to take over. A good that
+  gets scarce gets dearer, its assets earn more and investors move in.
+- **Full-cost price floor**: no good sells below (inputs + labour ÷ productivity) ×
+  (1 + `cost_floor_margin`, 10%), so capital goods and housing are never valued at 0.
+- **Risk appetite** (personality, 0–1, editable per agent): entrepreneurs (above 0.3)
+  build projects up to 5× bigger and borrow from a bank for them when the asset's yield
+  beats the loan rate. Whether the bank lends is its own credit rule (collateral).
 
 ### Stock band
 

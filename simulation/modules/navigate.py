@@ -3,6 +3,9 @@ import math
 from .. import economy
 from .base import Module
 
+# A seller stops whatever it is doing to meet a buyer this close (px) that is walking to it.
+NEAR_SEEKER = 60
+
 
 class Navigate(Module):
     """Decides where the agent walks each step. Priority:
@@ -39,11 +42,22 @@ class Navigate(Module):
         # Someone coming to buy from it beats walking away from the last deal: a busy
         # seller that keeps leaving can't be caught by slower buyers, who then starve.
         seekers = world.seekers_of(agent)
+        # A buyer about to reach it beats its own errands too (unless it is close to dying
+        # itself): a seller walking off at the buyer's own speed is never caught.
+        near = [s for s in seekers if agent.distance_to(s) <= NEAR_SEEKER]
+        if near and not economy.is_desperate(agent, world.rules):
+            agent.depart_steps = 0
+            self._go_to(agent, "meeting", min(near, key=agent.distance_to), world)
+            return
         if seekers and agent.depart_steps > 0:
             agent.depart_steps = 0
             self._go_to(agent, "meeting", min(seekers, key=agent.distance_to), world)
             return
 
+        # A need crossing the threshold ends the walk away from the last deal: an agent that
+        # traded while fine and then got thirsty must go and drink, not keep walking off.
+        if agent.depart_steps > 0 and economy.is_needy(agent, world.rules):
+            agent.depart_steps = 0
         if agent.depart_steps > 0:
             agent.activity = "leaving"
             agent.target_id = None
