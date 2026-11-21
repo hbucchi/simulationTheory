@@ -15,9 +15,17 @@ class NeedsDecay(Module):
 
     def on_step(self, agent, world):
         rules = world.rules
+        housing = rules.housing_enabled
         for need, rate in self.rates.items():
             if need == "sleep" and agent.sleeping:
                 continue
+            if need == "shelter" and housing:
+                # A house meets shelter every day; the homeless' shelter grows fast (housing.py).
+                if agent.home is not None:
+                    agent.shelter = max(0.0, agent.shelter - rules.house_relief)
+                    continue
+                if rate > 0:
+                    rate = max(rate, rules.homeless_shelter_rate)
             setattr(agent, need, getattr(agent, need) + rate * penalties.growth_factor(agent, need, rules))
         # Unmet needs (penalties.py): slower walking, and days spent too sick to work.
         agent.speed_factor = penalties.speed_factor(agent, rules)

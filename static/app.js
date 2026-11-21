@@ -245,6 +245,8 @@ function render(next) {
     renderProducts();
   } else if (activeTab === "banks") {
     renderBanking();
+  } else if (activeTab === "housing") {
+    renderHousing();
   } else if (activeTab === "government") {
     renderGovernment();
   } else {
@@ -630,6 +632,9 @@ function renderAgents() {
         `(living ${usd(a.budget.living)} + loan payments ${usd(a.budget.loans)} per day). ` +
         `Income ${usd(a.income)}/day.`],
         [a.budget.spare >= 0 ? "left to invest" : "short of budget", usd(Math.abs(a.budget.spare))]] : []),
+      ...(state.housing ? [["home", !a.home ? "homeless" : a.home.owns ? `its own house (#${a.home.house})`
+        : `rents house #${a.home.house} from ${a.home.landlord}`]] : []),
+      ...(a.houses ? [["houses", `${a.houses} owned` + (a.houses_let ? `, ${a.houses_let} let` : "")]] : []),
       ["movement", a.speed < a.movement ? `${a.speed} px (${a.movement} normally)` : `${a.speed} px`],
       ...Object.entries(a.subsistence || {}).map(([g, n]) => ["makes on its own", `${n.toFixed(2)} ${label(g).toLowerCase()}/day`,
         "No assets: the labour nobody hired goes into a little subsistence production (fetching water, a garden, gathering)"]),
@@ -739,9 +744,76 @@ function showTab(name) {
   if (typeof showView === "function") showView(name === "report" ? "report" : "simulation");
   if (name === "government") fillGovernment(true);
   if (name === "banks") fillBanking(true);
+  if (name === "housing") fillHousing();
   render(state);
 }
 for (const t of ui.tabs) t.onclick = () => showTab(t.dataset.tab);
+
+// ---------- Housing tab ----------
+
+function statCards(box, stats) {
+  box.innerHTML = "";
+  for (const [label, value, note] of stats) {
+    const card = document.createElement("div");
+    card.className = "stat";
+    card.append(Object.assign(document.createElement("div"), { className: "stat-label", textContent: label }),
+                Object.assign(document.createElement("div"), { className: "stat-value", textContent: value }),
+                Object.assign(document.createElement("div"), { className: "stat-note", textContent: note }));
+    box.append(card);
+  }
+}
+
+function renderHousing() {
+  const h = state.housing;
+  $("housing-off").hidden = !!h;
+  for (const id of ["housing-stats", "housing-landlords"]) $(id).hidden = !h;
+  if (!h) return;
+  const people = state.agents.length || 1;
+  statCards($("housing-stats"), [
+    ["Houses", `${h.houses}`, `${(h.houses / people).toFixed(2)} per agent · ${h.built_month} built in the last 30 days`],
+    ["Homeless", `${h.homeless}`, `${Math.round(h.homeless / people * 100)}% of agents · ${h.evictions} evictions so far`],
+    ["Live in their own house", `${h.owner_occupied}`, `${Math.round(h.owner_occupied / people * 100)}% of agents`],
+    ["Renting", `${h.rented}`, `${h.public} public housing (rent goes to the treasury)`],
+    ["Empty", `${h.vacant}`, `${h.for_sale} for sale`],
+    ["House price", usd(h.price), `minimum ${usd(h.min_price)} (${h.min_multiple}× the average good)`],
+    ["Rent", `${usd(h.rent * DAYS_PER_MONTH())} /month`, `${(perYear(h.rent_yield) * 100).toFixed(1)}% of the price a year · ${usd(h.rent_paid_day)} paid yesterday`],
+    ["Sales", `${h.sold_month} in 30 days`, `${h.sales} houses sold so far`],
+  ]);
+  const box = $("housing-landlords");
+  box.innerHTML = "";
+  if (!h.landlords.length) box.append(Object.assign(document.createElement("p"), { className: "empty-list", textContent: "Nobody rents out a house yet." }));
+  for (const [name, n] of h.landlords) {
+    const d = document.createElement("div");
+    d.append(name, Object.assign(document.createElement("b"), { textContent: `${n} let` }));
+    box.append(d);
+  }
+}
+
+function fillHousing() {
+  const h = state.housing;
+  if (!h) return;
+  $("house-min").value = h.min_multiple;
+  $("house-yield").value = +(perYear(h.rent_yield) * 100).toFixed(2);
+  $("house-evict").value = h.eviction_days;
+}
+
+$("housing-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const status = $("housing-status");
+  try {
+    render(await api("/api/housing", {
+      min_multiple: Number($("house-min").value),
+      rent_yield: perDay(Number($("house-yield").value) / 100),
+      eviction_days: Number($("house-evict").value),
+    }));
+    status.textContent = "Applied from tomorrow.";
+    status.className = "status";
+  } catch (err) {
+    status.textContent = err.message;
+    status.className = "status error";
+  }
+  status.hidden = false;
+};
 
 // ---------- Government tab ----------
 

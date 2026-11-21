@@ -142,7 +142,7 @@ class InvestTests(unittest.TestCase):
         world = World(seed=2, rules=Rules.from_dict({"agents": 15, "building_enabled": False,
                                                      "depreciation": {g: 0 for g in GOODS}}))
         world.spawn_random_agents()
-        money = sum(a.money for a in world.agents)
+        money = world.base_money()          # (cash + companies' working capital)
         assets = {r: sum(a.assets.get(r, 0) for a in world.agents) for r in economy.RESOURCES}
         for _ in range(300):
             world.step()

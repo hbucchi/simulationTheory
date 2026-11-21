@@ -74,6 +74,8 @@ class Agent:
         self.speed_factor = 1.0      # < 1 while very thirsty (penalties.py; set by NeedsDecay)
         self.critical_health_days = 0   # days in a row at health 1.00 (dies at penalties.HEALTH_DEATH_DAYS)
         self.subsistence = {}        # {good: fraction of a unit made on its own so far}
+        self.home = None             # the House it lives in (housing.py), or None: homeless
+        self.houses = []             # Houses it owns
         self.subsistence_made = {}   # {good: units per day made on its own (latest day)}
         self.depression_factor = 0.5  # set from the game rules by the World
         self.assets = {}  # good -> shares of productive assets owned
@@ -189,6 +191,11 @@ class Agent:
             "depressed": self.depressed,
             # What unmet needs are costing it now, and what it made on its own (no assets).
             "penalties": penalties.describe(self, rules),
+            "home": None if self.home is None else {
+                "house": self.home.id, "owns": self.home.owner is self,
+                "landlord": "the government" if self.home.owner is None else self.home.owner.name},
+            "houses": len(self.houses),
+            "houses_let": sum(1 for h in self.houses if h.occupant is not None and h.occupant is not self),
             "subsistence": {g: round(v, 3) for g, v in self.subsistence_made.items()},
             "inventory": self._held(),
             "output_capacity": {g: round(v, 4) for g, v in self.output_capacity.items()},

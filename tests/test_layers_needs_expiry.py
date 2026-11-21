@@ -59,7 +59,8 @@ class LayerLimitTests(unittest.TestCase):
 
 class GameSizingTests(unittest.TestCase):
     def test_default_industries_are_sized_for_the_game(self):
-        full, one = Rules.from_dict({}), Rules.from_dict({"industry_layers": 1})
+        # (The catalog is sized for shelter met by the housing good; the housing market meets it with houses.)
+        full, one = Rules.from_dict({"housing_enabled": False}), Rules.from_dict({"industry_layers": 1})
         catalog = {e["id"]: e["shares"] for e in CATALOG}
         self.assertEqual({g: full.assets[g]["average"] for g in GOODS}, catalog)    # full game = the catalog
         # Without food, meat or meals, hunger falls on raw grain and livestock: their farms alone

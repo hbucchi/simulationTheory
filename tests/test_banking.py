@@ -135,7 +135,7 @@ class DepositAndLoanTests(unittest.TestCase):
     def test_base_money_is_conserved(self):
         w = World(seed=5, rules=Rules.from_dict({"agents": 20}))
         w.spawn_random_agents()
-        start = sum(a.money for a in w.agents)
+        start = w.base_money()          # (cash + companies' working capital)
         for _ in range(200):
             w.step()
         if len(w.agents) == 20:

@@ -46,7 +46,7 @@ class LabourPurchaseTests(unittest.TestCase):
         world = World(seed=2, rules=Rules.from_dict({"agents": 10, "gov_labor_purchase": 1,
                                                      "assets": NO_ASSETS}))
         world.spawn_random_agents()
-        start = sum(a.money for a in world.agents)
+        start = world.base_money()          # (cash + companies' working capital)
         for _ in range(100):
             world.step()
         self.assertGreater(world.government.money_created, 0)

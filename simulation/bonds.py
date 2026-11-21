@@ -9,8 +9,8 @@ unemployment benefit), it sells bonds for the shortfall, as long as its debt sta
   with money (bank deposits included) above their monthly budget, richest first;
 - rate: the central bank's policy rate + ``bond_spread``, fixed for the bond's life, so the
   central bank's rate sets what the government pays to borrow;
-- interest is paid every day from the treasury (new money if the treasury is empty: the central
-  bank stands behind its government);
+- interest is paid every day from the treasury, borrowing it if taxes don't cover it (new money
+  only if nobody will lend: the central bank stands behind its government);
 - after ``bond_days`` a bond is repaid from the treasury, or rolled over (the holder gets a new
   bond at today's rate) when the treasury can't repay it;
 - with a balanced budget, taxes left after spending repay debt early (soonest maturity first)
@@ -131,14 +131,24 @@ class PublicDebt:
             spare = bank.reserves - banking.liquidity * bank.deposit_total - banking.required(bank)
             if spare > 0:
                 out.append((bank, spare))
-        prices = world.current_prices()
-        people = []
-        for a in world.agents:
-            spare = economy.money_of(a) - budget_needed(a, prices, world)
-            if spare > world.rules.min_investment:
-                people.append((a, spare))
-        people.sort(key=lambda t: t[1], reverse=True)
-        return out + people
+        # Savers with money beyond their budget, richest first (worked out once a day; what they
+        # lend today is taken off below).
+        cache = world._step_cache
+        people = cache.get("bond_savers") if cache else None
+        if people is None:
+            prices = world.current_prices()
+            floor = world.rules.min_investment
+            people = []
+            for a in world.agents:
+                money = economy.money_of(a)
+                if money > floor:
+                    spare = money - budget_needed(a, prices, world)
+                    if spare > floor:
+                        people.append([a, spare])
+            people.sort(key=lambda t: t[1], reverse=True)
+            if cache is not None:
+                cache["bond_savers"] = people
+        return out + [(a, min(spare, economy.money_of(a))) for a, spare in people if a in world.alive]
 
     # ---------- every day ----------
 
@@ -167,7 +177,8 @@ class PublicDebt:
                 self._pay_holder(world, b.holder, coupon)
                 interest += coupon
         if interest > 0:
-            gov.spend("interest", interest)        # new money if the treasury is empty
+            gov.borrow_for(world, interest)        # short of taxes: borrow it (new money only if nobody lends)
+            gov.spend("interest", interest)
             self.interest_paid += interest
             self.step_interest = interest
         for b in [b for b in self.bonds if b.due <= world.tick]:

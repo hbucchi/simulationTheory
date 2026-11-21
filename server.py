@@ -152,6 +152,16 @@ class Simulation:
                 raise ValueError('action must be "add", "update" or "remove"')
             return world.to_dict(self.detail)
 
+    def set_housing(self, changes):
+        """Change the housing market's rules while the game runs."""
+        with self.lock:
+            h = self.world.housing
+            for key, value in changes.items():
+                setattr(h, key, int(value) if key == "eviction_days" else value)
+            self.world.log(f"Housing rules: minimum price {h.min_multiple:g}x the average good, "
+                           f"evictions after {h.eviction_days} days")
+            return self.world.to_dict(self.detail)
+
     def set_banking(self, changes):
         """Switch banking on/off or change its rates while the game runs."""
         with self.lock:
@@ -205,7 +215,7 @@ def parse_policy(body):
             continue
         if key not in POLICY_LIMITS:
             raise ValueError(f"unknown government setting: {key}")
-        if isinstance(POLICY_LIMITS[key][0], str):
+        if POLICY_LIMITS[key] is not bool and isinstance(POLICY_LIMITS[key][0], str):   # a choice
             if value not in POLICY_LIMITS[key]:
                 raise ValueError(f"{key} must be one of {', '.join(POLICY_LIMITS[key])}")
             changes[key] = value
@@ -347,6 +357,16 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.sim.set_banking(changes)
             if self.path == "/api/government":
                 return self.sim.set_policy(parse_policy(body))
+            if self.path == "/api/housing":
+                limits = {"min_multiple": (0, 1e6), "rent_yield": (0, 0.01), "eviction_days": (1, 3600)}
+                changes = {}
+                for key, value in body.items():
+                    if key == "detail":
+                        continue
+                    if key not in limits:
+                        raise ValueError(f"unknown housing setting: {key}")
+                    changes[key] = _number(value, key, *limits[key], whole=key == "eviction_days")
+                return self.sim.set_housing(changes)
             if self.path == "/api/policies":
                 return self.sim.change_policies(body)
             match = AGENT_PATH.fullmatch(self.path)

@@ -81,7 +81,7 @@ class InterestAndRepaymentTests(unittest.TestCase):
         w.government.treasury = 0
         w.tick += 10
         w.government.debt.step(w)                              # nothing to repay with: rolled over
-        self.assertAlmostEqual(w.government.debt.total, 1000)
+        self.assertAlmostEqual(w.government.debt.total, 1000, delta=1)   # (+ the day's interest, borrowed)
         self.assertEqual(w.government.debt.bonds[0].due, w.tick + 10)
         w.government.treasury = 5000
         w.tick += 10

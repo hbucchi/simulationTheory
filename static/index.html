@@ -27,7 +27,8 @@
         <button role="tab" data-tab="dashboard" class="active"><span class="nav-ico" aria-hidden="true">◧</span><span>Dashboard</span></button>
         <button role="tab" data-tab="overview"><span class="nav-ico" aria-hidden="true">◎</span><span>Map &amp; people</span></button>
         <button role="tab" data-tab="products"><span class="nav-ico" aria-hidden="true">▤</span><span>Products</span></button>
-        <button role="tab" data-tab="banks"><span class="nav-ico" aria-hidden="true">⌂</span><span>Banks</span></button>
+        <button role="tab" data-tab="housing"><span class="nav-ico" aria-hidden="true">⌂</span><span>Housing</span></button>
+        <button role="tab" data-tab="banks"><span class="nav-ico" aria-hidden="true">¤</span><span>Banks</span></button>
         <button role="tab" data-tab="government"><span class="nav-ico" aria-hidden="true">⚖</span><span>Government</span></button>
         <button role="tab" data-tab="report"><span class="nav-ico" aria-hidden="true">▥</span><span>Reports</span></button>
         <button role="tab" data-tab="manage"><span class="nav-ico" aria-hidden="true">✎</span><span>Edit agents</span></button>
@@ -201,6 +202,32 @@
         </form>
         </details>
         <div id="bank-list" class="bank-list"></div>
+      </section>
+
+      <section id="tab-housing" class="page" role="tabpanel" hidden>
+        <p class="hint">Houses are whole assets: each houses one agent. Owners live in one and may rent out the rest;
+          homebuilders add new houses; agents without a house are homeless and their health suffers.</p>
+        <p id="housing-off" class="empty-list" hidden>The housing market is off in this game (New game &amp; rules → modules).</p>
+        <div id="housing-stats" class="stat-grid wide-stats"></div>
+        <details class="card fold settings">
+          <summary>Housing rules: minimum price, rent, evictions</summary>
+          <form id="housing-form" class="panel" novalidate>
+            <div class="bank-fields gov-fields">
+              <label>Minimum house price <span><input id="house-min" type="number" min="0" step="5"> × the average price of goods</span></label>
+              <label>Rent <span><input id="house-yield" type="number" min="0" step="0.5"> % of the house price a year</span></label>
+              <label>Evict after <span><input id="house-evict" type="number" min="1" step="1"> days of unpaid rent</span></label>
+            </div>
+            <div class="form-actions">
+              <span class="spacer"></span>
+              <button type="submit" class="primary">Apply</button>
+            </div>
+            <p id="housing-status" class="status" hidden></p>
+          </form>
+        </details>
+        <div class="card policies-card">
+          <div class="card-title">Biggest landlords</div>
+          <div id="housing-landlords" class="policy-budget"></div>
+        </div>
       </section>
 
       <section id="tab-government" class="page" role="tabpanel" hidden>

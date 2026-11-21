@@ -23,7 +23,7 @@ Definitions
   share whose need for a job is above 0.5.
 """
 
-INCOME_SOURCES = ("wages", "goods", "assets", "government", "benefits", "transfers", "banking")
+INCOME_SOURCES = ("wages", "goods", "assets", "government", "benefits", "transfers", "banking", "rent")
 SMOOTHING = 0.05   # weight of the latest step in agents' smoothed income / consumption
 
 from collections import deque

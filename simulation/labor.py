@@ -31,6 +31,10 @@ Market wage
   prices the wage is fixed_prices[labor].
 """
 import math
+from itertools import islice
+
+# Days of sales revenue the base wage looks back over (see base_wage).
+REVENUE_DAYS = 30
 
 
 from . import economy, penalties
@@ -141,6 +145,13 @@ class LaborMarket:
             weights = {g: 1 for g in world.rules.active_goods}
         value = sum(w * world.productivity_now[g] * world.value_added(g, prices)
                     for g, w in weights.items()) / sum(weights.values())
+        # Firms can only pay out of what they actually sell: once there is a month of history, a
+        # unit of labour is worth at most the sales revenue per unit of labour worked.
+        hist = world.recorder.history
+        h = list(islice(hist, max(0, len(hist) - REVENUE_DAYS), None))
+        worked = sum(s["labor_used"] for s in h)
+        if len(h) >= 3 and worked > 0:
+            value = min(value, sum(s["income_sources"]["goods"] for s in h) / worked)
         return rules.labor_share * value
 
     def clear(self, world):
@@ -192,9 +203,11 @@ class LaborMarket:
         # What employers actually want to hire is what they can pay for (at last step's wage),
         # not everything their assets could employ: unfunded jobs don't push wages up.
         ref_wage = self.wage if self.wage > 0 else base
+        # (Company cash pays wages too; wages already owed don't.)
         stats["wanted"] = sum(
             min(e.labor_need - e.labor_available,
-                max(0.0, economy.money_of(e) - cash_needed(e, prices, rules)) / ref_wage if ref_wage > 0 else 0.0)
+                max(0.0, economy.money_of(e) + e.company_cash - cash_needed(e, prices, rules) - owed.get(e.id, 0.0))
+                / ref_wage if ref_wage > 0 else 0.0)
             for e in employers)
         stats["jobs_funded"] = stats["own_use"] + stats["wanted"]
 

@@ -367,12 +367,29 @@ class Rules:
     # food, then sleep, shelter, health, energy and boredom): urgency = level x priority.
     need_priority: dict = field(default_factory=lambda: {"thirst": 3.0, "hunger": 2.5, "sleep": 2.0, "shelter": 1.5,
                                                          "health": 1.3, "energy": 1.2, "boredom": 1.0})
+    # Share of agents that start owning assets (industry shares, houses); the rest own nothing but
+    # their labour (and their starting money and goods). 1 = everyone gets a draw. Only the start:
+    # ownership then moves with the market.
+    asset_owner_share: float = 0.1
+    # Starting companies hold working capital: company cash for this many days of their full wage
+    # bill at the starting wage, so owners can hire before their first sales come in. 0 = none.
+    working_capital_days: int = 30
+    # Housing market (housing.py): houses are whole assets; each houses one agent (its shelter
+    # need is met every day); the homeless' shelter grows at homeless_shelter_rate. Homebuilders
+    # (the housing industry) turn every house_units units of housing into a new house. A house
+    # sells for at least house_min_multiple x the average price of goods; rent is its price x
+    # rent_yield (per day; 6% a year). A tenant who can't pay for eviction_days is evicted.
+    housing_enabled: bool = True
+    starting_houses: float = 0.95          # houses per agent at the start
+    house_units: int = 20
+    house_min_multiple: float = 50.0
+    rent_yield: float = (1.06 ** (1 / 360)) - 1
+    eviction_days: int = 30
+    homeless_shelter_rate: float = 0.01
+    house_relief: float = 0.02             # shelter relieved per day by living in a house
     # Subsistence: an agent with no assets can use the labour nobody hired to make a little of a
     # basic good on its own (fetch water, a garden, gather wood or herbs, collect stone), at
     # these units per unit of labour (an industry worker makes about 4). See labor.py.
-    # Share of agents that start owning assets (industry shares, houses); the rest own nothing but
-    # their labour (and their starting money and goods). 1 = everyone gets a draw.
-    asset_owner_share: float = 0.1
     subsistence_enabled: bool = True
     subsistence_rates: dict = field(default_factory=lambda: {"water": 0.4, "grain": 0.4, "wood": 0.4, "herbs": 0.4,
                                                              "stone": 0.2})
@@ -413,7 +430,10 @@ class Rules:
             effect, need_of, goods_for = {}, {}, {}
             for g in active:
                 signed = {}
-                for need, fit in self.effects.get(g, {}).items():
+                # With the housing market on, houses (housing.py) meet shelter: the housing good is
+                # only what homebuilders make houses from, not something people consume.
+                effects = {} if (g == "housing" and self.housing_enabled) else self.effects.get(g, {})
+                for need, fit in effects.items():
                     if fit > 0:
                         signed[need] = self.relief_per_unit * fit * (1 + self.layer_bonus * (layers[g] - 1))
                         goods_for.setdefault(need, []).append(g)
@@ -421,7 +441,7 @@ class Rules:
                         signed[need] = self.relief_per_unit * fit
                 if signed:
                     effect[g] = signed
-                main = main_need(self.effects.get(g, {}))
+                main = main_need(effects)
                 if main:
                     need_of[g] = main
             for need, goods in goods_for.items():
@@ -616,6 +636,8 @@ MODULES = {
     "death": ("death_enabled", "Death", (), "Hunger or thirst at 1.00 kills (and 30 days too ill to work)."),
     "penalties": ("need_penalties_enabled", "Unmet needs hurt", (),
                   "Thirst slows walking; hunger, tiredness, illness and cold cut labour; no shelter makes illness worse."),
+    "housing": ("housing_enabled", "Housing market", ("commerce",),
+                "Houses are whole assets: owned, rented or empty; homebuilders add houses; the homeless suffer."),
     "subsistence": ("subsistence_enabled", "Subsistence", (),
                     "Agents with no assets make a little water, grain, wood, herbs or stone with the labour nobody hired."),
     "depression": ("depression_enabled", "Depression", (), "Boredom at 1.00 depresses (slower, less efficient)."),
@@ -766,6 +788,15 @@ LIMITS = {
     "need_priority": ((NEEDS, 0.1, 10, False), None, "map"),
     "subsistence_enabled": (None, None, "bool"),
     "asset_owner_share": (0.001, 1, "float"),
+    "working_capital_days": (0, 3600, "int"),
+    "housing_enabled": (None, None, "bool"),
+    "starting_houses": (0, 5, "float"),
+    "house_units": (1, 10000, "int"),
+    "house_min_multiple": (0, 1e6, "float"),
+    "rent_yield": (0, 0.01, "float"),
+    "eviction_days": (1, 3600, "int"),
+    "homeless_shelter_rate": (0, 1, "float"),
+    "house_relief": (0, 1, "float"),
     "subsistence_rates": ((GOODS, 0, 10, False), None, "map"),
     "depression_enabled": (None, None, "bool"),
     "depression_factor": (0, 1, "float"),

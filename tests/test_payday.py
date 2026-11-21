@@ -57,6 +57,13 @@ class PaydayTests(unittest.TestCase):
         if len(w.agents) == 30:
             self.assertAlmostEqual(w.base_money(), start + w.money_issued(), places=4)
 
+    def test_the_pay_law_is_set_through_the_government_api(self):
+        import server
+        changes = server.parse_policy({"pay_period": "weekly", "balanced_budget": True, "debt_limit": 0.9})
+        self.assertEqual(changes, {"pay_period": "weekly", "balanced_budget": True, "debt_limit": 0.9})
+        with self.assertRaises(ValueError):
+            server.parse_policy({"pay_period": "hourly"})
+
 
 if __name__ == "__main__":
     unittest.main()

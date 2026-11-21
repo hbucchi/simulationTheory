@@ -12,6 +12,7 @@ from .modules import Build, Consume, Invest, Mood, Navigate, NeedsDecay, Product
 from .banking import Banking
 from .government import Government
 from .labor import LaborMarket
+from .housing import HousingMarket
 from .modules.invest import cash_needed, transfer_shares
 from .report import Recorder
 from .catalog import CAPITAL_GOODS
@@ -59,6 +60,7 @@ class World:
         self.events = []  # newest last; trimmed to keep the payload small
         self.cooldowns = {}  # frozenset({id_a, id_b}) -> (tick until which they ignore each other, after a deal?)
         self.labor = LaborMarket()
+        self.housing = HousingMarket(self.rules)
         self.government = Government.from_rules(self.rules)
         self.banking = Banking(self.rules, self.government)
         self.retained_total = 0.0
@@ -277,9 +279,28 @@ class World:
                         shares[i] *= total / kept
                     else:
                         shares[i] = total / len(owners)
+        if r.housing_enabled and "housing" in stock:
+            stock["housing"] = [0] * n         # houses, not loose housing units (housing.py)
         for i in range(n):
             self.create_agent(money=round(money[i], 2), inventory={k: v[i] for k, v in stock.items()},
                               assets={k: v[i] for k, v in assets.items()})
+        self.update_price_level()
+        if r.working_capital_days > 0:
+            # Companies start with working capital: company cash to pay working_capital_days of
+            # their full wage bill at the starting wage (before their sales bring money in).
+            prices = self.current_prices(include_labor=False)
+            jobs = {g: sum(self.asset_jobs(g, a.assets.get(g, 0)) for a in self.agents[-n:]) for g in r.active_goods}
+            wage = self.labor.base_wage(self, prices, jobs)
+            for a in self.agents[-n:]:
+                if a.assets:
+                    payroll = sum(self.asset_jobs(g, s) for g, s in a.assets.items() if g in jobs) * wage
+                    a.company_cash += round(payroll * r.working_capital_days, 2)
+        if r.housing_enabled:
+            created = self.agents[-n:]
+            owners = [a for a in created if a.assets]
+            others = [a for a in created if not a.assets]
+            random.Random(f"homes-{self.seed}").shuffle(others)
+            self.housing.setup(self, owners, others)
         self.update_price_level()   # starting prices already at the money's level (M x V = P x Y)
 
     def in_cooldown(self, a, b):
@@ -779,6 +800,8 @@ class World:
         finally:
             self._step_cache = None
         self.retain_earnings()
+        if self.rules.housing_enabled:
+            self.housing.step(self)          # new houses, rent, evictions, buying and renting
         self.banking.step(self)
         self.recorder.end_step(self, self._dead_flows)
 
@@ -862,6 +885,8 @@ class World:
         (the same rule as investing); what nobody can afford is lost. The sale price and the
         dead agent's own money leave the economy with it."""
         near = sorted(self.agents, key=lambda o: math.hypot(o.x - dead.x, o.y - dead.y))
+        if self.rules.housing_enabled:
+            self.housing.on_death(self, dead, near)
         sold = {}   # buyer name -> {"goods": money, "units": n, "shares": n}
         rules = self.rules
 
@@ -1073,6 +1098,7 @@ class World:
             # Industries left out because their recipe needs a good that isn't in this game.
             "auto_excluded": list(self.rules.auto_excluded),
             "government": self.government.to_dict(self),
+            "housing": self.housing.to_dict(self) if self.rules.housing_enabled else None,
             "market": {
                 "prices": self.current_prices(),
                 "base_prices": economy.market_prices(self.agents, self.rules),
