@@ -189,6 +189,17 @@ class PublicDebt:
                 b.rate = self.rate(world)
                 b.due = world.tick + gov.bond_days
 
+    def redeem(self, world, holder):
+        """Repay every bond ``holder`` holds now (a bank winding down): from the treasury, new
+        money for what it can't pay."""
+        gov = world.government
+        for b in [b for b in self.bonds if b.holder is holder]:
+            gov.spend("debt_repaid", b.principal)
+            self._pay_holder(world, holder, b.principal, principal=True)
+            self.repaid += b.principal
+            self.step_repaid += b.principal
+            self.bonds.remove(b)
+
     def repay_early(self, world, money):
         """Use up to ``money`` of the treasury to repay bonds, soonest due first. Returns spent."""
         gov = world.government

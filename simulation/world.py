@@ -768,6 +768,22 @@ class World:
             prices[economy.LABOR] = self.labor.wage
         return prices
 
+    def draw_luck(self):
+        """Once a month: some businesses strike lucky (see rules.luck_*); expired luck ends."""
+        r = self.rules
+        if not r.luck_enabled:
+            return
+        chance = r.luck_chance_year / 12
+        luck_rng = random.Random(f"luck-{self.seed}-{self.tick}")
+        for a in self.agents:
+            a.luck = {g: v for g, v in a.luck.items() if v[1] >= self.tick and g in a.assets}
+            for g in a.assets:
+                if g in a.luck or g not in r.active_goods or luck_rng.random() >= chance:
+                    continue
+                times = r.luck_big_multiplier if luck_rng.random() < r.luck_big_share else r.luck_multiplier
+                a.luck[g] = [times, self.tick + r.luck_days]
+                self.log(f"{a.name}'s {g} business struck lucky: output x{times:g} for {r.luck_days} days")
+
     def post_prices(self, market):
         """Today's posted prices given what the ``market`` says: the same with flexible prices;
         with sticky ones, yesterday's posted prices moved (1 - stickiness) of the way."""
@@ -822,9 +838,10 @@ class World:
         self.update_sell_through()
         self.update_profitability()
         if self.tick % self.rules.month_steps == 0:
-            self.government.monthly(self)
+            self.government.monthly(self)       # the central bank resets its rate (Taylor rule)
+            self.draw_luck()                    # some businesses strike lucky
             # Forget pauses between pairs that have run out.
-            self.cooldowns = {k: v for k, v in self.cooldowns.items() if v[0] >= self.tick}       # the central bank resets its rate (Taylor rule)
+            self.cooldowns = {k: v for k, v in self.cooldowns.items() if v[0] >= self.tick}
         self.government.debt.step(self)     # interest on government bonds, repayments
         self.labor.clear(self)
         seekers = {}

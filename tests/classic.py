@@ -29,4 +29,5 @@ CLASSIC = {
     "subsistence_enabled": False,
     "housing_enabled": False,
     "trade_radius": 0,
+    "luck_enabled": False,
 }

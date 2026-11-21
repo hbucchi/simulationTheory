@@ -394,6 +394,16 @@ class Rules:
     # Starting companies hold working capital: company cash for this many days of their full wage
     # bill at the starting wage, so owners can hire before their first sales come in. 0 = none.
     working_capital_days: int = 30
+    # Lucky businesses: each month every business (an agent's industry) has luck_chance_year / 12
+    # chance to strike lucky (a hit product, an invention): for luck_days its output is
+    # luck_multiplier times bigger from the same labour and inputs (luck_big_multiplier in
+    # luck_big_share of the cases). Small owners too: a way up.
+    luck_enabled: bool = True
+    luck_chance_year: float = 0.03
+    luck_days: int = 90
+    luck_multiplier: float = 10.0
+    luck_big_multiplier: float = 100.0
+    luck_big_share: float = 0.1
     # Agents offer all the labour they can spare once their money and the goods they hold for
     # their needs would cover fewer than labor_offer_months of living costs. At the start, agents
     # without assets hold at most start_months_cap months of them (money and goods cut in proportion).
@@ -828,6 +838,12 @@ LIMITS = {
     "subsistence_enabled": (None, None, "bool"),
     "asset_owner_share": (0.001, 1, "float"),
     "working_capital_days": (0, 3600, "int"),
+    "luck_enabled": (None, None, "bool"),
+    "luck_chance_year": (0, 1, "float"),
+    "luck_days": (1, 3600, "int"),
+    "luck_multiplier": (1, 1000, "float"),
+    "luck_big_multiplier": (1, 10000, "float"),
+    "luck_big_share": (0, 1, "float"),
     "labor_offer_months": (0, 1000, "float"),
     "start_months_cap": (0, 1000, "float"),
     "housing_enabled": (None, None, "bool"),

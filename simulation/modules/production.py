@@ -49,6 +49,10 @@ class Production(Module):
             fresh = employed * world.productivity_now[good]
             for item, per_unit in recipes.get(good, {}).items():
                 self._use(agent, item, fresh * per_unit)
+            # A lucky business (world.draw_luck) makes many times more from the same labour and inputs.
+            luck = agent.luck.get(good)
+            if luck and luck[1] >= world.tick:
+                fresh *= luck[0]
             made = self.asset_progress.get(good, 0) + fresh
             whole = int(made + 1e-9)
             if whole:

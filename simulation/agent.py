@@ -75,6 +75,7 @@ class Agent:
         self.critical_health_days = 0   # days in a row at health 1.00 (dies at penalties.HEALTH_DEATH_DAYS)
         self.subsistence = {}        # {good: fraction of a unit made on its own so far}
         self.months_left = None      # months of living costs its money and goods cover (labor.py)
+        self.luck = {}               # {good: [output multiplier, last day]}: a lucky business (world.draw_luck)
         self.home = None             # the House it lives in (housing.py), or None: homeless
         self.houses = []             # Houses it owns
         self.subsistence_made = {}   # {good: units per day made on its own (latest day)}
@@ -196,6 +197,7 @@ class Agent:
                 "house": self.home.id, "owns": self.home.owner is self,
                 "landlord": "the government" if self.home.owner is None else self.home.owner.name},
             "houses": len(self.houses),
+            "luck": {g: {"times": m, "until": u} for g, (m, u) in self.luck.items()},
             "houses_let": sum(1 for h in self.houses if h.occupant is not None and h.occupant is not self),
             "subsistence": {g: round(v, 3) for g, v in self.subsistence_made.items()},
             "inventory": self._held(),

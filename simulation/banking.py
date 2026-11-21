@@ -639,6 +639,7 @@ class Banking:
     def _wind_down(self, world, bank, owner):
         """Pay depositors back pro rata from the cash it has (after repaying the central bank);
         close once nothing is left."""
+        world.government.debt.redeem(world, bank)     # its government bonds are repaid first
         bank.reserves += bank.cb_reserves
         bank.cb_reserves = 0.0
         if bank.cb_loans > 0:

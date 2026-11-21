@@ -635,6 +635,8 @@ function renderAgents() {
         [a.budget.spare >= 0 ? "left to invest" : "short of budget", usd(Math.abs(a.budget.spare))]] : []),
       ...(state.housing ? [["home", !a.home ? "homeless" : a.home.owns ? `its own house (#${a.home.house})`
         : `rents house #${a.home.house} from ${a.home.landlord}`]] : []),
+      ...Object.entries(a.luck || {}).map(([g, l]) => ["lucky business", `${label(g).toLowerCase()} output ×${l.times} until day ${l.until}`,
+        "A hit product or an invention: many times the output from the same labour and inputs, for a while"]),
       ...(a.houses ? [["houses", `${a.houses} owned` + (a.houses_let ? `, ${a.houses_let} let` : "")]] : []),
       ["movement", a.speed < a.movement ? `${a.speed} px (${a.movement} normally)` : `${a.speed} px`],
       ...Object.entries(a.subsistence || {}).map(([g, n]) => ["makes on its own", `${n.toFixed(2)} ${label(g).toLowerCase()}/day`,

@@ -708,7 +708,9 @@ roughly 6% of it. Velocity 0 switches the price level off (the plain formula).
 ### Who owns what at the start
 
 Only **10% of agents** start owning assets (`asset_owner_share`): industry shares and houses.
-The other 90% own nothing but their labour, their starting money and a few goods. This is
+The other 90% own nothing but their labour, and at most **4 months** of living costs in
+money and goods (`start_months_cap`). Any agent whose money and goods for its needs would last
+fewer than **6 months** (`labor_offer_months`) offers all the labour it can spare. This is
 only the starting point: after that, ownership moves with the market (trading shares,
 investing, building, estates). Companies start with **working capital** (`working_capital_days`,
 30): company cash for a month of their full wage bill, so owners can hire before their first
@@ -718,6 +720,11 @@ sales come in.
 of labour is worth, capped by actual **sales revenue per unit of labour worked** over the last
 30 days. Before, it was the theoretical value of the output, far above what firms could sell, so
 wages ran away from what employers could pay.
+
+### Buying at a distance
+
+Buyers trade with sellers up to `trade_radius` (600 px of the 1024 px map) away without
+walking to them, like shops and deliveries; 0 = only when they touch.
 
 ### Labour law: when wages are paid
 
@@ -737,13 +744,19 @@ workers must live a month on savings or credit.
 - **New houses**: the homebuilders (the housing industry) turn every `house_units` (20) units of
   housing they make into a house and put it up for sale. The housing good no longer relieves
   shelter on its own.
-- **Price**: at least `house_min_multiple` (50) × the average price of goods, so the floor
-  follows the price level; above it, the build cost × demand pressure (agents without a home of
-  their own vs houses free to move into).
-- **Rent** = price × `rent_yield` (6% a year), paid daily to the landlord (to the treasury for
-  public housing). A tenant who can't pay for `eviction_days` (30) days in a row is evicted.
+- **Price**: what the rent is worth: a year's rent ÷ `rent_yield` (6%), the rent being
+  `rent_income_share` (30%) of the median income × demand pressure (agents without a home of
+  their own vs houses free to move into). That makes a house about five years of the median
+  income, as in real housing markets. Never below `house_min_multiple` (100) × the price of food.
+- **Rent** = price × `rent_yield`, paid daily to the landlord (to the treasury for public
+  housing). A tenant who can't pay for `eviction_days` (30) days in a row is evicted.
 - **Buying a home**: an agent buys a vacant house for sale when the price fits on top of its
-  monthly budget, and moves in.
+  monthly budget, or with a **mortgage**: a bank lends up to `mortgage_ltv` (80%) of the price
+  over `mortgage_years` (25), at its loan rate + `mortgage_premium`, with a fixed installment, only
+  if that installment plus its other loan payments are at most `mortgage_dti` (35%) of its
+  income; the buyer pays the rest (the deposit) from money beyond its budget. After
+  `mortgage_default_days` (90) unpaid the bank forecloses: its owner takes the house and pays the
+  bank what it can. Selling a mortgaged house repays the bank first. All set in the Banks tab.
 - **Buying to let**: only an agent living in its own house may buy more, paying cash beyond its
   budget, when the rent yield beats the bank deposit rate; it rents them out. Owners short of cash
   put a house they don't live in up for sale.
@@ -788,15 +801,23 @@ Less labour is how lower productivity shows: a hungry, tired or sick worker deli
 of labour, so it earns less and its employer makes less (a poverty trap). Penalties only apply
 to needs some good in the game can relieve. The agent card lists the penalties it suffers now.
 
-### Subsistence
+### Autonomous production (subsistence)
 
-An agent with **no assets** puts the labour nobody hired that day into making a little of a
-basic good on its own (`subsistence_enabled`, `subsistence_rates`, units per unit of labour):
-water 0.4 (fetching), grain 0.4 (a garden), wood 0.4 and herbs 0.4 (gathering), stone 0.2. It
-makes the good for its most urgent need that it holds least of. An industry worker makes about
-4 units per unit of labour, so a whole day on its own (about 0.5 labour) gives about 0.2 units:
-roughly a day's water, or a day's grain, not both. It slows the fall of the poorest without
-replacing a job.
+**Every agent** puts the labour it has left (after its own industries and any job) into making
+water or food on its own (`subsistence_enabled`, `subsistence_rates`: water 0.5 and food 0.35
+units per unit of labour), whichever its most urgent need calls for each day. Working at nothing
+else, an agent just about covers its thirst and hunger (about 0.49 of its 0.5 units of daily
+labour). An industry worker makes about 4 units per unit of labour, so a job is far better; this
+keeps the poorest alive, not comfortable. In a game without food the main hunger good takes its
+place at the same relief. The Reports tab shows the share of agents doing it and its share of all
+output (*Autonomous production*).
+
+### Lucky businesses
+
+Each month every business (an agent's industry) has a small chance (`luck_chance_year`, 3% a
+year) to strike lucky, a hit product or an invention: for `luck_days` (90) its output is ×10
+(×100 in one case in ten) from the same labour and inputs, so its profit jumps. Small owners
+can strike lucky too: a way up the ladder. Shown on the agent card and in the log.
 
 ### Death and depression
 
