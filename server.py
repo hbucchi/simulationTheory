@@ -16,6 +16,8 @@ API
     DELETE /api/agents/<id>           remove an agent
     POST   /api/government any of POLICY_LIMITS (taxes, benefit, policy rate, Basel capital ratio,
                            reserve requirement, lender of last resort, ...), changes live
+    POST   /api/policies   {"action": "add", "policy": {...}} | {"action": "update", "id": n, "policy": {...}}
+                           | {"action": "remove", "id": n}: public spending policies (policies.py)
     POST   /api/banking    {"enabled": bool, "deposit_rate": r, "loan_spread": r, "liquidity": r,
                             "min_capital": m, "loan_income_share": s}
                            (any subset; changes live)
@@ -108,6 +110,47 @@ class Simulation:
                            f"and equity of {gov.capital_ratio:.1%} of loans; lender of last resort "
                            f"{'on' if gov.lender_of_last_resort else 'off'}")
             return self.world.to_dict(self.detail)
+
+    def change_policies(self, body):
+        """Add, edit or remove a public spending policy while the game runs."""
+        from simulation.policies import clean
+        with self.lock:
+            world = self.world
+            policies = world.government.policies
+            action = body.get("action")
+            if action == "add":
+                if len(policies.items) >= 50:
+                    raise ValueError("at most 50 policies")
+                p = policies.add(clean(body.get("policy", {})))
+                world.log(f"New policy: {p.label(world.rules)}")
+            elif action in ("update", "remove"):
+                pid = body.get("id")
+                p = policies.get(pid) if isinstance(pid, int) and not isinstance(pid, bool) else None
+                if p is None:
+                    raise LookupError(f"no policy {pid}")
+                if action == "remove":
+                    policies.remove(pid)
+                    world.log(f"Policy ended: {p.label(world.rules)}")
+                else:
+                    spec = {**{k: getattr(p, k) for k in p.FIELDS}, **body.get("policy", {})}
+                    spec = {k: v for k, v in spec.items() if v is not None}
+                    # Switching what a policy does picks a sensible resource or need to start from.
+                    if spec.get("kind") == "goods":
+                        spec.setdefault("good", next((g for g in ("food", "water") if g in world.rules.active_goods),
+                                                     world.rules.active_goods[0]))
+                    else:
+                        spec.pop("good", None)
+                    if spec.get("kind") == "service":
+                        spec.setdefault("need", "health")
+                    else:
+                        spec.pop("need", None)
+                    fields = clean(spec)
+                    p.good = p.need = None
+                    p.update(**fields)
+                    world.log(f"Policy changed: {p.label(world.rules)}")
+            else:
+                raise ValueError('action must be "add", "update" or "remove"')
+            return world.to_dict(self.detail)
 
     def set_banking(self, changes):
         """Switch banking on/off or change its rates while the game runs."""
@@ -298,6 +341,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.sim.set_banking(changes)
             if self.path == "/api/government":
                 return self.sim.set_policy(parse_policy(body))
+            if self.path == "/api/policies":
+                return self.sim.change_policies(body)
             match = AGENT_PATH.fullmatch(self.path)
             if match:
                 return self.sim.update_agent(int(match[1]), parse_agent_config(body))

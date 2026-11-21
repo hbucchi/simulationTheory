@@ -142,7 +142,11 @@ angle in ±90° (a 180° window that never points back), for 2 days, unless
 someone is coming to buy from them (then they go and meet that buyer) or they
 are (or become) in need themselves. The pair then ignores each other for a week
 after a deal, or 2 days when nothing could be traded, so a needy agent moves
-on to the next-closest agent instead of retrying the same one. (These used to be
+on to the next-closest agent instead of retrying the same one. An agent that is **alarmed**,
+hungry or thirsty now, or holding food or water for fewer than 14 days, never walks away: it
+heads for a seller at once, its restocking comes before meeting other buyers, and it may go
+straight back to a seller it just bought from (the week's pause only applies after a meeting
+where nothing could be traded). (These used to be
 15, 60 and 10 *steps*; once a step became a day, agents spent half their time walking
 away from deals and could not go back to the only water seller nearby for two months,
 and about 40% of a 1000-agent game died of thirst next to plenty of water.) Sellers never
@@ -474,10 +478,27 @@ the economy together with the dead agent's own money.
 
 Each step the treasury pays, in order: public works (*labour bought*), the **unemployment
 benefit** (`benefit_rate`, 40% of the wage for every unit of labour offered that nobody hired),
-then, with **balanced budget** on, a **safety net** (anyone hungry or thirsty whose money can't
-buy the food and water it needs right now gets the difference, most in danger first), more
+then the player's **public spending policies** (below), and with **balanced budget** on, more
 public works with what is left and finally an equal transfer to everyone, so taxes return to
-the economy instead of piling up. Only public works
+the economy instead of piling up.
+
+**Public spending policies** (Government tab, *Public spending*; `gov_policies` in the rules).
+The player decides where the money goes: **+ Add policy** creates one, **×** ends it, and every
+field applies from the next day. Each policy has:
+
+| Field | Options |
+|---|---|
+| What | **Income support** (money) · **Give away a resource** (the government buys it from sellers with spare at the market price, production tax included, and hands the units out, keeping their expiry dates) · **Public service** (hires idle workers at their asking wage; their work relieves a chosen need directly, at half what the same labour makes in that industry, since there is no capital or input behind it) |
+| Who gets it | Everyone · Low income (poorest X% by income) · Unemployed · In need of it (need above 0.5) · Can't afford food & water · No assets |
+| How it is shared | Equal shares · Neediest first (money: the poorest raised to a common level; goods and services: the most in need first) |
+| Budget | $ a month, spent evenly each day; 0 = as much as needed |
+
+Policies are paid **in order** from the treasury only (never with new money), so promising more
+than taxes bring in leaves the later ones underfunded: each card shows what it spent in the last
+30 days, whom it reached and how much of its budget it could pay, and the summary compares taxes
+per month with the budgets promised. A new game starts with one policy, a **food and water safety
+net**: anyone hungry or thirsty whose money can't buy the food and water it needs gets the
+difference, most in danger first. Only public works
 the treasury can't pay are paid with new money.
 
 **Central bank.**

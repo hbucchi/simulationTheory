@@ -10,7 +10,9 @@ Fiscal policy (the government):
        the treasury can't pay is paid with newly created money (how money is injected);
     2. unemployment benefit: ``benefit_rate`` x the market wage for every unit of labour an agent
        offered and nobody hired (pro rata if the treasury runs short);
-    3. with ``balanced_budget``, whatever is left hires more idle labour for public works, and what
+    3. the player's public spending policies, in order (policies.py: income support, resources
+       given away, public services; by default a food and water safety net);
+    4. with ``balanced_budget``, whatever is left hires more idle labour for public works, and what
        is still left (nobody idle) is paid out equally to every agent (transfers), so taxes go
        back into the economy instead of sitting in the treasury.
 
@@ -41,6 +43,10 @@ POLICY = ("min_wage", "min_rate", "labor_purchase", "capital_ratio", "tax_produc
           "llr_penalty")
 TAXES = ("production", "wage", "profit")
 
+from .policies import AUDIENCES, DISTRIBUTIONS, KINDS, Policies  # noqa: E402
+
+POLICY_OPTIONS = {"kinds": KINDS, "audiences": AUDIENCES, "distributions": DISTRIBUTIONS}
+
 
 def _policy(name):
     """A policy setting that reads as 0 / False while the government is switched off."""
@@ -49,7 +55,7 @@ def _policy(name):
 
 
 class Government:
-    def __init__(self, min_rate=0.0, labor_purchase=0.0, capital_ratio=0.12, enabled=True, **policy):
+    def __init__(self, min_rate=0.0, labor_purchase=0.0, capital_ratio=0.12, enabled=True, policies=None, **policy):
         self.enabled = enabled
         self._policy = {"min_rate": min_rate, "labor_purchase": labor_purchase, "capital_ratio": capital_ratio,
                         "min_wage": 0.0, "tax_production": 0.0, "tax_wage": 0.0, "tax_profit": 0.0, "benefit_rate": 0.0,
@@ -67,6 +73,8 @@ class Government:
         self.llr_outstanding = 0.0   # central bank loans to banks not yet repaid (newly created money)
         self.llr_lent = 0.0          # all it has lent so far
         self.cb_income = 0.0         # interest banks paid on those loans (goes to the treasury)
+        self.revenue_days = []      # taxes collected on each of the last 30 days
+        self.policies = Policies(policies or ())   # public spending the player designed (policies.py)
 
     def receive(self, amount):
         """Central bank income (interest on its loans): into the treasury."""
@@ -77,6 +85,7 @@ class Government:
     @classmethod
     def from_rules(cls, rules):
         return cls(rules.gov_min_rate, rules.gov_labor_purchase, rules.capital_ratio, rules.government_enabled,
+                   policies=rules.gov_policies,
                    min_wage=rules.gov_min_wage, tax_production=rules.tax_production, tax_wage=rules.tax_wage, tax_profit=rules.tax_profit,
                    benefit_rate=rules.benefit_rate, balanced_budget=rules.balanced_budget,
                    reserve_requirement=rules.reserve_ratio, reserve_rate=rules.reserve_rate,
@@ -108,6 +117,9 @@ class Government:
     # ---------- taxes ----------
 
     def begin_step(self):
+        # Taxes of each of the last 30 days (for "taxes per month", what policies can be paid from).
+        self.revenue_days.append(sum(self.step_revenue.values()))
+        del self.revenue_days[:-30]
         self.step_revenue = {t: 0.0 for t in TAXES}
         self.step_spent = {"public_works": 0.0, "benefits": 0.0, "reserve_interest": 0.0, "transfers": 0.0}
         self.last_spent = 0.0
@@ -147,4 +159,7 @@ class Government:
                 "spent": {k: round(v, 2) for k, v in self.spent.items()},
                 "llr_outstanding": round(self.llr_outstanding, 2), "llr_lent": round(self.llr_lent, 2),
                 "cb_income": round(self.cb_income, 2),
+                "policies": self.policies.to_dict(),
+                "policy_options": POLICY_OPTIONS,
+                "revenue_month": round(sum(self.revenue_days) * 30 / max(1, len(self.revenue_days)), 2),
                 "step_spent": {k: round(v, 2) for k, v in self.step_spent.items()}}

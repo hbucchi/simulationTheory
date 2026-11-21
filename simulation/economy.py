@@ -182,6 +182,30 @@ def in_danger(agent, rules=DEFAULT_RULES):
                                        if n in rules.consumer_needs)
 
 
+# An agent whose stock of food (or water) would last fewer days than this before the need
+# crosses the seek threshold is running low: it goes to restock now, before other errands.
+LOW_STOCK_DAYS = 14
+
+
+def days_until_danger(agent, need, rules=DEFAULT_RULES):
+    """Days before ``need`` rises above the seek threshold, counting what its stock relieves."""
+    rate = need_rate(agent, need)
+    if rate <= 0:
+        return math.inf
+    return max(0.0, rules.seek_threshold - getattr(agent, need) + held_relief(agent, need, rules)) / rate
+
+
+def running_low(agent, rules=DEFAULT_RULES):
+    """True when the food or water it holds lasts fewer than LOW_STOCK_DAYS days."""
+    return rules.death_enabled and any(days_until_danger(agent, n, rules) < LOW_STOCK_DAYS
+                                       for n in FATAL_NEEDS if n in rules.consumer_needs)
+
+
+def alarmed(agent, rules=DEFAULT_RULES):
+    """Hungry or thirsty now, or about to be (running_low): it must go and buy promptly."""
+    return in_danger(agent, rules) or running_low(agent, rules)
+
+
 def is_desperate(agent, rules=DEFAULT_RULES):
     """True when a need that kills is above DESPERATE_LEVEL."""
     return rules.death_enabled and any(getattr(agent, n) > DESPERATE_LEVEL for n in FATAL_NEEDS

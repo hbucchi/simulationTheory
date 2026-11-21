@@ -57,7 +57,7 @@ class World:
         self.agents = []
         self.tick = 0
         self.events = []  # newest last; trimmed to keep the payload small
-        self.cooldowns = {}  # frozenset({id_a, id_b}) -> tick until which they ignore each other
+        self.cooldowns = {}  # frozenset({id_a, id_b}) -> (tick until which they ignore each other, after a deal?)
         self.labor = LaborMarket()
         self.government = Government.from_rules(self.rules)
         self.banking = Banking(self.rules, self.government)
@@ -263,7 +263,13 @@ class World:
         self.update_price_level()   # starting prices already at the money's level (M x V = P x Y)
 
     def in_cooldown(self, a, b):
-        return self.cooldowns.get(frozenset((a.id, b.id)), -1) >= self.tick
+        """True while a and b ignore each other. After a deal (not after a meeting where nothing
+        could be traded) an agent that is hungry, thirsty or running low on food or water
+        (economy.alarmed) may go straight back: it can't wait a week for the nearest seller."""
+        entry = self.cooldowns.get(frozenset((a.id, b.id)))
+        if entry is None or entry[0] < self.tick:
+            return False
+        return not (entry[1] and (economy.alarmed(a, self.rules) or economy.alarmed(b, self.rules)))
 
     def agent_by_id(self, agent_id):
         return self._by_id.get(agent_id)
@@ -912,11 +918,11 @@ class World:
             self.log(f"No trade: {reason}")
 
         wait = rules.cooldown_steps if deals else rules.retry_steps
-        self.cooldowns[frozenset((a.id, b.id))] = self.tick + wait
+        self.cooldowns[frozenset((a.id, b.id))] = (self.tick + wait, bool(deals))
         if deals:
             self.depart(a, b)
             for agent in (a, b):
-                if economy.is_needy(agent, rules):
+                if economy.is_needy(agent, rules) or economy.alarmed(agent, rules):
                     agent.depart_steps = 0
 
     def depart(self, a, b):

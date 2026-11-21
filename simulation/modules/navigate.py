@@ -54,9 +54,10 @@ class Navigate(Module):
             self._go_to(agent, "meeting", min(seekers, key=agent.distance_to), world)
             return
 
-        # A need crossing the threshold ends the walk away from the last deal: an agent that
-        # traded while fine and then got thirsty must go and drink, not keep walking off.
-        if agent.depart_steps > 0 and economy.is_needy(agent, world.rules):
+        # A need crossing the threshold, or food or water running low (under LOW_STOCK_DAYS),
+        # ends the walk away from the last deal: it must go and buy, not keep walking off.
+        alarmed = economy.alarmed(agent, world.rules)
+        if agent.depart_steps > 0 and (alarmed or economy.is_needy(agent, world.rules)):
             agent.depart_steps = 0
         if agent.depart_steps > 0:
             agent.activity = "leaving"
@@ -77,7 +78,9 @@ class Navigate(Module):
         else:
             # A buyer coming for its goods beats any shopping trip of its own: a seller that is
             # always off restocking, sourcing or building can't be caught, and its buyers starve.
-            seekers = world.seekers_of(agent)
+            # Unless its own food or water is running low: then it restocks first (close buyers
+            # were already met above).
+            seekers = [] if alarmed else world.seekers_of(agent)
             if seekers:
                 self._go_to(agent, "meeting", min(seekers, key=agent.distance_to), world)
                 return

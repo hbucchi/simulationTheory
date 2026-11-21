@@ -208,6 +208,19 @@
           the capital rule commercial banks must meet (Basel), and can inject money by buying labour each day.
           Changes apply from tomorrow.</p>
         <div id="gov-stats" class="stat-grid wide-stats"></div>
+        <div class="card policies-card">
+          <div class="card-head">
+            <div>
+              <div class="card-title">Public spending</div>
+              <p class="card-sub">Decide where the treasury's money goes, to whom and how it is shared. Policies are paid
+                in order from the treasury: the first is funded first. Budget 0 = as much as needed.</p>
+            </div>
+            <button type="button" id="policy-add" class="primary">+ Add policy</button>
+          </div>
+          <div id="policy-budget" class="policy-budget"></div>
+          <div id="policy-list" class="policy-list"></div>
+          <p id="policy-status" class="status" hidden></p>
+        </div>
         <details class="card fold settings">
           <summary>Policy settings: taxes, spending, interest rate, central bank rules</summary>
         <form id="gov-form" class="panel" novalidate>

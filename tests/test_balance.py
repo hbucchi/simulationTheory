@@ -161,12 +161,11 @@ class SurvivalFirstTests(unittest.TestCase):
 
     def test_the_safety_net_pays_for_the_water_of_people_who_cant(self):
         from simulation import economy
-        from simulation.labor import LaborMarket
         w = self.world()
         poor = w.create_agent(needs={**CALM, "thirst": 0.9}, money=0, inventory=NO_ASSETS)
         fine = w.create_agent(needs=CALM, money=0, inventory=NO_ASSETS)
         w.government.treasury = 1e6
-        LaborMarket._safety_net(w)
+        w.government.policies.run(w)      # the default policy: food and water safety net
         need = economy.shopping_cost(poor, w.current_prices(), w.rules, economy.FATAL_NEEDS)
         self.assertAlmostEqual(poor.money, need)
         self.assertEqual(fine.money, 0)

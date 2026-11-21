@@ -263,6 +263,9 @@ class Rules:
     gov_min_rate: float = 0.0
     gov_labor_purchase: float = 0.0
     gov_min_wage: float = 0.0          # lowest wage per unit of labour (a day's work); 0 = none
+    # Public spending policies (see policies.py): what the treasury pays for, to whom, how shared.
+    # Default: a safety net paying hungry or thirsty agents what they lack for food and water.
+    gov_policies: list = field(default_factory=lambda: [dict(p) for p in _default_policies()])
     capital_ratio: float = 0.12
     # Central bank: banks keep reserve_ratio x deposits in an account at the central bank, which
     # pays reserve_rate on it; as lender of last resort it lends to solvent banks that run out of
@@ -504,6 +507,11 @@ class Rules:
                 if not isinstance(value, list) or any(g not in GOODS for g in value):
                     raise ValueError(f"{key} must be a list of industries ({', '.join(GOODS)})")
                 setattr(rules, key, sorted(set(value), key=GOODS.index))
+            elif kind == "policies":
+                from .policies import clean
+                if not isinstance(value, list) or len(value) > 50:
+                    raise ValueError(f"{key} must be a list of at most 50 policies")
+                setattr(rules, key, [clean(p) for p in value])
             elif kind == "bool":
                 if not isinstance(value, bool):
                     raise ValueError(f"{key} must be true or false")
@@ -712,6 +720,7 @@ LIMITS = {
     "gov_min_rate": (0, 10, "float"),
     "gov_labor_purchase": (0, 1e6, "float"),
     "gov_min_wage": (0, 1e9, "float"),
+    "gov_policies": (None, None, "policies"),
     "cost_floor_margin": (0, 10, "float"),
     "purchase_min": (1, 10, "float"),
     "purchase_max": (1, 10, "float"),
@@ -761,6 +770,11 @@ MIN_DEFAULT_SHARES = 0.02
 CAPITAL_DEFAULT_SHARES = 0.1
 # Inputs that also relieve a need get this many times the capacity their industries' use takes.
 INPUT_LEAKAGE = 2.0   # capital industries: no consumers, but new capacity is built from them
+
+
+def _default_policies():
+    from .policies import DEFAULTS
+    return DEFAULTS
 
 
 def daily_use(rules, leak=1.0):

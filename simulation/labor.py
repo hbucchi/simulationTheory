@@ -191,9 +191,9 @@ class LaborMarket:
         stats["gov_hired"] += self._public_works(world, offers, remaining, gov.labor_purchase, stats)
         if gov.benefit_rate > 0:
             self._benefits(world, offers, remaining, stats)
-        if gov.balanced_budget and gov.treasury > 1e-6 and world.agents:
-            # Safety net: people who can't pay for the food or water they need right now.
-            self._safety_net(world)
+        if gov.enabled and world.agents:
+            # The player's spending policies (income support, give-aways, public services).
+            gov.policies.run(world, offers, remaining, stats)
         if gov.balanced_budget and gov.treasury > 1e-6:
             # Whatever the treasury has left hires more idle labour: taxes go back into the economy.
             stats["gov_hired"] += self._public_works(world, offers, remaining, math.inf, stats, budget=gov.treasury)
@@ -243,31 +243,6 @@ class LaborMarket:
             hired += units
             gov.labor_bought += units
         return hired
-
-    @staticmethod
-    def _safety_net(world):
-        """Transfers to agents that are hungry or thirsty and whose money (deposits included)
-        can't buy the food and water they need now: each gets its shortfall, most in danger first, while the
-        treasury lasts."""
-        gov, rules = world.government, world.rules
-        prices = world.current_prices()
-        gaps = []
-        for a in world.agents:
-            if not economy.in_danger(a, rules):
-                continue
-            gap = economy.shopping_cost(a, prices, rules, economy.FATAL_NEEDS) - economy.money_of(a)
-            if gap > 0:
-                gaps.append((max(a.hunger, a.thirst), a, gap))
-        gaps.sort(key=lambda t: t[0], reverse=True)
-        for _, a, gap in gaps:
-            if gov.treasury <= 1e-6:
-                break
-            pay = min(gap, gov.treasury)
-            gov.treasury -= pay
-            gov.spent["transfers"] += pay
-            gov.step_spent["transfers"] += pay
-            a.money += pay
-            economy.earn(a, pay, "transfers")
 
     def _benefits(self, world, offers, remaining, stats):
         """Unemployment benefit: benefit_rate x the wage for every unit of labour offered and not

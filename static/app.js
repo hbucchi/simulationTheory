@@ -45,6 +45,10 @@ const ui = {
   govRevert: $("gov-revert"),
   govStatus: $("gov-status"),
   govStats: $("gov-stats"),
+  policyAdd: $("policy-add"),
+  policyBudget: $("policy-budget"),
+  policyList: $("policy-list"),
+  policyStatus: $("policy-status"),
   productSearch: $("product-search"),
   productSummary: $("product-summary"), productTable: $("product-table"),
   bankForm: $("bank-form"), bankEnabled: $("bank-enabled"), bankDeposit: $("bank-deposit"),
@@ -763,8 +767,173 @@ function setGovInputs(ratePct, buy) {
   ui.govBuyLabel.textContent = `${buy}`;
 }
 
+// ---------- Public spending policies ----------
+
+const policyCards = new Map();   // policy id -> card element
+
+function policyStatus(message, error = false) {
+  ui.policyStatus.textContent = message;
+  ui.policyStatus.className = error ? "status error" : "status";
+  ui.policyStatus.hidden = !message;
+}
+
+async function sendPolicy(body) {
+  try {
+    render(await api("/api/policies", body));
+    policyStatus("");
+  } catch (err) {
+    policyStatus(err.message, true);
+  }
+}
+
+function policySelect(options, value, field, id) {
+  const sel = document.createElement("select");
+  for (const [v, text] of options) sel.append(new Option(text, v, false, v === value));
+  sel.dataset.field = field;
+  sel.onchange = () => sendPolicy({ action: "update", id, policy: { [field]: sel.value } });
+  return sel;
+}
+
+function policyField(label, control) {
+  const l = document.createElement("label");
+  l.append(label, control);
+  return l;
+}
+
+function buildPolicyCard(p, opts) {
+  const card = document.createElement("div");
+  card.className = "policy";
+  const head = document.createElement("div");
+  head.className = "policy-head";
+  const order = Object.assign(document.createElement("span"), { className: "order" });
+  const name = Object.assign(document.createElement("input"), { className: "policy-name", type: "text",
+    maxLength: 60, value: p.name, placeholder: p.label, title: "Name this policy" });
+  name.dataset.field = "name";
+  name.onchange = () => sendPolicy({ action: "update", id: p.id, policy: { name: name.value } });
+  const close = Object.assign(document.createElement("button"), { type: "button", className: "policy-close",
+    textContent: "×", title: "End this policy" });
+  close.setAttribute("aria-label", `End policy ${p.label}`);
+  close.onclick = () => sendPolicy({ action: "remove", id: p.id });
+  head.append(order, name, close);
+
+  const fields = document.createElement("div");
+  fields.className = "policy-fields";
+  fields.append(policyField("What", policySelect(Object.entries(opts.kinds), p.kind, "kind", p.id)));
+  if (p.kind === "goods") {
+    fields.append(policyField("Resource", policySelect(activeGoods().map(g => [g, g.replace(/_/g, " ")]),
+      p.good, "good", p.id)));
+  }
+  if (p.kind === "service") {
+    fields.append(policyField("Need it relieves", policySelect(NEEDS.filter(n => n !== "sleep").map(n => [n, n]),
+      p.need, "need", p.id)));
+  }
+  fields.append(policyField("Who gets it", policySelect(Object.entries(opts.audiences), p.audience, "audience", p.id)));
+  if (p.audience === "low_income") {
+    const share = Object.assign(document.createElement("input"), { type: "number", min: 1, max: 100, step: 1,
+      value: Math.round(p.share * 100) });
+    share.dataset.field = "share";
+    share.onchange = () => sendPolicy({ action: "update", id: p.id, policy: { share: Number(share.value) / 100 } });
+    fields.append(policyField("Poorest % by income", share));
+  }
+  fields.append(policyField("How it is shared", policySelect(Object.entries(opts.distributions), p.distribution,
+    "distribution", p.id)));
+  const budget = Object.assign(document.createElement("input"), { type: "number", min: 0, step: 100, value: p.budget });
+  budget.dataset.field = "budget";
+  budget.onchange = () => sendPolicy({ action: "update", id: p.id, policy: { budget: Number(budget.value) } });
+  fields.append(policyField("Budget ($ a month, 0 = as needed)", budget));
+
+  const stats = document.createElement("div");
+  stats.className = "policy-stats";
+  card.append(head, fields, stats);
+  card.dataset.shape = `${p.kind}|${p.audience}`;
+  return card;
+}
+
+function fillPolicyCard(card, p, index) {
+  card.querySelector(".order").textContent = `#${index + 1}`;
+  const name = card.querySelector(".policy-name");
+  name.placeholder = p.label;
+  if (!card.contains(document.activeElement)) {
+    name.value = p.name;
+    for (const el of card.querySelectorAll(".policy-fields [data-field]")) {
+      const f = el.dataset.field;
+      el.value = f === "share" ? Math.round(p.share * 100) : p[f] ?? "";
+    }
+  }
+  const what = p.kind === "goods" ? `${p.delivered.toFixed(0)} ${p.good.replace(/_/g, " ")} handed out`
+    : p.kind === "service" ? `${p.hired.toFixed(2)} labour hired · ${p.delivered.toFixed(2)} of ${p.need} relieved`
+    : `${p.recipients} paid`;
+  const stats = card.querySelector(".policy-stats");
+  stats.innerHTML = "";
+  const funded = p.funded < 0.999;
+  for (const [label, value, cls] of [
+    ["Spent last 30 days", usd(p.spent_month)],
+    ["Yesterday", what],
+    ["Reached yesterday", `${p.recipients} agents`],
+    ["Funded", funded ? `${Math.round(p.funded * 100)}% (treasury short)` : "fully", funded ? "short" : ""],
+  ]) {
+    const span = document.createElement("span");
+    if (cls) span.className = cls;
+    span.append(`${label}: `, Object.assign(document.createElement("b"), { textContent: value }));
+    stats.append(span);
+  }
+}
+
+function renderPolicies() {
+  const g = state.government;
+  const list = g.policies || [];
+  const opts = g.policy_options;
+  ui.policyAdd.disabled = !g.enabled;
+  // Budget summary: what comes in, what is promised and what was spent.
+  const promised = list.reduce((a, p) => a + p.budget, 0);
+  const asNeeded = list.filter(p => p.budget === 0).length;
+  const spent = list.reduce((a, p) => a + p.spent_month, 0);
+  ui.policyBudget.innerHTML = "";
+  for (const [label, value, warn] of [
+    ["Taxes per month", usd(g.revenue_month)],
+    ["Budgets promised per month", usd(promised) + (asNeeded ? ` + ${asNeeded} as needed` : ""), promised > g.revenue_month],
+    ["Spent on policies, last 30 days", usd(spent)],
+    ["Treasury now", usd(g.treasury)],
+  ]) {
+    const d = document.createElement("div");
+    if (warn) d.className = "warn";
+    d.append(label, Object.assign(document.createElement("b"), { textContent: value }));
+    ui.policyBudget.append(d);
+  }
+  if (!list.length) {
+    ui.policyList.innerHTML = `<p class="empty-list">No spending policies: taxes go to the benefit, public works and equal transfers.</p>`;
+    policyCards.clear();
+    return;
+  }
+  const seen = new Set();
+  list.forEach((p, i) => {
+    seen.add(p.id);
+    let card = policyCards.get(p.id);
+    const shape = `${p.kind}|${p.audience}`;
+    if (!card || card.dataset.shape !== shape) {          // new, or its fields changed: rebuild
+      const fresh = buildPolicyCard(p, opts);
+      if (card) card.replaceWith(fresh);
+      card = fresh;
+      policyCards.set(p.id, card);
+    }
+    fillPolicyCard(card, p, i);
+    if (ui.policyList.children[i] !== card) ui.policyList.insertBefore(card, ui.policyList.children[i] || null);
+  });
+  for (const [id, card] of policyCards) {
+    if (!seen.has(id)) { card.remove(); policyCards.delete(id); }
+  }
+  for (const el of [...ui.policyList.children]) if (!el.classList.contains("policy")) el.remove();
+}
+
+ui.policyAdd.onclick = () => {
+  const g = state.government;
+  const budget = Math.max(100, Math.round((g.revenue_month || 0) * 0.1 / 100) * 100);
+  sendPolicy({ action: "add", policy: { kind: "cash", audience: "low_income", share: 0.2, distribution: "equal", budget } });
+};
+
 function renderGovernment() {
   fillGovernment();
+  renderPolicies();
   const g = state.government;
   const m = state.market;
   const stats = [
