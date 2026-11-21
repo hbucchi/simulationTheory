@@ -191,6 +191,12 @@ class LaborMarket:
             a.flow["labor_used"] += own
             free = a.capacity_now - own
             a.offered = free * (rules.participation_floor + (1 - rules.participation_floor) * a.job_need)
+            # Fewer than labor_offer_months of living costs left (money + goods for its needs):
+            # it looks for work with all the labour it can spare.
+            if rules.labor_offer_months > 0:
+                a.months_left = economy.months_covered(a, prices, rules)
+                if a.months_left < rules.labor_offer_months:
+                    a.offered = free
             if a.offered > 1e-9:
                 offers.append(a)
             if a.labor_need - own > 1e-9:

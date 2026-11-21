@@ -161,7 +161,7 @@ class PriceLevelTests(unittest.TestCase):
     def test_the_amount_of_money_only_sets_the_scale(self):
         levels = []
         for money in (1000, 4000):
-            w = World(seed=1, rules=Rules.from_dict({"agents": 30, "money": money}))
+            w = World(seed=1, rules=Rules.from_dict({"agents": 30, "money": money, "start_months_cap": 0}))
             w.spawn_random_agents()
             levels.append(w.current_prices()["water"])
         self.assertAlmostEqual(levels[1] / levels[0], 4, places=6)

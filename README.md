@@ -780,7 +780,7 @@ Going without has consequences (`need_penalties_enabled`, the *Unmet needs hurt*
 | Hunger | labour −30% | death |
 | Sleep | labour −30% (tired) | agents rest from 0.5 anyway |
 | Shelter | health worsens twice as fast | sleeps 30% worse |
-| Health | labour −50% (sick days) | can't work; dies after 30 days at 1.00 |
+| Health | labour −50% (sick days) | can't work; dies after 180 days (six months) at 1.00 |
 | Energy | labour −20% | shelter worsens twice as fast (no heating) |
 | Boredom | – | depression: slower, sleeps worse, labour −20% |
 
@@ -800,7 +800,7 @@ replacing a job.
 
 ### Death and depression
 
-- **Hunger or thirst at 1.00** (after eating/drinking whatever it had), or **30 days at health
+- **Hunger or thirst at 1.00** (after eating/drinking whatever it had), or **180 days at health
   1.00**, → the agent **dies** and disappears with its inventory and money.
 - **Boredom at 1.00** → the agent becomes **depressed**: its movement and its
   sleep recovery are halved. It recovers when boredom drops below 0.3.

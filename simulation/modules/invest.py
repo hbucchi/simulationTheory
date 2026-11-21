@@ -130,7 +130,7 @@ def purchase_limit(agent, asset_prices, ratio):
 
 def cash_needed(agent, prices, rules):
     """Money an agent wants on hand: its liquidity plus the cost of what it needs to buy now."""
-    return economy.liquidity_cost(prices, rules) + economy.shopping_cost(agent, prices, rules)
+    return economy.liquidity_cost(prices, rules, agent) + economy.shopping_cost(agent, prices, rules)
 
 
 def budget(agent, prices, world):

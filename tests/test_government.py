@@ -53,7 +53,7 @@ class LabourPurchaseTests(unittest.TestCase):
         if len(world.agents) == 10:
             # Base money: agents' cash plus the cash banks hold (deposits and loans only move it).
             base = world.base_money()
-            self.assertAlmostEqual(base, start + world.government.money_created, places=6)
+            self.assertAlmostEqual(base, start + world.money_issued(), places=6)   # (incl. central bank loans)
 
     def test_no_money_is_printed_by_default(self):
         # Default policy: taxes pay for benefits and public works (balanced budget), no new money.

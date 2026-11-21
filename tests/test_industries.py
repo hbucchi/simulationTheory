@@ -116,7 +116,7 @@ class InputTradingTests(unittest.TestCase):
         self.assertEqual(economy.spare(miner, "ore", world.rules), 30)
 
     def test_short_baker_buys_inputs_from_farmer(self):
-        world = world_with(price_mode="fixed", demand_pricing_enabled=False)
+        world = world_with(price_mode="fixed", demand_pricing_enabled=False, trade_radius=0)   # (no remote buying)
         baker = self.make_baker(world, 0)
         farmer = world.create_agent(needs=CALM, inventory={**NO_STOCK, "grain": 50})
         deals = economy.trade(baker, farmer, world.current_prices(), world.rules)

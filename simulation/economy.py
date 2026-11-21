@@ -267,6 +267,16 @@ def living_cost(agent, prices, rules=DEFAULT_RULES):
     return value
 
 
+def months_covered(agent, prices, rules=DEFAULT_RULES):
+    """How many months its money (deposits included) and the goods it holds for its needs would
+    pay for its living costs (math.inf if it costs nothing to live)."""
+    living = living_cost(agent, prices, rules) * rules.month_steps
+    if living <= 0:
+        return math.inf
+    held = sum(n * prices.get(g, 0.0) for g, n in agent.inventory.to_dict().items() if n and rules.need_of(g))
+    return (money_of(agent) + held) / living
+
+
 def shopping_cost(agent, prices, rules=DEFAULT_RULES, needs=None):
     """Money to buy what it needs right now, the cheapest way for each need (only ``needs``,
     if given)."""
@@ -284,21 +294,33 @@ def shopping_cost(agent, prices, rules=DEFAULT_RULES, needs=None):
 _liquidity_memo = {}   # id(prices) -> (prices, rules, value): the same for every agent at given prices
 
 
-def liquidity_cost(prices, rules=DEFAULT_RULES):
-    """Price of rules.liquidity_units baseline units of relief (relief_per_unit each) for every
-    need, bought the cheapest way: the cash an agent keeps on hand."""
+def liquidity_by_need(prices, rules=DEFAULT_RULES):
+    """{need: price of rules.liquidity_units baseline units of relief (relief_per_unit each),
+    bought the cheapest way}. Memoised per prices dict."""
     hit = _liquidity_memo.get(id(prices))
     if hit and hit[0] is prices and hit[1] is rules:
         return hit[2]
-    total = 0.0
+    out = {}
     for need in rules.consumer_needs:
         per_relief = [prices[g] / rules.relief(g, need) for g in rules.goods_for(need) if g in prices]
-        total += min(per_relief, default=0.0) * rules.relief_per_unit
+        out[need] = rules.liquidity_units * min(per_relief, default=0.0) * rules.relief_per_unit
     if len(_liquidity_memo) > 8:
         _liquidity_memo.clear()
     # Keeping prices in the entry keeps its id from being reused by another dict.
-    _liquidity_memo[id(prices)] = (prices, rules, rules.liquidity_units * total)
-    return _liquidity_memo[id(prices)][2]
+    _liquidity_memo[id(prices)] = (prices, rules, out)
+    return out
+
+
+def liquidity_cost(prices, rules=DEFAULT_RULES, agent=None):
+    """The cash an agent keeps on hand: liquidity_units of relief for every need, bought the
+    cheapest way, except needs its own industries already meet (it doesn't keep cash to buy
+    what it makes)."""
+    costs = liquidity_by_need(prices, rules)
+    if agent is None or not agent.assets:
+        return sum(costs.values())
+    made = agent.output_capacity
+    return sum(c for need, c in costs.items()
+               if not any(made.get(g, 0) > 0 for g in rules.goods_for(need)))
 
 
 def stockpile_target(agent, resource, rules=DEFAULT_RULES, scarcity=None):

@@ -370,7 +370,7 @@ class Rules:
     unit_markup: float = 0.05
 
     # Life
-    death_enabled: bool = True         # hunger or thirst at 1.00 kills (and 30 days at health 1.00)
+    death_enabled: bool = True         # hunger or thirst at 1.00 kills (and 180 days at health 1.00)
     # Unmet needs have consequences (penalties.py): slower walking, less labour, needs that make
     # others worse, illness that can kill.
     need_penalties_enabled: bool = True
@@ -385,15 +385,21 @@ class Rules:
     # Starting companies hold working capital: company cash for this many days of their full wage
     # bill at the starting wage, so owners can hire before their first sales come in. 0 = none.
     working_capital_days: int = 30
+    # Agents offer all the labour they can spare once their money and the goods they hold for
+    # their needs would cover fewer than labor_offer_months of living costs. At the start, agents
+    # without assets hold at most start_months_cap months of them (money and goods cut in proportion).
+    labor_offer_months: float = 6.0
+    start_months_cap: float = 4.0
     # Housing market (housing.py): houses are whole assets; each houses one agent (its shelter
     # need is met every day); the homeless' shelter grows at homeless_shelter_rate. Homebuilders
-    # (the housing industry) turn every house_units units of housing into a new house. A house
-    # sells for at least house_min_multiple x the average price of goods; rent is its price x
-    # rent_yield (per day; 6% a year). A tenant who can't pay for eviction_days is evicted.
+    # (the housing industry) turn every house_units units of housing into a new house. A house is
+    # worth a year's rent / rent_yield (6% a year), the rent being rent_income_share of the median
+    # income x demand; never below house_min_multiple x the price of food. A tenant who can't pay for eviction_days is evicted.
     housing_enabled: bool = True
     starting_houses: float = 0.95          # houses per agent at the start
     house_units: int = 20
-    house_min_multiple: float = 50.0
+    house_min_multiple: float = 100.0     # minimum house price: x the price of food
+    rent_income_share: float = 0.3        # rent people can pay: share of the median income
     rent_yield: float = (1.06 ** (1 / 360)) - 1
     eviction_days: int = 30
     homeless_shelter_rate: float = 0.01
@@ -409,6 +415,9 @@ class Rules:
 
     # Meetings
     contact_distance: float = 12       # px between centres to count as touching
+    # Buyers trade with sellers up to this far away (px) without walking to them (like shops and
+    # deliveries; the map is 1024 px wide). 0 = only when they touch.
+    trade_radius: float = 600
     # (Steps are days: walking apart for weeks after every deal, or ignoring the only water
     # seller nearby for two months, let agents die of thirst next to plenty of water.)
     depart_steps: int = 2              # days two traders walk apart
@@ -644,7 +653,7 @@ MODULES = {
     "government": ("government_enabled", "Government & central bank", (),
                    "Policy rate, Basel capital rule for banks, buying labour with new money."),
     "expiry": ("expiry_enabled", "Expiry", (), "Goods go off after their shelf life."),
-    "death": ("death_enabled", "Death", (), "Hunger or thirst at 1.00 kills (and 30 days too ill to work)."),
+    "death": ("death_enabled", "Death", (), "Hunger or thirst at 1.00 kills (and six months too ill to work)."),
     "penalties": ("need_penalties_enabled", "Unmet needs hurt", (),
                   "Thirst slows walking; hunger, tiredness, illness and cold cut labour; no shelter makes illness worse."),
     "housing": ("housing_enabled", "Housing market", ("commerce",),
@@ -805,10 +814,13 @@ LIMITS = {
     "subsistence_enabled": (None, None, "bool"),
     "asset_owner_share": (0.001, 1, "float"),
     "working_capital_days": (0, 3600, "int"),
+    "labor_offer_months": (0, 1000, "float"),
+    "start_months_cap": (0, 1000, "float"),
     "housing_enabled": (None, None, "bool"),
     "starting_houses": (0, 5, "float"),
     "house_units": (1, 10000, "int"),
     "house_min_multiple": (0, 1e6, "float"),
+    "rent_income_share": (0, 1, "float"),
     "rent_yield": (0, 0.01, "float"),
     "eviction_days": (1, 3600, "int"),
     "homeless_shelter_rate": (0, 1, "float"),
@@ -817,6 +829,7 @@ LIMITS = {
     "depression_enabled": (None, None, "bool"),
     "depression_factor": (0, 1, "float"),
     "contact_distance": (1, 200, "float"),
+    "trade_radius": (0, 5000, "float"),
     "depart_steps": (0, 1000, "int"),
     "cooldown_steps": (0, 10000, "int"),
     "retry_steps": (0, 10000, "int"),

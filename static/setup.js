@@ -100,7 +100,7 @@ const SETUP_SECTIONS = [
       "suffer. All but the starting stock can be changed in the Housing tab during the game.", fields: [
     { path: "starting_houses", label: "Houses per agent at the start", kind: "float", min: 0, max: 5, step: 0.05,
       enabledWhen: v => v.housing_enabled },
-    { path: "house_min_multiple", label: "Minimum house price (× the average good)", kind: "float", min: 0, step: 5,
+    { path: "house_min_multiple", label: "Minimum house price (× the price of food)", kind: "float", min: 0, step: 5,
       enabledWhen: v => v.housing_enabled },
     { path: "rent_yield", label: "Rent (% of the price a year)", kind: "float", min: 0, step: 0.5, yearly: true,
       enabledWhen: v => v.housing_enabled },

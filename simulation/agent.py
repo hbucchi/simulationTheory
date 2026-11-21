@@ -74,6 +74,7 @@ class Agent:
         self.speed_factor = 1.0      # < 1 while very thirsty (penalties.py; set by NeedsDecay)
         self.critical_health_days = 0   # days in a row at health 1.00 (dies at penalties.HEALTH_DEATH_DAYS)
         self.subsistence = {}        # {good: fraction of a unit made on its own so far}
+        self.months_left = None      # months of living costs its money and goods cover (labor.py)
         self.home = None             # the House it lives in (housing.py), or None: homeless
         self.houses = []             # Houses it owns
         self.subsistence_made = {}   # {good: units per day made on its own (latest day)}

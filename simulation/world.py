@@ -289,6 +289,23 @@ class World:
             self.create_agent(money=round(money[i], 2), inventory={k: v[i] for k, v in stock.items()},
                               assets={k: v[i] for k, v in assets.items()})
         self.update_price_level()
+        if r.start_months_cap > 0 and n > 1:
+            # Agents without assets start with at most start_months_cap months of living costs in
+            # money and goods for their needs (both cut in proportion).
+            prices = self.current_prices(include_labor=False)
+            for a in self.agents[-n:]:
+                if a.assets:
+                    continue
+                limit = r.start_months_cap * economy.living_cost(a, prices, r) * r.month_steps
+                held = {g: c for g, c in a.inventory.to_dict().items() if c and r.need_of(g)}
+                goods = sum(c * prices[g] for g, c in held.items())
+                if a.money + goods <= limit:
+                    continue
+                keep = limit / (a.money + goods)          # both cut in proportion
+                a.money = round(a.money * keep, 2)
+                for g, c in held.items():
+                    a.inventory.set(g, math.floor(c * keep))
+            self.update_price_level()
         if r.working_capital_days > 0:
             # Companies start with working capital: company cash to pay working_capital_days of
             # their full wage bill at the starting wage (before their sales bring money in).
@@ -924,9 +941,9 @@ class World:
         sold = {}   # buyer name -> {"goods": money, "units": n, "shares": n}
         rules = self.rules
 
-        def sell(price, quantity, whole):
+        def sell(price, quantity, whole, buyers=None):
             """Hand ``quantity`` to buyers in turn; yields (buyer, amount, cost)."""
-            for buyer in near:
+            for buyer in (near if buyers is None else buyers):
                 if quantity <= 1e-9:
                     return
                 if buyer.deposits:
@@ -940,8 +957,14 @@ class World:
                 quantity -= amount
                 yield buyer, amount, amount * price
 
+        def uses(agent, resource):
+            """Only agents that consume a good or need it for their industries buy it."""
+            return bool(rules.need_of(resource)) or economy.input_target(agent, resource, rules) > 0
+
         for resource in economy.GOODS:
-            for buyer, units, cost in sell(prices[resource], math.floor(dead.inventory.count(resource) + 1e-9), True):
+            near_users = [o for o in near if uses(o, resource)]
+            for buyer, units, cost in sell(prices[resource], math.floor(dead.inventory.count(resource) + 1e-9), True,
+                                           near_users):
                 economy.transfer(dead, buyer, resource, units)
                 buyer.money -= cost
                 got = sold.setdefault(buyer.name, {"cost": 0.0, "items": []})

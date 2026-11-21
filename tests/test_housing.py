@@ -104,7 +104,7 @@ class BuyingTests(unittest.TestCase):
         w = World(seed=3, rules=Rules.from_dict({"agents": 20}))
         w.spawn_random_agents()
         self.assertGreaterEqual(w.housing.price(w), w.housing.min_price(w))
-        self.assertGreater(w.housing.min_price(w), max(w.current_prices()[g] for g in w.rules.active_goods))
+        self.assertAlmostEqual(w.housing.min_price(w), 100 * w.current_prices()["food"])
 
 
 class BuildingTests(unittest.TestCase):

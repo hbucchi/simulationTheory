@@ -7,7 +7,7 @@ Each need has a warning level (WARNING, 0.80) and a critical level (CRITICAL, 1.
     hunger    labour capacity -30%                death
     sleep     labour capacity -30% (tired)        (agents rest from 0.5, see Rest)
     shelter   health grows twice as fast          sleep recovers 30% slower
-    health    labour capacity -50% (sick days)    can't work; dies after HEALTH_DEATH_DAYS at 1.00
+    health    labour capacity -50% (sick days)    can't work; dies after HEALTH_DEATH_DAYS (180) at 1.00
     energy    labour capacity -20%                shelter grows twice as fast (no heating)
     boredom   -                                   depression (Mood): slower, and labour -20%
 
@@ -18,7 +18,7 @@ labour, so it earns less and its employer makes less.
 """
 WARNING = 0.8
 CRITICAL = 1.0
-HEALTH_DEATH_DAYS = 30
+HEALTH_DEATH_DAYS = 180     # six months too ill to work
 
 LABOR_AT_WARNING = {"hunger": 0.7, "sleep": 0.7, "health": 0.5, "energy": 0.8}
 DEPRESSED_LABOR = 0.8

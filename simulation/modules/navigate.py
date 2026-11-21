@@ -5,6 +5,8 @@ from .base import Module
 
 # A seller stops whatever it is doing to meet a buyer this close (px) that is walking to it.
 NEAR_SEEKER = 60
+# Trips that can be done at a distance, within rules.trade_radius (buying, and selling surplus).
+REMOTE_TRADES = {"seeking", "stockpiling", "restocking", "sourcing", "building", "selling"}
 
 
 class Navigate(Module):
@@ -121,4 +123,11 @@ class Navigate(Module):
         agent.activity = activity
         agent.target_id = partner.id
         world.note_target(agent, partner)
+        radius = world.rules.trade_radius
+        if (activity in REMOTE_TRADES and radius > 0 and agent.distance_to(partner) <= radius
+                and not world.in_cooldown(agent, partner)):
+            # Within the trading radius: buy (or sell) without walking there, like a shop or an
+            # order with delivery.
+            world.interact(agent, partner)
+            return
         agent.move_towards(partner.x, partner.y, world)  # partner's position right now

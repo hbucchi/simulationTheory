@@ -109,7 +109,7 @@ class RulesTests(unittest.TestCase):
 
     def test_world_draws_each_agent_from_the_spreads(self):
         rules = Rules.from_dict({
-            "agents": 200,
+            "agents": 200, "start_months_cap": 0,          # (no cap: the spread itself)
             "labor_capacity": {"dist": "normal", "mean": 10, "std": 6, "limit": 3, "skew": 4},
             "money": {"dist": "normal", "mean": 100, "std": 20, "limit": 3, "skew": 0},
             "movement": 7,
@@ -126,7 +126,7 @@ class RulesTests(unittest.TestCase):
         self.assertEqual({a.movement for a in world.agents}, {7})
 
     def test_spawn_shares_tiered_money_exactly(self):
-        rules = Rules.from_dict({"agents": 10, "money": {"dist": "tiered", "average": 100, "tiers": [
+        rules = Rules.from_dict({"agents": 10, "start_months_cap": 0, "money": {"dist": "tiered", "average": 100, "tiers": [
             {"agents": 10, "share": 60}, {"agents": 90, "share": 40}]}})
         world = World(seed=5, rules=rules)
         world.spawn_random_agents()

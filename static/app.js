@@ -790,7 +790,7 @@ function renderHousing() {
     ["Live in their own house", `${h.owner_occupied}`, `${Math.round(h.owner_occupied / people * 100)}% of agents`],
     ["Renting", `${h.rented}`, `${h.public} public housing (rent goes to the treasury)`],
     ["Empty", `${h.vacant}`, `${h.for_sale} for sale`],
-    ["House price", usd(h.price), `minimum ${usd(h.min_price)} (${h.min_multiple}× the average good)`],
+    ["House price", usd(h.price), `minimum ${usd(h.min_price)} (${h.min_multiple}× food)`],
     ["Rent", `${usd(h.rent * DAYS_PER_MONTH())} /month`, `${(perYear(h.rent_yield) * 100).toFixed(1)}% of the price a year · ${usd(h.rent_paid_day)} paid yesterday`],
     ["Sales", `${h.sold_month} in 30 days`, `${h.sales} houses sold so far`],
   ]);

@@ -8,9 +8,10 @@ and maybe an occupant: its owner, a tenant, or nobody (vacant).
 
 - New houses: homebuilders (owners of the housing industry) turn every rules.house_units units
   of housing they made into a house, and put it up for sale.
-- Price: never below the minimum, house_min_multiple x the average price of goods (so it follows
-  the price level); above it, the cost of the housing units x demand pressure (agents without a
-  home / houses free to move into, between 0.5 and 3).
+- Price: what the rent is worth, a year's rent / rent_yield (6% a year), the rent being
+  rent_income_share (30%) of the median income x demand pressure (agents without a home of
+  their own vs houses free to move into): about five years of the median income. Never below
+  house_min_multiple (100) x the price of food.
 - Rent: price x rent_yield per day, paid by the tenant to the owner every day. A tenant who can't
   pay for eviction_days days in a row is evicted.
 - Buying a home: an agent without a home of its own buys a vacant house for sale once its money
@@ -108,20 +109,27 @@ class HousingMarket:
     # ---------- prices ----------
 
     def min_price(self, world, prices=None):
+        """The floor: min_multiple x the price of food (or of the main hunger good)."""
         prices = prices or world.current_prices()
-        goods = [prices[g] for g in world.rules.active_goods if g in prices]
-        return self.min_multiple * (sum(goods) / len(goods) if goods else 0.0)
+        rules = world.rules
+        food = "food" if "food" in rules.active_goods else next(iter(rules.goods_for("hunger")), None)
+        return self.min_multiple * prices.get(food, 0.0) if food else 0.0
 
     def price(self, world):
-        """Price of a house today (the same for every house)."""
+        """Price of a house today (the same for every house): what its rent is worth, a year's
+        rent / rent_yield, never below min_price. The rent people can pay is rent_income_share of
+        the median income, x demand pressure (agents without a home of their own vs houses free
+        to move into, between 0.5 and 3). With a 6% yield and 30% of income, a house costs about
+        five years of the median income."""
         if self._price and self._price[0] == world.tick:
             return self._price[1]
         prices = world.current_prices()
-        cost = world.rules.house_units * prices.get("housing", 0.0)
+        incomes = sorted(a.income_avg for a in world.agents if a.income_avg > 0)
         wanting = sum(1 for a in world.agents if a.home is None or a.home.owner is not a)
         free = sum(1 for h in self.houses if h.occupant is None or h.for_sale)
         pressure = min(3.0, max(0.5, (0.25 * wanting + 1) / (free + 1)))
-        value = max(self.min_price(world, prices), cost * pressure)
+        rent = world.rules.rent_income_share * incomes[len(incomes) // 2] * pressure if incomes else 0.0
+        value = max(self.min_price(world, prices), rent / self.rent_yield if self.rent_yield > 0 else 0.0)
         self._price = (world.tick, value)
         return value
 
