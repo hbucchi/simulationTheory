@@ -107,7 +107,7 @@ class SubsistenceTests(unittest.TestCase):
         a = w.create_agent(needs={**CALM, "thirst": 0.9}, money=0, inventory=EMPTY, labor_capacity=0.5)
         a.capacity_now, a.labor_sold, a.own_labor = 0.02, 0.0, 0.0      # crushed by penalties
         LaborMarket._subsistence(w)
-        self.assertAlmostEqual(a.subsistence_made["water"], 0.5 * 0.6 * 0.5)
+        self.assertAlmostEqual(a.subsistence_made["water"], 0.5 * 1.0 * 0.5)
 
 
 if __name__ == "__main__":

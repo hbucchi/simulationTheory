@@ -434,8 +434,9 @@ class Rules:
     # Each day it makes whichever its most urgent need calls for. See labor.py.
     subsistence_enabled: bool = True
     # However weak (penalties, low efficiency), an agent short of food or water can still put this
-    # share of its base labour capacity into making its own (enough for thirst alone at 0.6).
-    survival_effort: float = 0.6
+    # share of its base labour capacity into making its own (1 = all of it: enough for thirst and
+    # hunger; at 0.6 only thirst was covered and 80% of a game starved).
+    survival_effort: float = 1.0
     subsistence_rates: dict = field(default_factory=lambda: {"water": 0.5, "food": 0.35})
     depression_enabled: bool = True    # boredom at 1.00 depresses
     depression_factor: float = 0.5     # depressed speed and sleep recovery are multiplied by this
