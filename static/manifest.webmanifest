@@ -1,0 +1,9 @@
+{
+  "name": "Agent Simulation",
+  "short_name": "Agents",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f6fa",
+  "theme_color": "#6c72f0",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

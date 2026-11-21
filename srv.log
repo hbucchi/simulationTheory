@@ -1,0 +1,7 @@
+Simulation running at http://localhost:8123  (Ctrl+C to stop)
+127.0.0.1 - - [20/Nov/2026 16:52:26] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 16:52:26] "GET /catalog.js HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 16:52:26] "GET /app.js HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 16:52:26] "GET /style.css HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 16:52:26] "GET /report.js HTTP/1.1" 200 -
+127.0.0.1 - - [20/Nov/2026 16:52:26] "GET /setup.js HTTP/1.1" 200 -

@@ -2,45 +2,518 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Agent Simulation</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b2545">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <title>EconSim · Economy training simulator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
-    <h1>Agent Simulation</h1>
-    <div class="tick">Tick <span id="tick">0</span></div>
-  </header>
+  <div class="app">
+    <aside class="sidenav" aria-label="Sections">
+      <div class="brand">
+        <span class="logo" aria-hidden="true"></span>
+        <div>
+          <div class="brand-name">EconSim</div>
+          <div class="brand-sub">Economy training simulator</div>
+        </div>
+      </div>
+      <nav class="tabs nav-list" role="tablist">
+        <button role="tab" data-tab="dashboard" class="active"><span class="nav-ico" aria-hidden="true">◧</span><span>Dashboard</span></button>
+        <button role="tab" data-tab="overview"><span class="nav-ico" aria-hidden="true">◎</span><span>Map &amp; people</span></button>
+        <button role="tab" data-tab="products"><span class="nav-ico" aria-hidden="true">▤</span><span>Products</span></button>
+        <button role="tab" data-tab="banks"><span class="nav-ico" aria-hidden="true">⌂</span><span>Banks</span></button>
+        <button role="tab" data-tab="government"><span class="nav-ico" aria-hidden="true">⚖</span><span>Government</span></button>
+        <button role="tab" data-tab="report"><span class="nav-ico" aria-hidden="true">▥</span><span>Reports</span></button>
+        <button role="tab" data-tab="manage"><span class="nav-ico" aria-hidden="true">✎</span><span>Edit agents</span></button>
+      </nav>
+      <div class="nav-foot">
+        <button id="open-setup" class="soft">New game &amp; rules</button>
+      </div>
+    </aside>
 
-  <section class="controls">
-    <div class="group">
-      <button id="step">Step</button>
-      <button id="play">Play</button>
-      <label>Interval
-        <input id="interval" type="range" min="16" max="1000" value="200">
-        <span id="interval-label">200 ms</span>
-      </label>
+    <div class="workspace">
+      <header class="topbar">
+        <div class="page-head">
+          <h1 id="page-title">Dashboard</h1>
+          <div class="calendar" title="Each tick of the simulation is one day; a month is 30 days and a year 12 months">
+            <span id="cal-date" class="cal-date">Year 1 · Month 1 · Day 1</span>
+            <span class="cal-total">day <span id="tick" class="mono">0</span></span>
+          </div>
+        </div>
+        <div class="playback">
+          <div class="segmented">
+            <button id="step" title="Advance one day (→)">Next day</button>
+            <button id="play" class="primary" title="Play / pause (Space)">Play</button>
+            <button id="run100" title="Advance one month at once">+1 month</button>
+          </div>
+          <label class="speed" title="How much time passes on each tick while playing">
+            <span>Pace</span>
+            <select id="steps-per-tick">
+              <option value="1">1 day / tick</option>
+              <option value="7">1 week / tick</option>
+              <option value="30">1 month / tick</option>
+            </select>
+          </label>
+          <label class="speed" title="Time between ticks while playing">
+            <span>Speed</span>
+            <input id="interval" type="range" min="16" max="1000" value="200">
+            <span id="interval-label" class="mono">200 ms</span>
+          </label>
+        </div>
+      </header>
+
+      <main class="pages">
+        <section id="tab-dashboard" class="page" role="tabpanel">
+          <div id="dash-kpis" class="kpi-grid"></div>
+          <div class="dash-grid">
+            <section class="card">
+              <h2 class="card-title">Economy over time</h2>
+              <p class="card-sub">Recorded while you play.</p>
+              <div id="dash-charts" class="dash-charts"></div>
+            </section>
+            <section class="card">
+              <h2 class="card-title">What needs attention</h2>
+              <ul id="dash-alerts" class="alerts"></ul>
+              <h2 class="card-title gap">Biggest price moves this month</h2>
+              <div id="dash-movers" class="movers"></div>
+            </section>
+          </div>
+          <section class="card">
+            <h2 class="card-title">Latest events</h2>
+            <ol id="dash-events" class="events short"></ol>
+          </section>
+        </section>
+
+        <section id="tab-overview" class="page" role="tabpanel" hidden>
+          <div class="world-grid">
+      <section class="card map-card">
+        <div class="card-head">
+          <div>
+            <h2 class="card-title">World</h2>
+            <p class="card-sub">Click a dot to select an agent. Dashed lines show who is heading where.</p>
+          </div>
+          <div class="map-tools">
+            <label class="switch"><input id="show-range" type="checkbox" checked><span></span> Movement range</label>
+            <div class="restart">
+              <label>Agents <input id="agent-count" type="number" min="1" max="5000" value="3"></label>
+              <label>Seed <input id="seed" type="number" placeholder="random"></label>
+              <button id="reset" class="ghost" title="Start over with the same rules">Restart</button>
+            </div>
+          </div>
+        </div>
+        <div class="world-wrap">
+          <canvas id="world" width="1024" height="1024"></canvas>
+        </div>
+      </section>
+
+            <section class="card side-panel">
+
+        <h3 class="section-title">Events</h3>
+        <ol id="events" class="events" reversed></ol>
+
+        <h3 class="section-title">Agents <span id="agent-shown" class="count"></span></h3>
+        <div class="agent-tools">
+          <input id="agent-search" type="search" placeholder="Search by name…" aria-label="Search agents by name">
+          <select id="agent-filter" aria-label="Filter agents">
+            <option value="all">All agents</option>
+            <option value="needy">Needs something</option>
+            <option value="seeking">Seeking a seller</option>
+            <option value="searching">Searching (no seller)</option>
+            <option value="stockpiling">Stockpiling</option>
+            <option value="restocking">Restocking</option>
+            <option value="sourcing">Buying industry inputs</option>
+            <option value="building">Building new assets</option>
+            <option value="hiring">Hiring labour</option>
+            <option value="selling">Selling surplus</option>
+            <option value="meeting">Meeting a seeker</option>
+            <option value="leaving">Leaving a trade</option>
+            <option value="sleeping">Sleeping</option>
+            <option value="wandering">Wandering</option>
+            <option value="depressed">Depressed</option>
+          </select>
+          <select id="agent-sort" aria-label="Sort agents">
+            <option value="id">Sort: ID</option>
+            <option value="name">Sort: name</option>
+            <option value="money">Sort: money</option>
+            <option value="food">Sort: food</option>
+            <option value="water">Sort: water</option>
+            <option value="games">Sort: games</option>
+            <option value="labor">Sort: labour sold</option>
+            <option value="urgency">Sort: most urgent need</option>
+            <option value="hunger">Sort: hunger</option>
+            <option value="thirst">Sort: thirst</option>
+            <option value="sleep">Sort: sleep</option>
+            <option value="boredom">Sort: boredom</option>
+            <option value="movement">Sort: movement</option>
+            <option value="reserve">Sort: stockpile reserve</option>
+            <option value="assets">Sort: assets owned</option>
+          </select>
+          <button id="agent-sort-dir" type="button" class="ghost" title="Toggle ascending / descending">↓ desc</button>
+        </div>
+        <div id="agents" class="agent-list"></div>
+            </section>
+          </div>
+        </section>
+
+      <section id="tab-products" class="page" role="tabpanel" hidden>
+        <p class="hint">Every product in this game: its price, who makes it, how much is made and used, and its market.
+          Click a column name to sort by it (again to reverse); tap a row for details. Flows are averages per day
+          over the last 20 days.</p>
+        <div class="product-tools">
+          <input id="product-search" type="search" placeholder="Search products">
+        </div>
+        <div id="product-summary" class="stat-grid"></div>
+        <div class="table-wrap"><table id="product-table" class="product-table"></table></div>
+        <details class="card fold">
+          <summary>Industry notes: market detail for every industry, by layer</summary>
+        <div id="market" class="market"></div>
+        </details>
+      </section>
+
+      <section id="tab-banks" class="page" role="tabpanel" hidden>
+                <p class="hint">Banks are an industry: a bank needs a banking plant (built from machinery and construction,
+          run with labour and electricity) and its founder's own minimum capital. Its banking services are used up
+          by every loan. Switch banking off and banks stop lending, pay depositors back and close.</p>
+        <div id="bank-stats" class="stat-grid wide-stats"></div>
+        <details class="card fold settings">
+          <summary>Bank settings: rates, cash buffer, minimum capital, credit limit</summary>
+        <form id="bank-form" class="panel" novalidate>
+          <label class="bank-toggle"><input id="bank-enabled" type="checkbox"> Banking on</label>
+          <div class="bank-fields">
+            <label>Deposit rate <span><input id="bank-deposit" type="number" min="0" step="0.1"> % a year</span></label>
+            <label>Loan spread <span><input id="bank-spread" type="number" min="0" step="0.1"> % a year</span></label>
+            <label>Vault cash kept <span><input id="bank-reserve" type="number" min="0" max="100" step="1"> % of deposits</span></label>
+            <label>Minimum capital <span>$ <input id="bank-min-capital" type="number" min="0" step="500"></span></label>
+            <label>Lend each agent up to <span><input id="bank-income-share" type="number" min="0" max="10000" step="5"> % of a month's income</span></label>
+          </div>
+          <div class="form-actions">
+            <button type="button" id="bank-revert" class="ghost">Revert</button>
+            <span class="spacer"></span>
+            <button type="submit" class="primary">Apply</button>
+          </div>
+          <p id="bank-status" class="status" hidden></p>
+        </form>
+        </details>
+        <div id="bank-list" class="bank-list"></div>
+      </section>
+
+      <section id="tab-government" class="page" role="tabpanel" hidden>
+        <p class="hint">The central government and its central bank set a minimum interest rate for every asset,
+          the capital rule commercial banks must meet (Basel), and can inject money by buying labour each day.
+          Changes apply from tomorrow.</p>
+        <div id="gov-stats" class="stat-grid wide-stats"></div>
+        <div class="card policies-card">
+          <div class="card-head">
+            <div>
+              <div class="card-title">Public spending</div>
+              <p class="card-sub">Decide where the treasury's money goes, to whom and how it is shared. Policies are paid
+                in order from the treasury: the first is funded first. Budget 0 = as much as needed.</p>
+            </div>
+            <button type="button" id="policy-add" class="primary">+ Add policy</button>
+          </div>
+          <div id="policy-budget" class="policy-budget"></div>
+          <div id="policy-list" class="policy-list"></div>
+          <p id="policy-status" class="status" hidden></p>
+        </div>
+        <details class="card fold settings">
+          <summary>Policy settings: taxes, spending, interest rate, central bank rules</summary>
+        <form id="gov-form" class="panel" novalidate>
+          <label class="bank-toggle"><input id="gov-enabled" type="checkbox"> Government and central bank on</label>
+          <div class="field">
+            <div class="field-head">
+              <label for="gov-rate">Minimum interest rate</label>
+              <span class="field-value mono" id="gov-rate-label">0.00%</span>
+            </div>
+            <input id="gov-rate-range" type="range" min="0" max="30" step="0.25" value="0" aria-label="Minimum interest rate">
+            <div class="field-row">
+              <input id="gov-rate" type="number" min="0" step="0.25" value="0"> <span class="unit">% a year</span>
+            </div>
+            <p class="field-help">No asset is valued below this return. Higher rates make assets cheaper
+              (price = output × good price ÷ rate).</p>
+          </div>
+          <div class="field">
+            <div class="field-head">
+              <label for="gov-buy">Labour bought each day</label>
+              <span class="field-value mono" id="gov-buy-label">0</span>
+            </div>
+            <input id="gov-buy-range" type="range" min="0" max="20" step="0.5" value="0" aria-label="Labour bought each day">
+            <div class="field-row">
+              <input id="gov-buy" type="number" min="0" step="0.5" value="0"> <span class="unit">units /day</span>
+            </div>
+            <p class="field-help">Bought at the market price from agents with labour to spare, paid with newly created
+              money. The labour is used up in public works.</p>
+          </div>
+          <div class="field">
+            <div class="field-head">
+              <label for="gov-basel">Capital ratio for banks (Basel)</label>
+            </div>
+            <div class="field-row">
+              <input id="gov-basel" type="number" min="0" max="100" step="0.5"> <span class="unit">% of loans</span>
+            </div>
+            <p class="field-help">Central bank rule: a bank's equity (its owners' money) must be at least this share of its
+              loans, which are lent from third parties' deposits. At 12%, $1 of equity backs at most $8.33 of loans.</p>
+          </div>
+          <h4 class="gov-sub">Fiscal policy: taxes and spending</h4>
+          <div class="bank-fields gov-fields">
+            <label>Minimum wage <span>$ <input data-policy="min_wage" type="number" min="0" step="5"> per day's work (0 = none)</span></label>
+            <label>Production tax <span><input data-policy="tax_production" data-scale="100" type="number" min="0" max="100" step="1"> % of every sale</span></label>
+            <label>Salary tax <span><input data-policy="tax_wage" data-scale="100" type="number" min="0" max="100" step="1"> % of wages</span></label>
+            <label>Profit tax <span><input data-policy="tax_profit" data-scale="100" type="number" min="0" max="100" step="1"> % of profits</span></label>
+            <label>Unemployment benefit <span><input data-policy="benefit_rate" data-scale="100" type="number" min="0" max="1000" step="5"> % of the wage</span></label>
+            <label class="check">Spend all taxes (balanced budget: the rest buys public works, then is paid out equally) <input data-policy="balanced_budget" type="checkbox"></label>
+          </div>
+          <h4 class="gov-sub">Central bank</h4>
+          <div class="bank-fields gov-fields">
+            <label>Reserve requirement <span><input data-policy="reserve_requirement" data-scale="100" type="number" min="0" max="100" step="1"> % of deposits</span></label>
+            <label>Interest on reserves <span><input data-policy="reserve_rate" data-scale="100" data-yearly="1" type="number" min="0" step="0.1"> % a year</span></label>
+            <label class="check">Lender of last resort (lends to solvent banks short of cash) <input data-policy="lender_of_last_resort" type="checkbox"></label>
+            <label>… at the policy rate + <span><input data-policy="llr_penalty" data-scale="100" data-yearly="1" type="number" min="0" step="0.1"> % a year</span></label>
+          </div>
+          <div class="form-actions">
+            <button type="button" id="gov-revert" class="ghost">Revert</button>
+            <span class="spacer"></span>
+            <button type="submit" class="primary">Apply policy</button>
+          </div>
+          <p id="gov-status" class="status" hidden></p>
+        </form>
+        </details>
+
+      </section>
+
+      <section id="tab-manage" class="page" role="tabpanel" hidden>
+        <div class="picker">
+          <button id="new-agent" class="chip">+ New agent</button>
+          <span id="agent-chips"></span>
+        </div>
+        <p class="hint">Pick an agent (or click its dot) to edit it. Fields you haven't touched keep updating live;
+          only the fields you change are saved.</p>
+        <form id="agent-form" class="panel" novalidate>
+          <h3 id="form-title">New agent</h3>
+          <div id="form-fields"></div>
+          <div class="balance"></div>
+          <div class="form-actions">
+            <button type="button" id="form-remove" class="danger">Remove</button>
+            <span class="spacer"></span>
+            <button type="button" id="form-revert" class="ghost">Revert</button>
+            <button type="submit" id="form-submit" class="primary">Create agent</button>
+          </div>
+          <p id="form-status" class="status" hidden></p>
+        </form>
+      </section>
+
+      <section id="tab-report" class="page" role="tabpanel" hidden>
+  <div id="report-view" class="report">
+    <div class="report-head">
+      <div>
+        <h1>Report</h1>
+        <p class="hint" id="report-range"></p>
+      </div>
+      <div class="segmented" id="report-window" aria-label="Window">
+        <button data-window="30">Last month</button>
+        <button data-window="90" class="active">Quarter</button>
+        <button data-window="360">Year</button>
+        <button data-window="0">All</button>
+      </div>
     </div>
-    <div class="group">
-      <label>Agents <input id="agent-count" type="number" min="1" max="500" value="3"></label>
-      <label>Seed <input id="seed" type="number" placeholder="random"></label>
-      <button id="reset">Reset</button>
+
+    <details class="card wealth-note">
+      <summary>What "wealth" and these measures mean</summary>
+      <div class="wealth-note-body">
+        <p><b>Wealth</b> of an agent = its <b>money</b> + the <b>goods</b> it holds valued at today's prices + its
+          <b>asset shares</b> valued at today's asset prices. Asset prices come from profit (output value minus wages,
+          divided by the return), so assets that don't cover their wages are worth 0 even though they still produce.
+          Wealth is a snapshot at current prices: it changes when prices move, not only when things change hands.</p>
+        <p><b>Why inequality moves slowly:</b> everyone starts with the same money, and money is most of wealth, so the
+          wealth Gini starts near 0 and only drifts as trades, wages and asset sales move money around. A few hundred
+          days of small trades barely move it. Starting with less money (or uneven money), or less stock, makes
+          differences show up faster.</p>
+        <p><b>Gini</b>: 0 = everyone holds the same, 1 = one agent holds everything. <b>Income</b> and
+          <b>consumption</b> inequality use each agent's smoothed per-day income/consumption. <b>Asset
+          ownership</b> uses shares owned. Each figure below shows its change since the start of the window.</p>
+        <p><b>Employment rate</b> = agents who worked today (on their own assets or hired).
+          <b>Participation</b> = agents offering labour. <b>Unemployment</b> = labour offered that nobody hired.
+          <b>Unfilled jobs</b> = jobs on assets employers wanted but could not fill. <b>Labour share of output</b> =
+          wages paid ÷ value of goods produced (owners working their own assets aren't paid a wage).</p>
+      </div>
+    </details>
+
+    <div id="report-kpis"></div>
+
+    <div class="report-grid">
+      <section class="card report-card">
+        <h2 class="card-title">GDP</h2>
+        <p class="card-sub">What the economy made over the last year, at today's prices (nominal) and at the prices of a
+          year ago (real: changes only with quantities).</p>
+        <div id="chart-gdp"></div>
+      </section>
+      <section class="card report-card">
+        <h2 class="card-title">Price indexes</h2>
+        <p class="card-sub">CPI: last year's consumption at today's vs a year ago's prices. Deflator: nominal ÷ real GDP.
+          Above 100 = inflation.</p>
+        <div id="chart-cpi"></div>
+      </section>
+      <section class="card report-card span-2">
+        <h2 class="card-title">Prices</h2>
+        <p class="card-sub">Price of one unit over time (money per unit).</p>
+        <div id="chart-prices"></div>
+      </section>
+      <section class="card report-card">
+        <h2 class="card-title">Price summary</h2>
+        <p class="card-sub">Over the selected window.</p>
+        <div id="table-prices"></div>
+      </section>
+
+      <section class="card report-card span-3">
+        <h2 class="card-title">Production and consumption</h2>
+        <p class="card-sub">Units per day of the goods in each industry layer, <span class="avg-note"></span> (same scale on all of them). "Used" = consumed for needs + used up as industry inputs; "expired" = thrown away past its shelf life.</p>
+        <div class="small-multiples" id="flow-layers"></div>
+        <div class="small-multiples">
+          <div><h3 class="mini-title">Totals in this window</h3><div id="table-flows"></div></div>
+        </div>
+      </section>
+
+      <section class="card report-card span-2">
+        <h2 class="card-title">Employment</h2>
+        <p class="card-sub">Share of agents who worked and who offered labour, share of offered labour nobody hired,
+          and share of jobs left unfilled (<span class="avg-note"></span>).</p>
+        <div id="chart-employment"></div>
+      </section>
+      <section class="card report-card">
+        <h2 class="card-title">Owners and workers</h2>
+        <p class="card-sub">Owners hold at least one asset share; workers hold none. Averages per agent now.</p>
+        <div id="table-groups"></div>
+      </section>
+
+      <section class="card report-card span-2">
+        <h2 class="card-title">Labour</h2>
+        <p class="card-sub">Units per day (<span class="avg-note"></span>): capacity, used on assets (own + hired),
+          hired by the government, and unused (not offered, or offered but not hired).</p>
+        <div id="chart-labor"></div>
+      </section>
+      <section class="card report-card">
+        <h2 class="card-title">Labour summary</h2>
+        <p class="card-sub">Totals in this window.</p>
+        <div id="table-labor"></div>
+      </section>
+
+      <section class="card report-card span-2">
+        <h2 class="card-title">Workers' condition</h2>
+        <p class="card-sub">Averages over all agents: efficiency (share of capacity they can give), wellbeing, and how much
+          they need a job (0 = not at all, 1 = desperately).</p>
+        <div id="chart-workers"></div>
+      </section>
+      <section class="card report-card">
+        <h2 class="card-title">Hardship</h2>
+        <p class="card-sub">Share of agents with a need above the seek threshold, and share who badly need a job
+          (need above 0.5).</p>
+        <div id="chart-hardship"></div>
+        <div id="table-deaths"></div>
+      </section>
+
+      <section class="card report-card span-2">
+        <h2 class="card-title">Inequality of what agents hold</h2>
+        <p class="card-sub">Gini of money, asset shares and wealth: 0 = everyone holds the same, 1 = one agent holds
+          everything.</p>
+        <div id="chart-gini"></div>
+      </section>
+      <section class="card report-card">
+        <h2 class="card-title">Who holds what now</h2>
+        <p class="card-sub">Lorenz curves: share held by the poorest x% of agents. The dashed line is perfect equality.</p>
+        <div id="chart-lorenz"></div>
+      </section>
+
+      <section class="card report-card span-2">
+        <h2 class="card-title">Inequality of income and consumption</h2>
+        <p class="card-sub">Gini of each agent's smoothed income and consumption per day.</p>
+        <div id="chart-gini-flows"></div>
+      </section>
+      <section class="card report-card">
+        <h2 class="card-title">Wealth by fifth</h2>
+        <p class="card-sub">Agents ranked by wealth, split into five equal groups (poorest first).</p>
+        <div id="table-quintiles"></div>
+      </section>
+
+      <section class="card report-card span-2">
+        <h2 class="card-title">Income by source</h2>
+        <p class="card-sub">Money earned per day (<span class="avg-note"></span>) from wages, selling goods, selling
+          asset shares and government hiring.</p>
+        <div id="chart-sources"></div>
+      </section>
+      <section class="card report-card">
+        <h2 class="card-title">Income sources</h2>
+        <p class="card-sub">Totals in this window.</p>
+        <div id="table-sources"></div>
+      </section>
+
+      <section class="card report-card">
+        <h2 class="card-title">Total wealth</h2>
+        <p class="card-sub">Money + goods + assets at current prices.</p>
+        <div id="chart-wealth"></div>
+      </section>
+      <section class="card report-card">
+        <h2 class="card-title">Income</h2>
+        <p class="card-sub">Money all agents earned per day (<span class="avg-note"></span>).</p>
+        <div id="chart-income"></div>
+      </section>
+      <section class="card report-card">
+        <h2 class="card-title">Richest agents</h2>
+        <p class="card-sub">Share of all wealth.</p>
+        <div id="table-top"></div>
+      </section>
+
+      <section class="card report-card span-2">
+        <h2 class="card-title">Trading activity</h2>
+        <p class="card-sub">Deals per day (<span class="avg-note"></span>).</p>
+        <div id="chart-trades"></div>
+      </section>
+      <section class="card report-card">
+        <h2 class="card-title">Population</h2>
+        <p class="card-sub">Agents alive.</p>
+        <div id="chart-population"></div>
+      </section>
     </div>
-    <label class="toggle"><input id="show-range" type="checkbox" checked> Show movement range</label>
+  </div>
+      </section>
+      </main>
+    </div>
+  </div>
+
+  <section id="setup" class="setup" hidden>
+    <div class="setup-card">
+      <div class="setup-head">
+        <div>
+          <h1>Game rules</h1>
+          <p class="hint">These rules apply to the whole game. Every agent starts from them and can still be edited
+            individually later in <b>Agents</b>.</p>
+        </div>
+        <label class="preset">Preset <select id="setup-preset"></select></label>
+      </div>
+      <form id="setup-form" novalidate>
+        <div id="setup-sections" class="setup-grid"></div>
+        <div class="setup-preview">
+          <h2>What these rules mean</h2>
+          <div id="setup-preview"></div>
+        </div>
+        <p id="setup-status" class="status error" hidden></p>
+        <div class="form-actions sticky">
+          <button type="button" id="setup-factory" class="ghost"><span class="narrow-hide">Factory </span>Defaults</button>
+          <span class="spacer"></span>
+          <button type="button" id="setup-close" class="soft">Back<span class="narrow-hide"> to current game</span></button>
+          <button type="submit" class="primary">Start new game</button>
+        </div>
+      </form>
+    </div>
   </section>
 
-  <main>
-    <div class="world-wrap">
-      <canvas id="world" width="1024" height="1024"></canvas>
-    </div>
-    <aside>
-      <h2>Agents</h2>
-      <div id="agents"></div>
-      <h2>Events</h2>
-      <ol id="events" reversed></ol>
-    </aside>
-  </main>
-
+  <script src="catalog.js"></script>
   <script src="app.js"></script>
+  <script src="setup.js"></script>
+  <script src="report.js"></script>
 </body>
 </html>
