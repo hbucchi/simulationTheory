@@ -318,6 +318,15 @@ class Rules:
     max_loan_to_value: float = 0.6     # debt <= this x the borrower's asset shares (+ what it builds)
     loan_per_service: float = 250.0    # money lent per unit of banking services used
     default_steps: int = 30            # unpaid steps in a row before a loan defaults
+    # Mortgages (housing market + banks): a bank lends up to mortgage_ltv of a house's price over
+    # mortgage_years, at its loan rate + mortgage_premium (per day), only if the installment plus the
+    # borrower's other loan payments are at most mortgage_dti of its income; after
+    # mortgage_default_days of missed payments the bank forecloses. Changeable in the Banks tab.
+    mortgage_years: float = 25
+    mortgage_dti: float = 0.35
+    mortgage_ltv: float = 0.8
+    mortgage_premium: float = 0.0
+    mortgage_default_days: int = 90
     deposit_share: float = 0.5         # share of spare cash agents deposit each step
     # Budget: every agent knows what living costs it (the cheapest goods for each need, housing
     # included) plus what its loans cost per step, and keeps budget_steps steps of that (a
@@ -766,6 +775,11 @@ LIMITS = {
     "deposit_rate": (0, 1, "float"),
     "loan_spread": (0, 1, "float"),
     "loan_steps": (1, 100000, "int"),
+    "mortgage_years": (0, 100, "float"),
+    "mortgage_dti": (0, 1, "float"),
+    "mortgage_ltv": (0, 1, "float"),
+    "mortgage_premium": (0, 0.01, "float"),
+    "mortgage_default_days": (1, 3600, "int"),
     "max_loan_to_value": (0, 10, "float"),
     "loan_per_service": (0.01, 1e9, "float"),
     "default_steps": (1, 100000, "int"),

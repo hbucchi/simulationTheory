@@ -176,7 +176,7 @@ class Simulation:
         with self.lock:
             bank = self.world.banking
             for key, value in changes.items():
-                setattr(bank, key, value)
+                setattr(bank, key, int(value) if key == "mortgage_default_days" else value)
             self.world.log("Banking " + ("on" if bank.enabled else "off (banks wind down)") +
                            f": deposit rate {bank.deposit_rate:.2%}, loan spread {bank.loan_spread:.2%}, "
                            f"keeps {bank.liquidity:.0%} of deposits as cash, "
@@ -352,7 +352,9 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.sim.add_agent(parse_agent_config(body))
             if self.path == "/api/banking":
                 limits = {"deposit_rate": (0, 1), "loan_spread": (0, 1), "liquidity": (0, 1),
-                          "min_capital": (0, 1e12), "loan_income_share": (0, 100)}
+                          "min_capital": (0, 1e12), "loan_income_share": (0, 100),
+                          "mortgage_years": (0, 100), "mortgage_dti": (0, 1), "mortgage_ltv": (0, 1),
+                          "mortgage_premium": (0, 0.01), "mortgage_default_days": (1, 3600)}
                 changes = {}
                 for key, value in body.items():
                     if key == "detail":

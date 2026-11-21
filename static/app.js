@@ -1430,6 +1430,11 @@ function fillBanking(force = false) {
   ui.bankReserve.value = +(b.liquidity * 100).toFixed(2);
   ui.bankMinCapital.value = b.min_capital;
   ui.bankIncomeShare.value = +(b.loan_income_share * 100).toFixed(2);
+  $("mort-years").value = b.mortgage_years;
+  $("mort-dti").value = +(b.mortgage_dti * 100).toFixed(1);
+  $("mort-ltv").value = +(b.mortgage_ltv * 100).toFixed(1);
+  $("mort-premium").value = +(perYear(b.mortgage_premium) * 100).toFixed(2);
+  $("mort-default").value = b.mortgage_default_days;
 }
 
 function renderBanking() {
@@ -1444,6 +1449,8 @@ function renderBanking() {
     ["Money supply", usd(b.money_supply), "cash (people + companies) + deposits"],
     ["Money multiplier", `×${b.multiplier.toFixed(2)}`, "money supply ÷ (cash + reserves)"],
     ["Credit limit", `${(b.loan_income_share * 100).toFixed(0)}% of a month`, `of each borrower's income (${b.month_steps} days)`],
+    ["Mortgages", `${b.mortgages}`, `${usd(b.mortgage_debt)} owed · ${(perYear(b.mortgage_rate_now) * 100).toFixed(1)}% a year over ` +
+      `${b.mortgage_years} years · ${b.foreclosures} foreclosures`],
     ["Reserves at the central bank", usd(b.cb_reserves), `required: ${(b.reserve_requirement * 100).toFixed(0)}% of deposits` +
       (b.cb_loans ? ` · owe it ${usd(b.cb_loans)}` : "")],
     ["Basel (central bank)", b.capital_ratio ? `${(b.capital_ratio * 100).toFixed(1)}% of loans` : "none",
@@ -1490,6 +1497,11 @@ ui.bankForm.onsubmit = async (e) => {
       liquidity: Number(ui.bankReserve.value) / 100,
       min_capital: Number(ui.bankMinCapital.value),
       loan_income_share: Number(ui.bankIncomeShare.value) / 100,
+      mortgage_years: Number($("mort-years").value),
+      mortgage_dti: Number($("mort-dti").value) / 100,
+      mortgage_ltv: Number($("mort-ltv").value) / 100,
+      mortgage_premium: perDay(Number($("mort-premium").value) / 100),
+      mortgage_default_days: Number($("mort-default").value),
     });
     bankDirty = false;
     render(next);

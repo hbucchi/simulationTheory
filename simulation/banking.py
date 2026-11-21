@@ -56,6 +56,14 @@ DEPOSIT_KEEP = 2.0
 MIN_DEPOSIT = 10.0
 
 
+def annuity(amount, rate, steps):
+    """The fixed payment per step that repays ``amount`` with interest ``rate`` over ``steps``."""
+    steps = max(1, steps)
+    if rate <= 0:
+        return amount / steps
+    return amount * rate / (1 - (1 + rate) ** -steps)
+
+
 class Loan:
     def __init__(self, loan_id, bank, borrower, amount, rate, steps, tick, purpose):
         self.id = loan_id
@@ -69,9 +77,13 @@ class Loan:
         self.missed = 0
         self.started = tick
         self.purpose = purpose
+        self.house = None          # a mortgage's collateral (housing.House)
 
     def payment(self):
-        """Interest on the balance plus an even share of it over the steps left."""
+        """A mortgage: the same installment every day (an annuity). Other loans: interest on the
+        balance plus an even share of it over the steps left."""
+        if self.house is not None:
+            return annuity(self.balance, self.rate, self.steps_left)
         return self.balance * self.rate + self.balance / max(1, self.steps_left)
 
     def to_dict(self):
@@ -149,6 +161,13 @@ class Banking:
         self.liquidity = rules.bank_liquidity   # vault cash each bank keeps (share of deposits)
         self.min_capital = rules.bank_min_capital
         self.loan_income_share = rules.loan_income_share
+        # Mortgages (bankers judge the borrower's income; see mortgage_offer).
+        self.mortgage_years = rules.mortgage_years
+        self.mortgage_dti = rules.mortgage_dti
+        self.mortgage_ltv = rules.mortgage_ltv
+        self.mortgage_premium = rules.mortgage_premium
+        self.mortgage_default_days = rules.mortgage_default_days
+        self.foreclosures = 0
         self.banks = []
         self.closed = 0
         self.failed = 0
@@ -328,6 +347,100 @@ class Banking:
                   f"{loan.steps_left / world.rules.month_steps:.0f} months")
         return amount
 
+    # ---------- mortgages ----------
+
+    def mortgage_rate(self, world):
+        return self.loan_rate_now(world) + self.mortgage_premium
+
+    def mortgage_offer(self, world, agent, price):
+        """(bank, amount) a bank would lend ``agent`` towards a house costing ``price``, or None.
+        A banker lends at most mortgage_ltv of the price, and only if the installment plus the
+        agent's other loan payments stay within mortgage_dti of its income."""
+        if not self.available(world) or self.mortgage_years <= 0 or price <= 0:
+            return None
+        amount = price * self.mortgage_ltv
+        steps = round(self.mortgage_years * world.year_steps())
+        installment = annuity(amount, self.mortgage_rate(world), steps)
+        if installment + self.payments_of(agent) > self.mortgage_dti * agent.income_avg:
+            return None
+        bank = self.nearest_open(world, agent, key=lambda b: self.lendable_mortgage(world, b) >= amount
+                                 and b.owner_id != agent.id)
+        return (bank, amount) if bank else None
+
+    def lendable_mortgage(self, world, bank):
+        """Most a bank can lend for a house: reserves and the capital rule (a mortgage needs no
+        banking services: it is one loan)."""
+        if bank.status != "open" or world.agent_by_id(bank.owner_id) is None:
+            return 0.0
+        if bank.cb_loans > 0 or bank.cb_reserves < self.required(bank) - 0.01:
+            return 0.0
+        by_reserves = bank.reserves - self.liquidity * bank.deposit_total
+        basel = world.government.capital_ratio
+        by_capital = bank.equity / basel - bank.loan_total if basel > 0 else math.inf
+        return max(0.0, min(by_reserves, by_capital))
+
+    def take_mortgage(self, world, agent, bank, amount, house):
+        """Lend ``amount`` for ``house`` (paid into the agent's cash)."""
+        bank.reserves -= amount
+        agent.money += amount
+        steps = round(self.mortgage_years * world.year_steps())
+        loan = Loan(self.next_loan_id, bank, agent, amount, self.mortgage_rate(world), steps, world.tick, "a mortgage")
+        loan.house = house
+        self.next_loan_id += 1
+        bank.loans.append(loan)
+        _sync(agent, self)
+        world.log(f"{bank.name} lent {agent.name} {amount:,.2f} for house {house.id} at "
+                  f"{((1 + loan.rate) ** world.year_steps() - 1) * 100:.1f}% a year over {self.mortgage_years:g} years "
+                  f"({loan.payment() * world.rules.month_steps:,.2f} a month)")
+        return loan
+
+    def mortgage_on(self, house, owner=None):
+        """The mortgage on ``house`` (taken by ``owner``, if given), or None."""
+        return next((l for b in self.banks for l in b.loans if l.house is house
+                     and (owner is None or l.borrower_id == owner.id)), None)
+
+    def repay_mortgage(self, world, house, money, owner):
+        """``owner`` sells its mortgaged house: up to ``money`` of the price repays its loan first.
+        Returns what went to the bank."""
+        if owner is None:
+            return 0.0
+        loan = self.mortgage_on(house, owner)
+        if loan is None:
+            return 0.0
+        bank = next(b for b in self.banks if b.id == loan.bank_id)
+        paid = min(money, loan.balance)
+        bank.reserves += paid
+        if paid < loan.balance - 0.01:
+            bank.written_off += loan.balance - paid
+        bank.loans.remove(loan)
+        borrower = world.agent_by_id(loan.borrower_id)
+        if borrower is not None:
+            _sync(borrower, self)
+        return paid
+
+    def _foreclose(self, world, bank, loan, borrower):
+        """Payments missed for mortgage_default_days: the bank's owner takes the house, paying the
+        bank its price (as far as it can); the rest is written off. The borrower moves out."""
+        house = loan.house
+        owner = world.agent_by_id(bank.owner_id)
+        housing = world.housing
+        price = housing.price(world)
+        paid = min(price, loan.balance, owner.money) if owner is not None else 0.0
+        if borrower.home is house:
+            housing.move_out(borrower)
+        if owner is not None and paid > 0:
+            owner.money -= paid
+            housing.set_owner(house, owner)
+        else:
+            housing.set_owner(house, None)
+        bank.reserves += paid
+        bank.written_off += loan.balance - paid
+        bank.loans.remove(loan)
+        self.foreclosures += 1
+        _sync(borrower, self)
+        world.log(f"{bank.name} foreclosed on {borrower.name}'s house {house.id} "
+                  f"({paid:,.2f} recovered, {loan.balance - paid:,.2f} written off)")
+
     # ---------- each step ----------
 
     def step(self, world):
@@ -426,7 +539,10 @@ class Banking:
             self.cash_up(borrower, due + needs_now)
             if borrower.money - needs_now + 1e-9 < due:
                 loan.missed += 1
-                if loan.missed >= world.rules.default_steps:
+                if loan.house is not None:
+                    if loan.missed >= self.mortgage_default_days:
+                        self._foreclose(world, bank, loan, borrower)
+                elif loan.missed >= world.rules.default_steps:
                     self._default(world, bank, loan, borrower)
                 continue
             interest = loan.balance * loan.rate
@@ -613,6 +729,12 @@ class Banking:
             "cb_reserves": round(sum(b.cb_reserves for b in self.banks), 2),
             "cb_loans": round(sum(b.cb_loans for b in self.banks), 2),
             "min_capital": self.min_capital, "loan_income_share": self.loan_income_share,
+            "mortgage_years": self.mortgage_years, "mortgage_dti": self.mortgage_dti,
+            "mortgage_ltv": self.mortgage_ltv, "mortgage_premium": self.mortgage_premium,
+            "mortgage_default_days": self.mortgage_default_days, "mortgage_rate_now": self.mortgage_rate(world),
+            "mortgages": sum(1 for b in self.banks for l in b.loans if l.house is not None),
+            "mortgage_debt": round(sum(l.balance for b in self.banks for l in b.loans if l.house is not None), 2),
+            "foreclosures": self.foreclosures,
             "month_steps": world.rules.month_steps,
             "deposit_rate_now": self.deposit_rate_now(world), "loan_rate_now": self.loan_rate_now(world),
             "banks": [b.to_dict(world) for b in self.banks], "open": len(open_banks),

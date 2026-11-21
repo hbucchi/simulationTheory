@@ -206,11 +206,19 @@ class HousingMarket:
             if not owns_home:
                 # A home of its own: a vacant house for sale it can pay for on top of its budget.
                 mine = [h for h in vacant_listings if h.owner is not a]
-                if mine and economy.money_of(a) >= price \
-                        and economy.money_of(a) - budget_needed(a, prices, world) >= price:
+                spare = economy.money_of(a) - budget_needed(a, prices, world) if mine else 0.0
+                loan = None
+                if mine and spare < price and world.banking.enabled:
+                    # A mortgage: the bank lends the rest if the deposit fits and its income allows.
+                    offer = world.banking.mortgage_offer(world, a, price)
+                    if offer and spare >= price - offer[1]:
+                        loan = offer
+                if mine and (spare >= price or loan):
                     h = mine[-1]
                     vacant_listings.remove(h)
                     listings.remove(h)
+                    if loan:
+                        world.banking.take_mortgage(world, a, loan[0], loan[1], h)
                     self._buy(world, a, h, price)
                     self.move_in(a, h)
                     sold += 1
@@ -241,11 +249,12 @@ class HousingMarket:
             world.banking.cash_up(buyer, price)
         buyer.money -= price
         seller = house.owner
+        to_bank = world.banking.repay_mortgage(world, house, price, seller)    # its mortgage is repaid first
         if seller is None:
-            world.government.treasury += price
+            world.government.treasury += price - to_bank
         else:
-            seller.money += price
-            economy.earn(seller, price, "assets")
+            seller.money += price - to_bank
+            economy.earn(seller, price - to_bank, "assets")
             if seller.home is house:
                 self.move_out(seller)
         self.set_owner(house, buyer)
@@ -267,10 +276,13 @@ class HousingMarket:
         for h in list(dead.houses):
             buyer = next((o for o in near if o.money - cash_needed(o, prices, world.rules) >= price), None)
             if buyer is not None:
-                buyer.money -= price            # the estate's money leaves with the dead
+                buyer.money -= price
+                # A mortgage is repaid from the price; the rest of the estate's money leaves with the dead.
+                world.banking.repay_mortgage(world, h, price, dead)
                 self.set_owner(h, buyer)
                 world.log(f"{buyer.name} bought house {h.id} from {dead.name}'s estate for {price:,.2f}")
             else:
+                world.banking.repay_mortgage(world, h, 0.0, dead)   # (written off)
                 self.set_owner(h, None)
                 world.log(f"House {h.id} from {dead.name}'s estate became public housing")
 

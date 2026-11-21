@@ -199,6 +199,11 @@
             <label>Vault cash kept <span><input id="bank-reserve" type="number" min="0" max="100" step="1"> % of deposits</span></label>
             <label>Minimum capital <span>$ <input id="bank-min-capital" type="number" min="0" step="500"></span></label>
             <label>Lend each agent up to <span><input id="bank-income-share" type="number" min="0" max="10000" step="5"> % of a month's income</span></label>
+            <label>Mortgages over <span><input id="mort-years" type="number" min="0" max="100" step="1"> years (0 = no mortgages)</span></label>
+            <label>Installments at most <span><input id="mort-dti" type="number" min="0" max="100" step="1"> % of the borrower's income</span></label>
+            <label>Lend at most <span><input id="mort-ltv" type="number" min="0" max="100" step="5"> % of the house price (the rest is the deposit)</span></label>
+            <label>Mortgage rate = loan rate + <span><input id="mort-premium" type="number" min="0" step="0.25"> % a year (risk premium)</span></label>
+            <label>Foreclose after <span><input id="mort-default" type="number" min="1" step="10"> days of missed payments</span></label>
           </div>
           <div class="form-actions">
             <button type="button" id="bank-revert" class="ghost">Revert</button>

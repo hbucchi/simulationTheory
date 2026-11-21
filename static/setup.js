@@ -268,6 +268,11 @@ const SETUP_SECTIONS = [
       "it (a “month”) on top of the cash it needs right now, and only invests or builds with what is left. " +
       "Loans are paid only out of money left after what it needs to buy now.", fields: [
     { path: "budget_steps", label: "Budget covers (days)", kind: "int", min: 0, max: 100000 },
+    { path: "mortgage_years", label: "Mortgages: term (years; 0 = none)", kind: "float", min: 0, max: 100, step: 1 },
+    { path: "mortgage_dti", label: "Mortgages: installments ≤ (share of income)", kind: "float", min: 0, max: 1, step: 0.05 },
+    { path: "mortgage_ltv", label: "Mortgages: lend ≤ (share of the house price)", kind: "float", min: 0, max: 1, step: 0.05 },
+    { path: "mortgage_premium", label: "Mortgages: rate = loan rate + (% a year)", kind: "float", min: 0, step: 0.25, yearly: true },
+    { path: "mortgage_default_days", label: "Mortgages: foreclose after (days unpaid)", kind: "int", min: 1, max: 3600 },
   ]},
   { title: "Central government", hint: "A minimum interest rate that no asset's return can fall below (higher rates " +
       "make assets cheaper), and labour bought every day with newly created money. Both can be changed during the game " +
