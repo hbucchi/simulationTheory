@@ -286,6 +286,10 @@ function renderReport(r) {
       KPI("Capacity used", rate(p => p.utilisation), pct, "pp", "up", "labour used ÷ labour capacity"),
       KPI("Wage", rate(p => p.wage), fmt.money, "rel", "up", "market wage per unit of labour"),
       KPI("Labour share of output", rate(p => p.labor_share_output), pct, "pp", null, "wages ÷ value of goods produced"),
+      KPI("Autonomous production", rate(p => p.auto_agents ?? 0), pct, "pp", null,
+          "agents making their own water or food with labour nobody hired"),
+      KPI("… share of output", rate(p => p.auto_output ?? 0), pct, "pp", null,
+          "of all units produced: made by agents on their own, without assets"),
       KPI("Government spending", rate(p => p.gov_money), fmt.money, "rel", null,
           `per day · ${fmt.money(t.gov_money)} created · ${fmt.num(t.labor_gov, 1)} labour hired`),
     ]),
@@ -396,13 +400,15 @@ function renderReport(r) {
     series: [{ label: "Capacity", color: SERIES[0], values: flow(p => p.labor_made) },
              { label: "Used on assets", color: SERIES[1], values: flow(p => p.labor_used) },
              { label: "Unused", color: SERIES[2], values: flow(p => p.labor_expired) },
-             { label: "Hired by government", color: SERIES[3], values: flow(p => p.labor_gov) }] });
+             { label: "Hired by government", color: SERIES[3], values: flow(p => p.labor_gov) },
+             { label: "Autonomous (own water / food)", color: SERIES[4], values: flow(p => p.labor_auto ?? 0) }] });
   const made = t.labor_made || 1;
   table($("table-labor"), ["Labour", "Units", "Share of capacity"], [
     ["Capacity", fmt.num(t.labor_made, 1), "100%"],
     ["Used on assets", fmt.num(t.labor_used, 1), fmt.pct(t.labor_used / made)],
     ["Unused (not offered or not hired)", fmt.num(t.labor_expired, 1), fmt.pct(t.labor_expired / made)],
     ["Hired by government", fmt.num(t.labor_gov, 1), fmt.pct(t.labor_gov / made)],
+    ["Autonomous production (own water / food)", fmt.num(t.labor_auto ?? 0, 1), fmt.pct((t.labor_auto ?? 0) / made)],
   ]);
   lineChart($("chart-workers"), { x, xLabel: "Day", yMax: 1, yFormat: (v) => v.toFixed(2), title: "Workers' condition",
     series: [{ label: "Efficiency", color: SERIES[0], values: s.map(p => p.efficiency) },

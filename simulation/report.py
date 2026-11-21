@@ -213,6 +213,12 @@ class Recorder:
             "labor_used": world.labor.stats["own_use"] + world.labor.stats["hired"],
             "labor_expired": world.labor.stats["unused"],
             "labor_gov": world.labor.stats["gov_hired"],
+            # Autonomous production (subsistence): labour agents put into making their own water or
+            # food, the share of agents doing it and its share of all units produced.
+            "labor_auto": world.labor.stats.get("subsistence", 0.0),
+            "auto_agents": world.labor.stats.get("subsistence_agents", 0) / n,
+            "auto_output": (world.labor.stats.get("subsistence_units", 0.0)
+                            / max(sum(produced.values()), world.labor.stats.get("subsistence_units", 0.0), 1e-9)),
             "labor_offered": world.labor.stats["offered"],
             "labor_wanted": world.labor.stats["wanted"],
             "wage": world.labor.wage,
@@ -280,6 +286,7 @@ def build_report(world, window=None):
         "labor_used": sum(s["labor_used"] for s in history),
         "labor_expired": sum(s["labor_expired"] for s in history),
         "labor_gov": sum(s["labor_gov"] for s in history),
+        "labor_auto": sum(s.get("labor_auto", 0.0) for s in history),
         "goods_deals": sum(s["goods_deals"] for s in history),
         "labor_deals": sum(s["labor_deals"] for s in history),
         "asset_trades": sum(s["asset_trades"] for s in history),

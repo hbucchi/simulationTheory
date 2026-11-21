@@ -638,7 +638,7 @@ function renderAgents() {
       ...(a.houses ? [["houses", `${a.houses} owned` + (a.houses_let ? `, ${a.houses_let} let` : "")]] : []),
       ["movement", a.speed < a.movement ? `${a.speed} px (${a.movement} normally)` : `${a.speed} px`],
       ...Object.entries(a.subsistence || {}).map(([g, n]) => ["makes on its own", `${n.toFixed(2)} ${label(g).toLowerCase()}/day`,
-        "No assets: the labour nobody hired goes into a little subsistence production (fetching water, a garden, gathering)"]),
+        "Autonomous production: labour it had left (no job, own industries done) goes into making its own water or food"]),
       ...GOODS.filter(r => a.assets[r]).map(r => {
         const price = state.market.asset_prices[r];
         return [`${label(r).toLowerCase()} industry`, `${a.assets[r].toFixed(2)} (worth ${usd(a.assets[r] * price)}, ` +

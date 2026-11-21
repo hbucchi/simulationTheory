@@ -413,12 +413,12 @@ class Rules:
     eviction_days: int = 30
     homeless_shelter_rate: float = 0.01
     house_relief: float = 0.02             # shelter relieved per day by living in a house
-    # Subsistence: an agent with no assets can use the labour nobody hired to make a little of a
-    # basic good on its own (fetch water, a garden, gather wood or herbs, collect stone), at
-    # these units per unit of labour (an industry worker makes about 4). See labor.py.
+    # Autonomous production (subsistence): every agent can put the labour it has left (after its own
+    # industries and any job) into making water or food on its own, at these units per unit of
+    # labour: about enough to live on working at nothing else (an industry worker makes about 4).
+    # Each day it makes whichever its most urgent need calls for. See labor.py.
     subsistence_enabled: bool = True
-    subsistence_rates: dict = field(default_factory=lambda: {"water": 0.4, "grain": 0.4, "wood": 0.4, "herbs": 0.4,
-                                                             "stone": 0.2})
+    subsistence_rates: dict = field(default_factory=lambda: {"water": 0.5, "food": 0.35})
     depression_enabled: bool = True    # boredom at 1.00 depresses
     depression_factor: float = 0.5     # depressed speed and sleep recovery are multiplied by this
 

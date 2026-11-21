@@ -40,6 +40,12 @@ REVENUE_DAYS = 30
 from . import economy, penalties
 
 from .rules import NEEDS as NEEDS_FOR_WELLBEING
+from .rules import Rules as _Rules
+
+# What each good relieves in the full catalog (for subsistence goods missing from a game).
+_FULL = _Rules.from_dict({"housing_enabled": False})
+CATALOG_NEED = {g: _FULL.need_of(g) for g in _FULL.active_goods}
+CATALOG_RELIEF = {(g, n): _FULL.relief(g, n) for g in _FULL.active_goods for n in _FULL.consumer_needs}
 
 
 def efficiency(agent, rules):
@@ -134,7 +140,8 @@ class LaborMarket:
     def _empty_stats():
         return {"capacity": 0.0, "own_use": 0.0, "offered": 0.0, "wanted": 0.0, "hired": 0.0,
                 "wanted_full": 0.0, "job_capacity": 0.0, "jobs_funded": 0.0,
-                "gov_hired": 0.0, "benefits": 0.0, "subsistence": 0.0, "unused": 0.0, "withheld": 0.0, "idle": 0.0, "hires": 0, "workers_hired": 0, "base_wage": 0.0, "pressure": 1.0}
+                "gov_hired": 0.0, "benefits": 0.0, "subsistence": 0.0,
+                "subsistence_agents": 0, "subsistence_units": 0.0, "unused": 0.0, "withheld": 0.0, "idle": 0.0, "hires": 0, "workers_hired": 0, "base_wage": 0.0, "pressure": 1.0}
 
     def base_wage(self, world, prices, jobs):
         """labor_share x value added by one unit of labour (output minus the inputs it used),
@@ -182,6 +189,7 @@ class LaborMarket:
                 jobs_by_good[g] = jobs_by_good.get(g, 0) + j
             own = min(a.capacity_now, a.labor_need)
             a.labor_available = own
+            a.own_labor = own
             a.labor_sold = 0.0
             a.labor_bought = 0.0
             a.employers = {}
@@ -292,11 +300,12 @@ class LaborMarket:
             gov.treasury = 0.0
 
         if rules.subsistence_enabled and rules.industries_enabled:
-            stats["subsistence"] = self._subsistence(world)
+            stats["subsistence"] = self._subsistence(world, stats)
 
         # Unused capacity = withheld (not offered: the agent didn't need to work) + idle
         # (offered but nobody hired it).
-        stats["unused"] = stats["capacity"] - stats["own_use"] - stats["hired"] - stats["gov_hired"]
+        stats["unused"] = (stats["capacity"] - stats["own_use"] - stats["hired"] - stats["gov_hired"]
+                           - stats.get("subsistence", 0.0))     # (autonomous production uses labour too)
         stats["idle"] = max(0.0, stats["offered"] - stats["hired"] - stats["gov_hired"])
         stats["withheld"] = max(0.0, stats["unused"] - stats["idle"])
         stats["workers_hired"] = sum(1 for a in offers if a.labor_sold > 1e-9)
@@ -332,21 +341,40 @@ class LaborMarket:
         return hired
 
     @staticmethod
-    def _subsistence(world):
-        """Agents with no assets spend the labour nobody hired making a little of a basic good on
-        their own (rules.subsistence_rates units per unit of labour: fetching water, a garden,
-        gathering wood or herbs, collecting stone). Each makes the good for its most urgent need
-        that it holds least of. Fractions of a unit accumulate until a whole unit is made.
+    def subsistence_options(rules):
+        """[(good, units per unit of labour)] agents can make on their own: rules.subsistence_rates
+        (water and food by default). A good that doesn't exist in this game is replaced by the best
+        one that does for the same need, at a rate giving the same relief per unit of labour."""
+        options = {}
+        for g, rate in rules.subsistence_rates.items():
+            if rate <= 0:
+                continue
+            need = CATALOG_NEED.get(g)
+            if g in rules.active_goods and rules.need_of(g) in rules.consumer_needs:
+                options[g] = max(options.get(g, 0.0), rate)
+            elif need in rules.consumer_needs and rules.goods_for(need):
+                best = rules.goods_for(need)[0]
+                relief = rate * CATALOG_RELIEF.get((g, need), 0.0)
+                if relief > 0:
+                    options[best] = max(options.get(best, 0.0), relief / rules.relief(best, need))
+        return list(options.items())
+
+    @staticmethod
+    def _subsistence(world, stats=None):
+        """Autonomous production: every agent puts the labour it has left (after its own
+        industries and any job) into making a little water or food on its own, at
+        rules.subsistence_rates units per unit of labour (about enough to live on if it works at
+        nothing else). Each day it makes the one its most urgent need calls for (less so when it
+        holds some already). Fractions of a unit accumulate until a whole unit is made.
         Returns the labour used."""
         rules = world.rules
-        options = [(g, rate) for g, rate in rules.subsistence_rates.items()
-                   if rate > 0 and g in rules.active_goods and rules.need_of(g) in rules.consumer_needs]
-        used = 0.0
+        options = LaborMarket.subsistence_options(rules)
+        used, agents, units = 0.0, 0, 0.0
         for a in world.agents:
             a.subsistence_made = {}
-            if a.assets or not options:
+            if not options:
                 continue
-            spare = a.capacity_now - a.labor_sold
+            spare = a.capacity_now - getattr(a, "own_labor", 0.0) - a.labor_sold
             if spare <= 1e-9:
                 continue
             # Most urgent need first; for a need it already has stock of, less so.
@@ -363,6 +391,11 @@ class LaborMarket:
             a.subsistence[good] = done - whole
             a.subsistence_made[good] = made
             used += spare
+            agents += 1
+            units += made
+        if stats is not None:
+            stats["subsistence_agents"] = agents
+            stats["subsistence_units"] = units
         return used
 
     def _benefits(self, world, offers, remaining, stats):

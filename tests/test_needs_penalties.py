@@ -2,7 +2,7 @@
 with no assets make a little of a basic good on their own (subsistence)."""
 import unittest
 
-from simulation import World, economy, penalties
+from simulation import World, distributions, economy, penalties
 from simulation.labor import LaborMarket
 from simulation.rules import GOODS, Rules
 from tests.classic import CALM
@@ -59,26 +59,48 @@ class PenaltyTests(unittest.TestCase):
 
 
 class SubsistenceTests(unittest.TestCase):
-    def test_an_agent_without_assets_fetches_a_little_water_when_thirsty(self):
+    """Autonomous production: every agent can make a little water or food with labour it has left."""
+
+    def test_a_thirsty_agent_fetches_a_little_water(self):
         w = world()
         a = w.create_agent(needs={**CALM, "thirst": 0.7}, money=0, inventory=EMPTY)
-        a.capacity_now, a.labor_sold = 0.5, 0.0
-        for _ in range(5):
+        a.capacity_now, a.labor_sold, a.own_labor = 0.5, 0.0, 0.0
+        for _ in range(4):
             LaborMarket._subsistence(w)
-        self.assertEqual(a.subsistence_made, {"water": 0.2})
-        self.assertEqual(a.inventory.count("water"), 1)               # 5 days x 0.2
+        self.assertEqual(a.subsistence_made, {"water": 0.25})
+        self.assertEqual(a.inventory.count("water"), 1)               # 4 days x 0.25
 
-    def test_owners_and_fully_employed_agents_make_nothing_on_their_own(self):
+    def test_a_hungry_agent_makes_food_instead(self):
+        w = world()
+        a = w.create_agent(needs={**CALM, "hunger": 0.7, "thirst": 0.2}, money=0, inventory=EMPTY)
+        a.capacity_now, a.labor_sold, a.own_labor = 0.5, 0.0, 0.0
+        LaborMarket._subsistence(w)
+        self.assertEqual(list(a.subsistence_made), ["food"])
+
+    def test_owners_with_spare_time_do_it_too_but_not_with_their_labour_used_up(self):
         w = world()
         owner = w.create_agent(needs={**CALM, "thirst": 0.7}, money=0, inventory=EMPTY, assets={"water": 1})
-        worker = w.create_agent(needs={**CALM, "thirst": 0.7}, money=0, inventory=EMPTY)
-        owner.capacity_now = worker.capacity_now = worker.labor_sold = 0.5
-        LaborMarket._subsistence(w)
-        self.assertEqual((owner.subsistence_made, worker.subsistence_made), ({}, {}))
+        busy = w.create_agent(needs={**CALM, "thirst": 0.7}, money=0, inventory=EMPTY)
+        owner.capacity_now, owner.own_labor, owner.labor_sold = 0.5, 0.3, 0.0
+        busy.capacity_now, busy.own_labor, busy.labor_sold = 0.5, 0.0, 0.5
+        stats = {}
+        LaborMarket._subsistence(w, stats)
+        self.assertAlmostEqual(owner.subsistence_made["water"], 0.2 * 0.5)
+        self.assertEqual(busy.subsistence_made, {})
+        self.assertEqual(stats["subsistence_agents"], 1)
 
-    def test_it_is_far_below_what_a_job_pays_in_goods(self):
+    def test_working_only_for_itself_just_about_keeps_an_agent_alive(self):
         r = Rules()
-        self.assertTrue(all(rate <= 0.1 * 4 for rate in r.subsistence_rates.values()))
+        rates = dict(LaborMarket.subsistence_options(r))
+        labour = (distributions.mean(r.rates["thirst"]) / (rates["water"] * r.relief("water", "thirst"))
+                  + distributions.mean(r.rates["hunger"]) / (rates["food"] * r.relief("food", "hunger")))
+        self.assertLessEqual(labour, 0.5)            # a day's labour (0.5) covers thirst and hunger
+        self.assertGreater(labour, 0.4)              # ... with little to spare
+
+    def test_without_a_food_industry_the_main_hunger_good_takes_its_place(self):
+        r = Rules.from_dict({"industry_layers": 1})
+        rates = dict(LaborMarket.subsistence_options(r))
+        self.assertAlmostEqual(rates["grain"] * r.relief("grain", "hunger"), 0.35 * Rules().relief("food", "hunger"))
 
 
 if __name__ == "__main__":
