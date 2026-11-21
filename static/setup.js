@@ -70,6 +70,8 @@ const SETUP_SECTIONS = [
       "average agent's cash lasts about 3 months. Fixed: the prices below.", fields: [
     { path: "price_mode", label: "Price rule", kind: "choice", full: true,
       options: [["scarcity", "Scarcity (changes with supply)"], ["fixed", "Fixed prices"]] },
+    { path: "price_stickiness", label: "Price stickiness (0 = perfectly flexible; 0.8 = close 20% of the gap a day)",
+      kind: "float", min: 0, max: 0.99, step: 0.05, enabledWhen: v => v.price_mode !== "fixed" },
     { path: "money_velocity", label: "Money velocity (times a year; 0 = off)", kind: "float", min: 0, max: 1000, step: 0.5,
       enabledWhen: v => v.price_mode !== "fixed" },
     { path: "fixed_prices.labor", label: "Wage", kind: "float", min: 0, step: 0.01, enabledWhen: v => v.price_mode === "fixed" },
@@ -80,6 +82,9 @@ const SETUP_SECTIONS = [
       group: `Starting stock · layer ${catalogLayer(r)} goods` })),
     ...per(GOODS, r => ({ path: `assets.${r}`, label: `${label(r)} (shares)`, kind: "spread", tiered: true,
       min: 0, step: 0.1, group: `Starting industries (asset shares) · layer ${catalogLayer(r)}` })),
+    { path: "asset_owner_share", label: "Share of agents that start owning assets (rest: only their labour)",
+      kind: "float", min: 0.001, max: 1, step: 0.05 },
+    { path: "working_capital_days", label: "Companies start with working capital for (days of wages)", kind: "int", min: 0, max: 3600 },
     { path: "money", label: "Money", kind: "spread", tiered: true, min: 0, step: 0.01 },
     { path: "movement", label: "Movement (px)", kind: "spread", whole: true, min: 1, max: 200 },
     { path: "start_needs", label: "Starting needs", kind: "spread", min: 0, max: 1, step: 0.05 },
@@ -90,6 +95,21 @@ const SETUP_SECTIONS = [
       "each day agents can work up to their capacity (scaled by efficiency) and sell it in the labour market. Anything " +
       "unsold is lost. Every good is only made by its industry's assets worked by labour.", fields: [
     { path: "labor_capacity", label: "Capacity per day", kind: "spread", min: 0, step: 0.05 },
+  ]},
+  { title: "Housing market", hint: "Houses are whole assets, each housing one agent; homebuilders add new ones; the homeless " +
+      "suffer. All but the starting stock can be changed in the Housing tab during the game.", fields: [
+    { path: "starting_houses", label: "Houses per agent at the start", kind: "float", min: 0, max: 5, step: 0.05,
+      enabledWhen: v => v.housing_enabled },
+    { path: "house_min_multiple", label: "Minimum house price (× the average good)", kind: "float", min: 0, step: 5,
+      enabledWhen: v => v.housing_enabled },
+    { path: "rent_yield", label: "Rent (% of the price a year)", kind: "float", min: 0, step: 0.5, yearly: true,
+      enabledWhen: v => v.housing_enabled },
+    { path: "eviction_days", label: "Evict after (days of unpaid rent)", kind: "int", min: 1, max: 3600,
+      enabledWhen: v => v.housing_enabled },
+    { path: "house_units", label: "Housing units per house", kind: "int", min: 1, max: 10000,
+      enabledWhen: v => v.housing_enabled },
+    { path: "homeless_shelter_rate", label: "Homeless: shelter grows per day", kind: "float", min: 0, max: 1, step: 0.005,
+      enabledWhen: v => v.housing_enabled },
   ]},
   { title: "Labour market", hint: "Base wage = labour share × value one unit of labour makes. The wage then follows " +
       "labour wanted ÷ capacity offered (labour elasticity in Market dynamics). Agents offer more and ask less when they " +
