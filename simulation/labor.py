@@ -77,6 +77,29 @@ def general_need(agent, prices, rules):
     return rules.money_weight * money_short + (1 - rules.money_weight) * pressing
 
 
+def skill(agent, good, rules):
+    """How many units of labour one unit of this agent's time is worth in ``good``'s industry
+    (specialization): 1 + (skill_max - 1) x (1 - e^(-experience / skill_scale)). Learning with
+    diminishing returns, up to skill_max (10x)."""
+    if not rules.specialization_enabled or good is None:
+        return 1.0
+    xp = agent.experience.get(good, 0.0)
+    return 1.0 + (rules.skill_max - 1.0) * (1.0 - math.exp(-xp / rules.skill_scale)) if xp > 0 else 1.0
+
+
+def autonomous_factor(agent, rules):
+    """Share of its starting productivity in autonomous production the agent keeps: specialised
+    workers lose the knack of fending for themselves, down to auto_skill_floor (5%) as their total
+    experience grows (same learning curve as skill)."""
+    if not rules.specialization_enabled:
+        return 1.0
+    xp = sum(agent.experience.values())
+    if xp <= 0:
+        return 1.0
+    learned = 1.0 - math.exp(-xp / rules.skill_scale)
+    return 1.0 - (1.0 - rules.auto_skill_floor) * learned
+
+
 class LaborMarket:
     def __init__(self):
         self.multiplier = 1.0
@@ -192,6 +215,8 @@ class LaborMarket:
             a.capacity_now = a.labor_capacity * a.efficiency * penalties.labor_factor(a, rules)
             # Jobs its industries can actually use: secondary ones only as far as their inputs go.
             jobs = {g: world.usable_jobs(a, g) for g in a.assets if g in economy.GOODS}
+            # The industry it hires for (and learns in): the one with the most jobs.
+            a.main_good = max(jobs, key=jobs.get) if jobs and max(jobs.values()) > 0 else None
             a.labor_need = sum(jobs.values())
             a.output_capacity = {g: world.asset_output(g, s) for g, s in a.assets.items() if g in economy.GOODS}
             for g, j in jobs.items():
@@ -199,6 +224,8 @@ class LaborMarket:
             own = min(a.capacity_now, a.labor_need)
             a.labor_available = own
             a.own_labor = own
+            if own > 0 and a.main_good and rules.specialization_enabled:
+                a.experience[a.main_good] = a.experience.get(a.main_good, 0.0) + own
             a.labor_sold = 0.0
             a.labor_bought = 0.0
             a.employers = {}
@@ -283,17 +310,23 @@ class LaborMarket:
                 # Wages are paid in cash: take what's needed out of the bank.
                 world.banking.cash_up(employer, need + min(budget, want * ref_wage * 2))
             budget = min(budget, max(0.0, employer.money - need - owed.get(employer.id, 0.0)))
-            for worker in offers:
+            good = employer.main_good
+            # Specialization: the cheapest labour per unit of work done in its industry first
+            # (asking wage / skill), so experienced workers are hired first.
+            pool = offers if not rules.specialization_enabled or good is None else sorted(
+                offers, key=lambda w: w.asking_wage / skill(w, good, rules))
+            for worker in pool:
                 if want <= 1e-9 or budget <= 1e-9:
                     break
                 if worker is employer or remaining[worker] <= 1e-9:
                     continue
+                s = skill(worker, good, rules)
                 affordable = budget / worker.asking_wage if worker.asking_wage > 0 else remaining[worker]
-                units = min(remaining[worker], want, affordable)
+                units = min(remaining[worker], want / s, affordable)       # units of the worker's time
                 self._hire(employer, worker, units, worker.asking_wage, stats, world.government,
-                           self.payroll if period > 1 else None)
+                           self.payroll if period > 1 else None, effective=units * s, good=good)
                 remaining[worker] -= units
-                want -= units
+                want -= units * s
                 budget -= units * worker.asking_wage
 
         # Government spending (public works, then unemployment benefits; see government.py).
@@ -408,7 +441,7 @@ class LaborMarket:
                 need = rules.need_of(opt[0])
                 return (economy.urgency(a, need, rules) - economy.held_relief(a, need, rules), opt[1])
             good, rate = max(options, key=score)
-            made = spare * rate
+            made = spare * rate * autonomous_factor(a, rules)     # specialists fend less well for themselves
             done = a.subsistence.get(good, 0.0) + made
             whole = int(done + 1e-9)
             if whole:
@@ -446,7 +479,7 @@ class LaborMarket:
         stats["benefits"] = total * scale
 
     @staticmethod
-    def _hire(employer, worker, units, wage, stats, gov=None, payroll=None):
+    def _hire(employer, worker, units, wage, stats, gov=None, payroll=None, effective=None, good=None):
         pay = units * wage
         employer.flow["wages_paid"] = employer.flow.get("wages_paid", 0.0) + pay   # a cost when worked
         if payroll is not None:
@@ -462,9 +495,12 @@ class LaborMarket:
             economy.earn(worker, pay - tax, "wages")
         worker.labor_sold += units
         worker.employers[employer.name] = worker.employers.get(employer.name, 0) + units
-        employer.labor_available += units
-        employer.labor_bought += units
-        employer.flow["labor_used"] += units
+        if good is not None:
+            worker.experience[good] = worker.experience.get(good, 0.0) + units   # learning on the job
+        done = units if effective is None else effective      # work done: time x skill
+        employer.labor_available += done
+        employer.labor_bought += done
+        employer.flow["labor_used"] += done
         stats["hired"] += units
         stats["hires"] += 1
 

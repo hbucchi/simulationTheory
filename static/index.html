@@ -176,6 +176,21 @@
               <option value="0.95">very sticky (close 5% a day)</option>
             </select></label>
         </div>
+        <details class="card fold settings">
+          <summary>Clearance sales: discounts on goods about to expire</summary>
+          <div class="panel">
+            <label class="bank-toggle"><input id="clear-on" type="checkbox"> Sellers discount goods close to expiry (even below cost)</label>
+            <p class="field-help">Each step: from this many days before a unit expires, it sells at this discount. The deepest
+              step that applies wins. Example of a gradual schedule: 5% off at 30 days, 10% at 20, 20% at 15 … 80% at 1.</p>
+            <div id="clear-steps" class="clear-steps"></div>
+            <div class="form-actions">
+              <button type="button" id="clear-add" class="ghost">+ Add step</button>
+              <span class="spacer"></span>
+              <button type="button" id="clear-apply" class="primary">Apply</button>
+            </div>
+            <p id="clear-status" class="status" hidden></p>
+          </div>
+        </details>
         <div id="product-summary" class="stat-grid"></div>
         <div class="table-wrap"><table id="product-table" class="product-table"></table></div>
         <details class="card fold">

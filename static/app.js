@@ -243,6 +243,7 @@ function render(next) {
     renderEvents();
   } else if (activeTab === "products") {
     fillStickiness();
+    fillClearance();
     renderProducts();
   } else if (activeTab === "banks") {
     renderBanking();
@@ -635,6 +636,11 @@ function renderAgents() {
         [a.budget.spare >= 0 ? "left to invest" : "short of budget", usd(Math.abs(a.budget.spare))]] : []),
       ...(state.housing ? [["home", !a.home ? "homeless" : a.home.owns ? `its own house (#${a.home.house})`
         : `rents house #${a.home.house} from ${a.home.landlord}`]] : []),
+      ...Object.entries(a.experience || {}).map(([g, x]) => {
+        const r = state.rules;
+        const skill = r?.specialization_enabled ? 1 + (r.skill_max - 1) * (1 - Math.exp(-x / r.skill_scale)) : 1;
+        return [`skill in ${label(g).toLowerCase()}`, `×${skill.toFixed(1)}`, `${x.toFixed(1)} units of labour worked there`];
+      }),
       ...Object.entries(a.luck || {}).map(([g, l]) => ["lucky business", `${label(g).toLowerCase()} output ×${l.times} until day ${l.until}`,
         "A hit product or an invention: many times the output from the same labour and inputs, for a while"]),
       ...(a.houses ? [["houses", `${a.houses} owned` + (a.houses_let ? `, ${a.houses_let} let` : "")]] : []),
@@ -765,6 +771,53 @@ function fillStickiness() {
   if (![...sel.options].some(o => Number(o.value) === s)) sel.append(new Option(`custom (${s})`, String(s)));
   sel.value = String([...sel.options].find(o => Number(o.value) === s).value);
 }
+
+// ---------- Clearance sales (Products tab) ----------
+
+let clearDirty = false;
+
+function clearRow(days, off) {
+  const row = document.createElement("div");
+  row.className = "clear-row";
+  const d = Object.assign(document.createElement("input"), { type: "number", min: 0, max: 10000, step: 1, value: days });
+  const o = Object.assign(document.createElement("input"), { type: "number", min: 0, max: 100, step: 5, value: off });
+  const x = Object.assign(document.createElement("button"), { type: "button", className: "policy-close", textContent: "×", title: "Remove step" });
+  x.onclick = () => { row.remove(); clearDirty = true; };
+  row.append("From ", d, " days before expiry: ", o, " % off", x);
+  row.oninput = () => { clearDirty = true; };
+  return row;
+}
+
+function fillClearance(force = false) {
+  if (clearDirty && !force) return;
+  const m = state.market;
+  $("clear-on").checked = !!m.clearance_enabled;
+  const box = $("clear-steps");
+  box.innerHTML = "";
+  for (const [days, off] of m.clearance_schedule || []) box.append(clearRow(days, Math.round(off * 100)));
+  clearDirty = false;
+}
+
+$("clear-add").onclick = () => { $("clear-steps").append(clearRow(10, 20)); clearDirty = true; };
+$("clear-on").onchange = () => { clearDirty = true; };
+$("clear-apply").onclick = async () => {
+  const status = $("clear-status");
+  const steps = [...$("clear-steps").querySelectorAll(".clear-row")].map(r => {
+    const [d, o] = r.querySelectorAll("input");
+    return [Number(d.value), Number(o.value) / 100];
+  });
+  try {
+    render(await api("/api/market", { clearance_enabled: $("clear-on").checked, clearance_schedule: steps }));
+    clearDirty = false;
+    fillClearance(true);
+    status.textContent = "Applied from tomorrow.";
+    status.className = "status";
+  } catch (err) {
+    status.textContent = err.message;
+    status.className = "status error";
+  }
+  status.hidden = false;
+};
 
 // ---------- Housing tab ----------
 

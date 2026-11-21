@@ -819,6 +819,24 @@ keeps the poorest alive, not comfortable. In a game without food the main hunger
 place at the same relief. The Reports tab shows the share of agents doing it and its share of all
 output (*Autonomous production*).
 
+### Specialization
+
+(`specialization_enabled`, module *Specialization*.) Every unit of labour an agent works in an
+industry (for an employer or on its own assets) adds to its experience there. One unit of its
+time is then worth **skill = 1 + (`skill_max` − 1) × (1 − e^(−experience ÷ `skill_scale`))** units of
+labour in that industry: learning with diminishing returns, up to 10× (`skill_max`), about 63% of
+the way after `skill_scale` (60) units worked. Employers hire the cheapest labour per unit of
+work (asking wage ÷ skill), so experienced workers are hired first. Specialists lose the knack of
+fending for themselves: their autonomous production falls toward `auto_skill_floor` (5%) of its
+starting level as their total experience grows. Agent cards show each agent's skills.
+
+### Clearance sales
+
+(`clearance_enabled`, `clearance_schedule`; Products tab, live.) Goods about to expire sell at a
+discount, even below their cost: each step is [days before expiry, discount], and the deepest
+step that applies wins. Default `[[5, 0.8]]`: 80% off in a unit's last 5 days. A gradual schedule
+could be 5% off at 30 days, 10% at 20, 20% at 15 … 80% at 1.
+
 ### Lucky businesses
 
 Each month every business (an agent's industry) has a small chance (`luck_chance_year`, 3% a

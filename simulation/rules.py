@@ -110,6 +110,15 @@ class Rules:
     # below the reservation wage (what labour makes in autonomous production). 0 = the old rule
     # (labor_share x value of output x the demand multiplier).
     wage_adjust_speed: float = 0.05
+    # Specialization (labour module): working in an industry builds experience there. A worker's
+    # time is worth skill = 1 + (skill_max - 1) x (1 - e^(-experience / skill_scale)) units of
+    # labour in that industry (up to 10x; experience in units of labour worked), employers hire the
+    # cheapest per unit of work, and its autonomous production falls toward auto_skill_floor (5%)
+    # of the start as its total experience grows.
+    specialization_enabled: bool = True
+    skill_max: float = 10.0
+    skill_scale: float = 60.0
+    auto_skill_floor: float = 0.05
     money_weight: float = 0.5
     comfort_steps: int = 50
     participation_floor: float = 0.2
@@ -379,6 +388,11 @@ class Rules:
     # Sticky prices: 0 = perfectly flexible (default); 0.9 = posted prices close only 10% of the gap
     # to the market price each day (menu costs: why real inflation is slow). Changeable in game.
     price_stickiness: float = 0.0
+    # Clearance sales: goods about to expire sell at a discount, even below cost. A list of
+    # [days before expiry, discount]: [[5, 0.8]] = 80% off in the last 5 days; gradual, e.g.
+    # [[30, 0.05], [20, 0.1], [15, 0.2], [1, 0.8]]. Changeable in game (Products tab).
+    clearance_enabled: bool = True
+    clearance_schedule: list = field(default_factory=lambda: [[5, 0.8]])
     price_floor: float = 0.25
     price_cap: float = 4.0
     unit_markup: float = 0.05
@@ -601,6 +615,8 @@ class Rules:
                 if not isinstance(value, list) or any(g not in GOODS for g in value):
                     raise ValueError(f"{key} must be a list of industries ({', '.join(GOODS)})")
                 setattr(rules, key, sorted(set(value), key=GOODS.index))
+            elif kind == "schedule":
+                setattr(rules, key, clean_schedule(value))
             elif kind == "policies":
                 from .policies import clean
                 if not isinstance(value, list) or len(value) > 50:
@@ -686,6 +702,8 @@ MODULES = {
                   "Thirst slows walking; hunger, tiredness, illness and cold cut labour; no shelter makes illness worse."),
     "housing": ("housing_enabled", "Housing market", ("commerce",),
                 "Houses are whole assets: owned, rented or empty; homebuilders add houses; the homeless suffer."),
+    "specialization": ("specialization_enabled", "Specialization", (),
+                       "Working in an industry makes a worker up to 10x more productive there, and worse at fending for itself."),
     "subsistence": ("subsistence_enabled", "Subsistence", (),
                     "Agents with no assets make a little water, grain, wood, herbs or stone with the labour nobody hired."),
     "depression": ("depression_enabled", "Depression", (), "Boredom at 1.00 depresses (slower, less efficient)."),
@@ -745,6 +763,8 @@ LIMITS = {
     "price_level_speed": (0.001, 1, "float"),
     "price_adjust_speed": (0.01, 1, "float"),
     "price_stickiness": (0, 0.99, "float"),
+    "clearance_enabled": (None, None, "bool"),
+    "clearance_schedule": (None, None, "schedule"),
     "price_floor": (0.01, 1, "float"),
     "price_cap": (1, 100, "float"),
     "unit_markup": (0, 1, "float"),
@@ -757,6 +777,10 @@ LIMITS = {
     "labor_saving": ((GOODS, -1, 0.99, False), None, "map"),
     "labor_share": (0, 1, "float"),
     "wage_adjust_speed": (0, 1, "float"),
+    "specialization_enabled": (None, None, "bool"),
+    "skill_max": (1, 1000, "float"),
+    "skill_scale": (0.01, 1e6, "float"),
+    "auto_skill_floor": (0, 1, "float"),
     "money_weight": (0, 1, "float"),
     "comfort_steps": (0, 100000, "int"),
     "participation_floor": (0, 1, "float"),
@@ -911,6 +935,20 @@ MIN_DEFAULT_SHARES = 0.02
 CAPITAL_DEFAULT_SHARES = 0.1
 # Inputs that also relieve a need get this many times the capacity their industries' use takes.
 INPUT_LEAKAGE = 2.0   # capital industries: no consumers, but new capacity is built from them
+
+
+def clean_schedule(value):
+    """A validated clearance schedule: [[days before expiry, discount 0-1], ...] (at most 20 steps)."""
+    if not isinstance(value, list) or len(value) > 20:
+        raise ValueError("clearance_schedule must be a list of at most 20 [days, discount] steps")
+    out = []
+    for step in value:
+        if (not isinstance(step, (list, tuple)) or len(step) != 2
+                or any(isinstance(x, bool) or not isinstance(x, (int, float)) for x in step)
+                or not 0 <= step[0] <= 10000 or not 0 <= step[1] <= 1):
+            raise ValueError("each clearance step is [days before expiry (0-10000), discount (0-1)]")
+        out.append([int(step[0]), float(step[1])])
+    return sorted(out, key=lambda s: -s[0])
 
 
 def _default_policies():

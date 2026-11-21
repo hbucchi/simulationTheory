@@ -31,4 +31,6 @@ CLASSIC = {
     "trade_radius": 0,
     "luck_enabled": False,
     "wage_adjust_speed": 0,
+    "specialization_enabled": False,
+    "clearance_enabled": False,
 }

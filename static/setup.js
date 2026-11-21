@@ -114,7 +114,18 @@ const SETUP_SECTIONS = [
   { title: "Labour market", hint: "Base wage = labour share × value one unit of labour makes. The wage then follows " +
       "labour wanted ÷ capacity offered (labour elasticity in Market dynamics). Agents offer more and ask less when they " +
       "need a job more; healthy agents ask more.", fields: [
-    { path: "labor_share", label: "Labour share of output value", kind: "float", min: 0, max: 1, step: 0.05 },
+    { path: "labor_share", label: "Labour share of output value (first day's wage)", kind: "float", min: 0, max: 1, step: 0.05 },
+    { path: "wage_adjust_speed", label: "Wages move with supply and demand by up to (share a day)", kind: "float", min: 0, max: 1, step: 0.01 },
+    { path: "labor_offer_months", label: "Offer all spare labour below (months of living costs)", kind: "float", min: 0, max: 1000, step: 1 },
+    { path: "skill_max", label: "… up to (× productivity in an industry)", kind: "float", min: 1, max: 1000, step: 0.5,
+      enabledWhen: v => v.specialization_enabled },
+    { path: "skill_scale", label: "… learning scale (units of labour for ~63% of it)", kind: "float", min: 0.01, step: 5,
+      enabledWhen: v => v.specialization_enabled },
+    { path: "auto_skill_floor", label: "… autonomous production falls to (share of the start)", kind: "float", min: 0, max: 1, step: 0.01,
+      enabledWhen: v => v.specialization_enabled },
+    { path: "subsistence_rates.water", label: "Autonomous production: water per unit of labour", kind: "float", min: 0, max: 10, step: 0.05 },
+    { path: "subsistence_rates.food", label: "Autonomous production: food per unit of labour", kind: "float", min: 0, max: 10, step: 0.05 },
+    { path: "survival_effort", label: "Autonomous production: share of labour a struggling agent can still use", kind: "float", min: 0, max: 1, step: 0.05 },
     { path: "participation_floor", label: "Offer at least (share of capacity)", kind: "float", min: 0, max: 1, step: 0.05 },
     { path: "bargaining_spread", label: "Bargaining spread", kind: "float", min: 0, max: 2, step: 0.05 },
     { path: "money_weight", label: "Need: weight of money (vs needs)", kind: "float", min: 0, max: 1, step: 0.05 },

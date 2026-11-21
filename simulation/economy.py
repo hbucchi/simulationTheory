@@ -594,6 +594,22 @@ def purchase_goal(buyer, resource, rules, rng=None):
     return buyer.inventory.count(resource) + math.ceil(round(needed * multiplier, 9))
 
 
+def clearance_discount(seller, resource, rules=DEFAULT_RULES):
+    """Clearance sale: the share off the price of the seller's next unit of ``resource`` because it
+    is about to expire. rules.clearance_schedule is a list of [days before expiry, discount]: a
+    unit with at most that many days left sells at that discount (the deepest that applies), even
+    below its cost. Default [[5, 0.8]]: in its last 5 days, 80% off."""
+    if not rules.clearance_enabled or not rules.clearance_schedule:
+        return 0.0
+    batches = seller.inventory.batches.get(resource)
+    if not batches:
+        return 0.0
+    left = batches[0][0] - seller.inventory.now
+    if left == math.inf:
+        return 0.0
+    return max((d for days, d in rules.clearance_schedule if left <= days), default=0.0)
+
+
 def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, markups=None):
     """Buyer acquires what it needs (times a random multiplier) from seller at market prices,
     plus any stockpile reserve it is missing.
@@ -642,7 +658,8 @@ def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, mar
                    project_need(buyer, resource))
         markup = (markups or {}).get(resource, 0)
         while buyer.inventory.count(resource) < goal and spare(seller, resource, rules, scarcity) > 0:
-            unit_price = prices[resource] * (1 + markup) ** bought.get(resource, 0)
+            unit_price = (prices[resource] * (1 + markup) ** bought.get(resource, 0)
+                          * (1 - clearance_discount(seller, resource, rules)))
             for_reserve = buyer.inventory.count(resource) >= need_goal
             if for_reserve and (no_reserves or spent_on_reserve + unit_price > budget):
                 break

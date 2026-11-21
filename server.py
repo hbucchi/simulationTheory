@@ -155,10 +155,19 @@ class Simulation:
     def set_market(self, changes):
         """Change how markets work while the game runs (price stickiness)."""
         with self.lock:
-            self.world.price_stickiness = changes.get("price_stickiness", self.world.price_stickiness)
-            s = self.world.price_stickiness
-            self.world.log("Prices are now perfectly flexible" if s == 0 else
-                           f"Prices are sticky: each day they close {1 - s:.0%} of the gap to the market price")
+            if "price_stickiness" in changes:
+                self.world.price_stickiness = changes["price_stickiness"]
+                s = self.world.price_stickiness
+                self.world.log("Prices are now perfectly flexible" if s == 0 else
+                               f"Prices are sticky: each day they close {1 - s:.0%} of the gap to the market price")
+            rules = self.world.rules
+            if "clearance_enabled" in changes:
+                rules.clearance_enabled = changes["clearance_enabled"]
+            if "clearance_schedule" in changes:
+                rules.clearance_schedule = changes["clearance_schedule"]
+            if {"clearance_enabled", "clearance_schedule"} & set(changes):
+                steps = ", ".join(f"{d:.0%} off from {n} days before expiry" for n, d in rules.clearance_schedule)
+                self.world.log("Clearance sales: " + (steps if rules.clearance_enabled and steps else "off"))
             return self.world.to_dict(self.detail)
 
     def set_housing(self, changes):
@@ -375,9 +384,17 @@ class Handler(SimpleHTTPRequestHandler):
                 for key, value in body.items():
                     if key == "detail":
                         continue
-                    if key != "price_stickiness":
+                    if key == "clearance_schedule":
+                        from simulation.rules import clean_schedule
+                        changes[key] = clean_schedule(value)
+                    elif key == "clearance_enabled":
+                        if not isinstance(value, bool):
+                            raise ValueError("clearance_enabled must be true or false")
+                        changes[key] = value
+                    elif key == "price_stickiness":
+                        changes[key] = _number(value, key, 0, 0.99)
+                    else:
                         raise ValueError(f"unknown market setting: {key}")
-                    changes[key] = _number(value, key, 0, 0.99)
                 return self.sim.set_market(changes)
             if self.path == "/api/housing":
                 limits = {"min_multiple": (0, 1e6), "rent_yield": (0, 0.01), "eviction_days": (1, 3600)}

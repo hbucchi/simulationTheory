@@ -1186,6 +1186,8 @@ class World:
             "housing": self.housing.to_dict(self) if self.rules.housing_enabled else None,
             "market": {
                 "price_stickiness": self.price_stickiness,
+                "clearance_enabled": self.rules.clearance_enabled,
+                "clearance_schedule": self.rules.clearance_schedule,
                 "prices": self.current_prices(),
                 "base_prices": economy.market_prices(self.agents, self.rules),
                 "multiplier": self.price_multiplier,
