@@ -5,7 +5,7 @@ import random
 from collections import deque
 from itertools import islice
 
-from . import distributions, economy
+from . import distributions, economy, penalties
 from .agent import Agent
 from .inventory import Inventory
 from .modules import Build, Consume, Invest, Mood, Navigate, NeedsDecay, Production, Rest
@@ -343,7 +343,7 @@ class World:
             # then the ones getting scarcer.
             wanted.sort(key=lambda r: (economy.need_urgency(agent, r, self.rules), self.scarcity[r]), reverse=True)
         else:
-            # Most pressing need first (hunger and thirst count double); any good that relieves it will do, so the nearest agent
+            # Most pressing need first (by priority, see economy.urgency); any good that relieves it will do, so the nearest agent
             # with spare of any of them is chosen (and the most effective good it has is named).
             rules = self.rules
             for need in sorted(rules.consumer_needs, key=lambda n: economy.urgency(agent, n, rules), reverse=True):
@@ -815,19 +815,25 @@ class World:
         """
         if not self.rules.death_enabled:
             return False
+        if agent.critical_health_days >= penalties.HEALTH_DEATH_DAYS:
+            self._die(agent, "health")
+            return True
         for need in ("hunger", "thirst"):
             if getattr(agent, need) >= economy.CRITICAL_LEVEL:
-                prices = self.current_prices()
-                asset_prices = self.asset_prices(prices)
-                self.remove_agent(agent)
-                self.settle_estate(agent, prices, asset_prices)
-                self._dead_flows.append(agent.flow)
-                self.recorder.count("deaths")
-                cause = "hunger" if need == "hunger" else "thirst"
-                self.recorder.count(f"deaths_{cause}")
-                self.log(f"{agent.name} died of {cause}")
+                self._die(agent, need)
                 return True
         return False
+
+    def _die(self, agent, cause):
+        prices = self.current_prices()
+        asset_prices = self.asset_prices(prices)
+        self.remove_agent(agent)
+        self.settle_estate(agent, prices, asset_prices)
+        self._dead_flows.append(agent.flow)
+        self.recorder.count("deaths")
+        self.recorder.count(f"deaths_{cause}")
+        self.log(f"{agent.name} died of {cause}" if cause != "health"
+                 else f"{agent.name} died of illness ({penalties.HEALTH_DEATH_DAYS} days at health 1.00)")
 
     def settle_estate(self, dead, prices, asset_prices):
         """Sell a dead agent's goods and asset shares at market price to whoever is nearest

@@ -2,7 +2,7 @@
 
 import math
 
-from . import economy
+from . import economy, penalties
 from .inventory import Inventory
 from .rules import DEFAULT_RULES
 
@@ -71,6 +71,10 @@ class Agent:
         self.activity = "wandering"
         self.sleeping = False  # set by the Rest module; a sleeping agent stays still
         self.depressed = False  # set by the Mood module; slows movement and sleep recovery
+        self.speed_factor = 1.0      # < 1 while very thirsty (penalties.py; set by NeedsDecay)
+        self.critical_health_days = 0   # days in a row at health 1.00 (dies at penalties.HEALTH_DEATH_DAYS)
+        self.subsistence = {}        # {good: fraction of a unit made on its own so far}
+        self.subsistence_made = {}   # {good: units per day made on its own (latest day)}
         self.depression_factor = 0.5  # set from the game rules by the World
         self.assets = {}  # good -> shares of productive assets owned
         self.labor_need = 0.0  # labour its assets use per step at full capacity (Production)
@@ -138,7 +142,8 @@ class Agent:
     @property
     def speed(self):
         """Pixels this agent can actually move per step: movement, reduced while depressed."""
-        return max(1, int(self.movement * self.depression_factor)) if self.depressed else self.movement
+        speed = max(1, int(self.movement * self.depression_factor)) if self.depressed else self.movement
+        return max(1, int(speed * self.speed_factor)) if self.speed_factor < 1 else speed
 
     def _held(self):
         """{good: whole units} of the goods it holds (none of the zeros)."""
@@ -182,6 +187,9 @@ class Agent:
                       "asking_wage": round(self.asking_wage, 2), "sold": round(self.labor_sold, 4),
                       "bought": round(self.labor_bought, 4), "employers": {k: round(v, 3) for k, v in self.employers.items()}},
             "depressed": self.depressed,
+            # What unmet needs are costing it now, and what it made on its own (no assets).
+            "penalties": penalties.describe(self, rules),
+            "subsistence": {g: round(v, 3) for g, v in self.subsistence_made.items()},
             "inventory": self._held(),
             "output_capacity": {g: round(v, 4) for g, v in self.output_capacity.items()},
             "input_target": {r: economy.input_target(self, r, rules) for r in rules.active_goods

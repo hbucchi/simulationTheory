@@ -119,7 +119,7 @@ class SurvivalFirstTests(unittest.TestCase):
         w = self.world()
         a = w.create_agent(needs={**CALM, "thirst": 0.6, "boredom": 1.0}, money=0)
         self.assertGreater(economy.urgency(a, "thirst", w.rules), economy.urgency(a, "boredom", w.rules))
-        w2 = self.world(death_enabled=False)
+        w2 = self.world(need_priority={"thirst": 1.0, "boredom": 1.0})        # priorities are game rules
         b = w2.create_agent(needs={**CALM, "thirst": 0.6, "boredom": 1.0}, money=0)
         self.assertLess(economy.urgency(b, "thirst", w2.rules), economy.urgency(b, "boredom", w2.rules))
 

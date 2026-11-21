@@ -349,7 +349,20 @@ class Rules:
     unit_markup: float = 0.05
 
     # Life
-    death_enabled: bool = True         # hunger or thirst at 1.00 kills
+    death_enabled: bool = True         # hunger or thirst at 1.00 kills (and 30 days at health 1.00)
+    # Unmet needs have consequences (penalties.py): slower walking, less labour, needs that make
+    # others worse, illness that can kill.
+    need_penalties_enabled: bool = True
+    # How much each need counts when an agent decides what to see to first (Maslow: water and
+    # food, then sleep, shelter, health, energy and boredom): urgency = level x priority.
+    need_priority: dict = field(default_factory=lambda: {"thirst": 3.0, "hunger": 2.5, "sleep": 2.0, "shelter": 1.5,
+                                                         "health": 1.3, "energy": 1.2, "boredom": 1.0})
+    # Subsistence: an agent with no assets can use the labour nobody hired to make a little of a
+    # basic good on its own (fetch water, a garden, gather wood or herbs, collect stone), at
+    # these units per unit of labour (an industry worker makes about 4). See labor.py.
+    subsistence_enabled: bool = True
+    subsistence_rates: dict = field(default_factory=lambda: {"water": 0.4, "grain": 0.4, "wood": 0.4, "herbs": 0.4,
+                                                             "stone": 0.2})
     depression_enabled: bool = True    # boredom at 1.00 depresses
     depression_factor: float = 0.5     # depressed speed and sleep recovery are multiplied by this
 
@@ -587,7 +600,11 @@ MODULES = {
     "government": ("government_enabled", "Government & central bank", (),
                    "Policy rate, Basel capital rule for banks, buying labour with new money."),
     "expiry": ("expiry_enabled", "Expiry", (), "Goods go off after their shelf life."),
-    "death": ("death_enabled", "Death", (), "Hunger or thirst at 1.00 kills."),
+    "death": ("death_enabled", "Death", (), "Hunger or thirst at 1.00 kills (and 30 days too ill to work)."),
+    "penalties": ("need_penalties_enabled", "Unmet needs hurt", (),
+                  "Thirst slows walking; hunger, tiredness, illness and cold cut labour; no shelter makes illness worse."),
+    "subsistence": ("subsistence_enabled", "Subsistence", (),
+                    "Agents with no assets make a little water, grain, wood, herbs or stone with the labour nobody hired."),
     "depression": ("depression_enabled", "Depression", (), "Boredom at 1.00 depresses (slower, less efficient)."),
 }
 
@@ -727,6 +744,10 @@ LIMITS = {
     "price_mode": (PRICE_MODES, None, "choice"),
     "fixed_prices": ((PRICED, 0, 1e9, False), None, "map"),
     "death_enabled": (None, None, "bool"),
+    "need_penalties_enabled": (None, None, "bool"),
+    "need_priority": ((NEEDS, 0.1, 10, False), None, "map"),
+    "subsistence_enabled": (None, None, "bool"),
+    "subsistence_rates": ((GOODS, 0, 10, False), None, "map"),
     "depression_enabled": (None, None, "bool"),
     "depression_factor": (0, 1, "float"),
     "contact_distance": (1, 200, "float"),

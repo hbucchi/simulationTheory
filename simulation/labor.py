@@ -33,7 +33,7 @@ Market wage
 import math
 
 
-from . import economy
+from . import economy, penalties
 
 from .rules import NEEDS as NEEDS_FOR_WELLBEING
 
@@ -77,7 +77,7 @@ class LaborMarket:
     def _empty_stats():
         return {"capacity": 0.0, "own_use": 0.0, "offered": 0.0, "wanted": 0.0, "hired": 0.0,
                 "wanted_full": 0.0, "job_capacity": 0.0, "jobs_funded": 0.0,
-                "gov_hired": 0.0, "benefits": 0.0, "unused": 0.0, "withheld": 0.0, "idle": 0.0, "hires": 0, "workers_hired": 0, "base_wage": 0.0, "pressure": 1.0}
+                "gov_hired": 0.0, "benefits": 0.0, "subsistence": 0.0, "unused": 0.0, "withheld": 0.0, "idle": 0.0, "hires": 0, "workers_hired": 0, "base_wage": 0.0, "pressure": 1.0}
 
     def base_wage(self, world, prices, jobs):
         """labor_share x value added by one unit of labour (output minus the inputs it used),
@@ -102,7 +102,8 @@ class LaborMarket:
             a.efficiency = efficiency(a, rules)
             a.wellbeing = wellbeing(a, rules)
             a.job_need = general_need(a, prices, rules)
-            a.capacity_now = a.labor_capacity * a.efficiency
+            # Unmet needs cut what it can give (hungry, tired, sick, cold, depressed: penalties.py).
+            a.capacity_now = a.labor_capacity * a.efficiency * penalties.labor_factor(a, rules)
             # Jobs its industries can actually use: secondary ones only as far as their inputs go.
             jobs = {g: world.usable_jobs(a, g) for g in a.assets if g in economy.GOODS}
             a.labor_need = sum(jobs.values())
@@ -207,6 +208,9 @@ class LaborMarket:
             gov.step_spent["transfers"] += gov.treasury
             gov.treasury = 0.0
 
+        if rules.subsistence_enabled:
+            stats["subsistence"] = self._subsistence(world)
+
         # Unused capacity = withheld (not offered: the agent didn't need to work) + idle
         # (offered but nobody hired it).
         stats["unused"] = stats["capacity"] - stats["own_use"] - stats["hired"] - stats["gov_hired"]
@@ -243,6 +247,40 @@ class LaborMarket:
             hired += units
             gov.labor_bought += units
         return hired
+
+    @staticmethod
+    def _subsistence(world):
+        """Agents with no assets spend the labour nobody hired making a little of a basic good on
+        their own (rules.subsistence_rates units per unit of labour: fetching water, a garden,
+        gathering wood or herbs, collecting stone). Each makes the good for its most urgent need
+        that it holds least of. Fractions of a unit accumulate until a whole unit is made.
+        Returns the labour used."""
+        rules = world.rules
+        options = [(g, rate) for g, rate in rules.subsistence_rates.items()
+                   if rate > 0 and g in rules.active_goods and rules.need_of(g) in rules.consumer_needs]
+        used = 0.0
+        for a in world.agents:
+            a.subsistence_made = {}
+            if a.assets or not options:
+                continue
+            spare = a.capacity_now - a.labor_sold
+            if spare <= 1e-9:
+                continue
+            # Most urgent need first; for a need it already has stock of, less so.
+            def score(opt):
+                need = rules.need_of(opt[0])
+                return (economy.urgency(a, need, rules) - economy.held_relief(a, need, rules), opt[1])
+            good, rate = max(options, key=score)
+            made = spare * rate
+            done = a.subsistence.get(good, 0.0) + made
+            whole = int(done + 1e-9)
+            if whole:
+                a.inventory.add(good, whole)
+                a.flow["produced"][good] = a.flow["produced"].get(good, 0) + whole
+            a.subsistence[good] = done - whole
+            a.subsistence_made[good] = made
+            used += spare
+        return used
 
     def _benefits(self, world, offers, remaining, stats):
         """Unemployment benefit: benefit_rate x the wage for every unit of labour offered and not

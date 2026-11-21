@@ -114,9 +114,9 @@ Every step each agent runs its modules in this order:
    - *seeking*: a need is still above 0.5 because stock ran out. Every step,
      find the closest agent that has spare of what it needs (most urgent need
      first, skipping agents it has just met) and walk straight at that agent's
-     current position (re-aiming as everyone moves). **Survival first**: hunger and
-     thirst (the needs that kill) count double, so a thirsty agent drinks before it
-     goes looking for games however bored it is. It sticks with the seller it chose
+     current position (re-aiming as everyone moves). **Survival first**: needs are
+     ranked by priority (see *Needs: priority and penalties*), so a thirsty agent drinks
+     before it goes looking for games however bored it is. It sticks with the seller it chose
      while that seller still has some, unless another is under half the distance away
      (otherwise an agent whose hunger and thirst take turns at the top walks to a food
      seller, then a water seller, then back, and arrives nowhere).
@@ -687,10 +687,44 @@ held about 5 months of living costs after a year and the poorest tenth about 1.5
 banks lent. The starting money (default $3,000 per agent) only sets the scale: a day's wage is
 roughly 6% of it. Velocity 0 switches the price level off (the plain formula).
 
+### Needs: priority and penalties
+
+Agents see to their needs in order of **urgency = level × priority** (`need_priority`, Maslow's
+hierarchy): thirst 3.0, hunger 2.5, sleep 2.0, shelter 1.5, health 1.3, energy 1.2, boredom 1.0.
+So a thirsty agent drinks before it looks for games however bored it is, and money goes to
+water and food first.
+
+Going without has consequences (`need_penalties_enabled`, the *Unmet needs hurt* module;
+`simulation/penalties.py`):
+
+| Need | Warning (≥ 0.80) | Critical (1.00) |
+|---|---|---|
+| Thirst | walks 30% slower | death |
+| Hunger | labour −30% | death |
+| Sleep | labour −30% (tired) | agents rest from 0.5 anyway |
+| Shelter | health worsens twice as fast | sleeps 30% worse |
+| Health | labour −50% (sick days) | can't work; dies after 30 days at 1.00 |
+| Energy | labour −20% | shelter worsens twice as fast (no heating) |
+| Boredom | – | depression: slower, sleeps worse, labour −20% |
+
+Less labour is how lower productivity shows: a hungry, tired or sick worker delivers fewer units
+of labour, so it earns less and its employer makes less (a poverty trap). Penalties only apply
+to needs some good in the game can relieve. The agent card lists the penalties it suffers now.
+
+### Subsistence
+
+An agent with **no assets** puts the labour nobody hired that day into making a little of a
+basic good on its own (`subsistence_enabled`, `subsistence_rates`, units per unit of labour):
+water 0.4 (fetching), grain 0.4 (a garden), wood 0.4 and herbs 0.4 (gathering), stone 0.2. It
+makes the good for its most urgent need that it holds least of. An industry worker makes about
+4 units per unit of labour, so a whole day on its own (about 0.5 labour) gives about 0.2 units:
+roughly a day's water, or a day's grain, not both. It slows the fall of the poorest without
+replacing a job.
+
 ### Death and depression
 
-- **Hunger or thirst at 1.00** (after eating/drinking whatever it had) → the
-  agent **dies** and disappears with its inventory and money.
+- **Hunger or thirst at 1.00** (after eating/drinking whatever it had), or **30 days at health
+  1.00**, → the agent **dies** and disappears with its inventory and money.
 - **Boredom at 1.00** → the agent becomes **depressed**: its movement and its
   sleep recovery are halved. It recovers when boredom drops below 0.3.
 

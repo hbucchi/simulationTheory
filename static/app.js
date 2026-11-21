@@ -630,7 +630,9 @@ function renderAgents() {
         `(living ${usd(a.budget.living)} + loan payments ${usd(a.budget.loans)} per day). ` +
         `Income ${usd(a.income)}/day.`],
         [a.budget.spare >= 0 ? "left to invest" : "short of budget", usd(Math.abs(a.budget.spare))]] : []),
-      ["movement", a.depressed ? `${a.speed} px (depressed, ${a.movement} normally)` : `${a.speed} px`],
+      ["movement", a.speed < a.movement ? `${a.speed} px (${a.movement} normally)` : `${a.speed} px`],
+      ...Object.entries(a.subsistence || {}).map(([g, n]) => ["makes on its own", `${n.toFixed(2)} ${label(g).toLowerCase()}/day`,
+        "No assets: the labour nobody hired goes into a little subsistence production (fetching water, a garden, gathering)"]),
       ...GOODS.filter(r => a.assets[r]).map(r => {
         const price = state.market.asset_prices[r];
         return [`${label(r).toLowerCase()} industry`, `${a.assets[r].toFixed(2)} (worth ${usd(a.assets[r] * price)}, ` +
@@ -681,10 +683,12 @@ function renderAgents() {
       (owned.length ? ` · its assets employ ${a.labor_need.toFixed(2)}/day` +
         (lab.bought ? ` (hired ${lab.bought.toFixed(2)})` : "") : "");
     activity.append(act);
-    if (a.depressed) {
+    // Unmet needs and what they cost it (slower, less labour, illness); "depressed" is one of them.
+    const hurts = a.penalties ?? (a.depressed ? ["depressed"] : []);
+    if (hurts.length) {
       const sad = document.createElement("b");
       sad.className = "depressed";
-      sad.textContent = "depressed";
+      sad.textContent = hurts.join(" · ");
       activity.append(" · ", sad);
     }
     meta.append(Object.assign(document.createElement("span"), { className: "work-line", textContent: prod }));

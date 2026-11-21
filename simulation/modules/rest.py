@@ -1,3 +1,4 @@
+from .. import penalties
 from ..rules import DEFAULT_RULES
 from .base import Module
 
@@ -22,7 +23,8 @@ class Rest(Module):
         elif not agent.sleeping and agent.sleep > rules.seek_threshold:
             agent.sleeping = True
         if agent.sleeping:
-            agent.sleep -= self.recovery * (rules.depression_factor if agent.depressed else 1)
+            agent.sleep -= (self.recovery * (rules.depression_factor if agent.depressed else 1)
+                            * penalties.sleep_recovery_factor(agent, rules))   # sleeps badly without shelter
 
     def to_dict(self):
         return {"recovery": self.recovery}

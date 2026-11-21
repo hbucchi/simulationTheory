@@ -162,18 +162,17 @@ def is_needy(agent, rules=DEFAULT_RULES):
     return any(getattr(agent, need) > rules.seek_threshold for need in rules.consumer_needs)
 
 
-# Needs that kill at 1.00 (with death on). They count FATAL_WEIGHT times as urgent as the
-# others, so a thirsty agent drinks before it goes looking for games however bored it is.
+# Needs that kill at 1.00 (with death on).
 FATAL_NEEDS = ("hunger", "thirst")
-FATAL_WEIGHT = 2.0
 # A fatal need above this is close to killing: the agent drops everything else to meet it.
 DESPERATE_LEVEL = 0.85
 
 
 def urgency(agent, need, rules=DEFAULT_RULES):
-    """How urgent ``need`` is for ``agent``: its level, x FATAL_WEIGHT for needs that kill."""
-    level = getattr(agent, need)
-    return level * FATAL_WEIGHT if rules.death_enabled and need in FATAL_NEEDS else level
+    """How urgent ``need`` is for ``agent``: its level x the need's priority (rules.need_priority:
+    thirst 3, hunger 2.5, ... boredom 1), so a thirsty agent drinks before it looks for games
+    however bored it is."""
+    return getattr(agent, need) * rules.need_priority.get(need, 1.0)
 
 
 def in_danger(agent, rules=DEFAULT_RULES):
@@ -593,7 +592,7 @@ def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, mar
     # Hungry or thirsty: every dollar goes on what it needs now, nothing on reserves.
     no_reserves = in_danger(buyer, rules)
     spent_on_reserve = 0.0
-    # Most pressing need first (hunger and thirst count double, see urgency); for each need the
+    # Most pressing need first (by priority, see urgency); for each need the
     # good that does the buyer most good per dollar
     # first (relief plus side effects, see benefit). Goods relieving no need (inputs) come last.
     def order(r):

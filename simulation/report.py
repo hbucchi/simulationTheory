@@ -144,7 +144,7 @@ class Recorder:
     def begin_step(self, world):
         for a in world.agents:
             a.flow = new_flow()
-        self.step_counts = {"deaths": 0, "deaths_hunger": 0, "deaths_thirst": 0, "goods_deals": 0,
+        self.step_counts = {"deaths": 0, "deaths_hunger": 0, "deaths_thirst": 0, "deaths_health": 0, "goods_deals": 0,
                             "asset_trades_before": world.asset_trades}
 
     def count(self, key, amount=1):
@@ -202,6 +202,7 @@ class Recorder:
             "struggling": sum(1 for a in agents if a.job_need > 0.5) / n,
             "deaths_hunger": sc["deaths_hunger"],
             "deaths_thirst": sc["deaths_thirst"],
+            "deaths_health": sc["deaths_health"],
             "produced": produced,
             "consumed": {g: sum(f["consumed"].get(g, 0) for f in flows) for g in economy.GOODS},
             "used": {g: sum(f["used"].get(g, 0) for f in flows) for g in economy.GOODS},   # as industry inputs
@@ -286,6 +287,7 @@ def build_report(world, window=None):
         "gov_money": sum(s["gov_money"] for s in history),
         "deaths_hunger": sum(s["deaths_hunger"] for s in history),
         "deaths_thirst": sum(s["deaths_thirst"] for s in history),
+        "deaths_health": sum(s.get("deaths_health", 0) for s in history),
         "income_sources": {k: sum(s["income_sources"][k] for s in history) for k in INCOME_SOURCES},
         "output_value": sum(s["output_value"] for s in history),
         "wealth_change": (last.get("wealth", 0) / first["wealth"] - 1) if history and first["wealth"] else 0.0,
