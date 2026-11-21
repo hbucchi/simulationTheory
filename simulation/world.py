@@ -314,7 +314,17 @@ class World:
         entry = self.cooldowns.get(frozenset((a.id, b.id)))
         if entry is None or entry[0] < self.tick:
             return False
-        return not (entry[1] and (economy.alarmed(a, self.rules) or economy.alarmed(b, self.rules)))
+        if not entry[1]:
+            return True
+        # Only worth going back if the other still has food or water to spare.
+        return not ((economy.alarmed(a, self.rules) and self._sells_survival(b))
+                    or (economy.alarmed(b, self.rules) and self._sells_survival(a)))
+
+    def _sells_survival(self, seller):
+        """True when ``seller`` has spare of a good for hunger or thirst (this step's spare table)."""
+        rules = self.rules
+        return any(seller in self.spare_table.get(g, ()) for n in economy.FATAL_NEEDS
+                   if n in rules.consumer_needs for g in rules.goods_for(n))
 
     def agent_by_id(self, agent_id):
         return self._by_id.get(agent_id)
@@ -795,7 +805,9 @@ class World:
         self.update_sell_through()
         self.update_profitability()
         if self.tick % self.rules.month_steps == 0:
-            self.government.monthly(self)       # the central bank resets its rate (Taylor rule)
+            self.government.monthly(self)
+            # Forget pauses between pairs that have run out.
+            self.cooldowns = {k: v for k, v in self.cooldowns.items() if v[0] >= self.tick}       # the central bank resets its rate (Taylor rule)
         self.government.debt.step(self)     # interest on government bonds, repayments
         self.labor.clear(self)
         seekers = {}
@@ -963,6 +975,17 @@ class World:
         scarcity = self.scarcity
         if not rules.commerce_enabled:
             return  # no commerce: agents don't trade
+        # Nothing can change hands unless one of them has something to spare (checked first: it
+        # is cheap, and in a slump crowds of needy agents with nothing to sell bump into each other).
+        cache = self._step_cache
+        sellers = cache.get("has_spare") if cache else None
+        if sellers is None:
+            sellers = set().union(*self.spare_table.values()) if self.spare_table else set()
+            if cache is not None:
+                cache["has_spare"] = sellers
+        if a not in sellers and b not in sellers:
+            self.cooldowns[frozenset((a.id, b.id))] = (self.tick + rules.retry_steps, False)
+            return
         if not (economy.wants_anything(a, rules, scarcity) or economy.wants_anything(b, rules, scarcity)):
             return  # a casual bump: nobody needs anything
         prices = self.current_prices()
