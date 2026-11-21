@@ -474,8 +474,10 @@ the economy together with the dead agent's own money.
 
 Each step the treasury pays, in order: public works (*labour bought*), the **unemployment
 benefit** (`benefit_rate`, 40% of the wage for every unit of labour offered that nobody hired),
-then, with **balanced budget** on, more public works with what is left and finally an equal
-transfer to everyone, so taxes return to the economy instead of piling up. Only public works
+then, with **balanced budget** on, a **safety net** (anyone hungry or thirsty whose money can't
+buy the food and water it needs right now gets the difference, most in danger first), more
+public works with what is left and finally an equal transfer to everyone, so taxes return to
+the economy instead of piling up. Only public works
 the treasury can't pay are paid with new money.
 
 **Central bank.**
@@ -628,6 +630,8 @@ to invest (or how short it is).
   gets scarce gets dearer, its assets earn more and investors move in.
 - **Full-cost price floor**: no good sells below (inputs + labour ÷ productivity) ×
   (1 + `cost_floor_margin`, 10%), so capital goods and housing are never valued at 0.
+- **No reserves while hungry or thirsty**: an agent whose food or water ran out spends nothing
+  on stockpiles, restocking or industry inputs until it has eaten and drunk.
 - **Risk appetite** (personality, 0–1, editable per agent): entrepreneurs (above 0.3)
   build projects up to 5× bigger and borrow from a bank for them when the asset's yield
   beats the loan rate. Whether the bank lends is its own credit rule (collateral).

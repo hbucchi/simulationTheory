@@ -149,6 +149,29 @@ class SurvivalFirstTests(unittest.TestCase):
         Invest().on_step(a, w)
         self.assertNotIn("water", a.assets)
 
+    def test_no_stockpiling_while_thirsty(self):
+        from simulation import economy
+        w = self.world()
+        seller = w.create_agent(needs=CALM, money=0, inventory={**NO_ASSETS, "stone": 50})
+        buyer = w.create_agent(needs={**CALM, "thirst": 0.7}, money=1000, inventory=NO_ASSETS)
+        w.scarcity["stone"] = 1.0                  # stone is running out: worth a reserve
+        prices = w.current_prices()
+        bought, *_ = economy.buy(buyer, seller, prices, w.rules, w.rng, w.scarcity)
+        self.assertNotIn("stone", bought)
+
+    def test_the_safety_net_pays_for_the_water_of_people_who_cant(self):
+        from simulation import economy
+        from simulation.labor import LaborMarket
+        w = self.world()
+        poor = w.create_agent(needs={**CALM, "thirst": 0.9}, money=0, inventory=NO_ASSETS)
+        fine = w.create_agent(needs=CALM, money=0, inventory=NO_ASSETS)
+        w.government.treasury = 1e6
+        LaborMarket._safety_net(w)
+        need = economy.shopping_cost(poor, w.current_prices(), w.rules, economy.FATAL_NEEDS)
+        self.assertAlmostEqual(poor.money, need)
+        self.assertEqual(fine.money, 0)
+        self.assertAlmostEqual(w.government.treasury, 1e6 - need)
+
 
 if __name__ == "__main__":
     unittest.main()

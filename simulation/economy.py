@@ -176,6 +176,12 @@ def urgency(agent, need, rules=DEFAULT_RULES):
     return level * FATAL_WEIGHT if rules.death_enabled and need in FATAL_NEEDS else level
 
 
+def in_danger(agent, rules=DEFAULT_RULES):
+    """True when a need that kills is above the seek threshold (its stock already used up)."""
+    return rules.death_enabled and any(getattr(agent, n) > rules.seek_threshold for n in FATAL_NEEDS
+                                       if n in rules.consumer_needs)
+
+
 def is_desperate(agent, rules=DEFAULT_RULES):
     """True when a need that kills is above DESPERATE_LEVEL."""
     return rules.death_enabled and any(getattr(agent, n) > DESPERATE_LEVEL for n in FATAL_NEEDS
@@ -238,10 +244,13 @@ def living_cost(agent, prices, rules=DEFAULT_RULES):
     return value
 
 
-def shopping_cost(agent, prices, rules=DEFAULT_RULES):
-    """Money to buy what it needs right now, the cheapest way for each need."""
+def shopping_cost(agent, prices, rules=DEFAULT_RULES, needs=None):
+    """Money to buy what it needs right now, the cheapest way for each need (only ``needs``,
+    if given)."""
     total = 0.0
     for need in rules.consumer_needs:
+        if needs is not None and need not in needs:
+            continue
         if getattr(agent, need) <= rules.seek_threshold:
             continue
         costs = [n * prices[g] for g in rules.goods_for(need) if (n := demand(agent, g, rules))]
@@ -546,7 +555,8 @@ def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, mar
 
     It stops when it reaches its goal, the seller has no spare left, or it
     can't pay. Units bought only for the reserve are paid in money, up to
-    stockpile_budget of the money the buyer had at the start. ``markups``
+    stockpile_budget of the money the buyer had at the start (none while it is hungry or
+    thirsty: see in_danger). ``markups``
     ({resource: rate}) makes each extra unit of a resource in this deal cost
     that much more than the previous one (price x (1 + rate) ** k).
     Returns (bought, paid, stocked, unit_prices): bought = {resource: units};
@@ -556,6 +566,8 @@ def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, mar
     """
     bought, paid, stocked, unit_prices = {}, {}, {}, {}
     budget = buyer.money * rules.stockpile_budget
+    # Hungry or thirsty: every dollar goes on what it needs now, nothing on reserves.
+    no_reserves = in_danger(buyer, rules)
     spent_on_reserve = 0.0
     # Most pressing need first (hunger and thirst count double, see urgency); for each need the
     # good that does the buyer most good per dollar
@@ -587,7 +599,7 @@ def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, mar
         while buyer.inventory.count(resource) < goal and spare(seller, resource, rules, scarcity) > 0:
             unit_price = prices[resource] * (1 + markup) ** bought.get(resource, 0)
             for_reserve = buyer.inventory.count(resource) >= need_goal
-            if for_reserve and spent_on_reserve + unit_price > budget:
+            if for_reserve and (no_reserves or spent_on_reserve + unit_price > budget):
                 break
             settled = _settle_one(buyer, seller, resource, {**prices, resource: unit_price}, rules, scarcity,
                                   money_only=for_reserve)
