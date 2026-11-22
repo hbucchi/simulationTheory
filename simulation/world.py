@@ -892,6 +892,24 @@ class World:
             prices[economy.LABOR] = self.labor.wage
         return prices
 
+    def procure_inputs(self):
+        """Purchasing departments: once a day every business short of inputs for its industries (or of
+        capital goods for a building project) orders them from sellers anywhere on the map, apart from
+        its owner's own shopping trips (which go to personal needs first, so inputs were never bought
+        and whole supply chains stood idle). Cheapest-to-reach first: the seller with the most spare."""
+        rules = self.rules
+        if not (rules.procurement_enabled and rules.commerce_enabled):
+            return
+        for buyer in [a for a in self.agents if a.assets or a.project]:
+            short = [g for g in rules.active_goods
+                     if economy.input_shortfall(buyer, g, rules) > 0 or economy.project_shortfall(buyer, g) > 0]
+            for good in short[:rules.procurement_per_day]:
+                sellers = sorted((s for s in self.spare_table.get(good, {}) if s is not buyer and s in self.alive
+                                  and not self.in_cooldown(buyer, s)),
+                                 key=lambda s: -self.spare_table[good].get(s, 0))
+                if sellers:
+                    self.interact(buyer, sellers[0])
+
     def leisure_sale(self, buyer, seller, good, units, price):
         """A leisure purchase (modules/leisure.py): money for goods, taxed like any sale; the buyer
         enjoys them at once."""
@@ -992,6 +1010,7 @@ class World:
             self.cooldowns = {k: v for k, v in self.cooldowns.items() if v[0] >= self.tick}
         self.government.debt.step(self)     # interest on government bonds, repayments
         self.labor.clear(self)
+        self.procure_inputs()                # businesses order their inputs
         seekers = {}
         for agent in self.agents:
             agent.inventory.now = self.tick

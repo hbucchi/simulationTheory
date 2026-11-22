@@ -750,6 +750,15 @@ would make on its own). Autonomous production is far less productive than a job 
 0.35 food per unit of labour vs about 4 units in industry) and only uses labour nobody hired, so
 agents sell their labour first.
 
+### Purchasing departments
+
+Once a day every business short of inputs for its industries (or of capital goods for a building
+project) orders them from sellers anywhere on the map (`procurement_enabled`, up to
+`procurement_per_day` (4) inputs a day), apart from its owner's own shopping. Owners' trips go to
+their personal needs first, so before this a steel maker never got round to buying coal while
+the coal mine sat on 200 unsold units, and steel, machinery, construction and electronics stood
+idle.
+
 ### Buying at a distance
 
 Buyers trade with sellers up to `trade_radius` (600 px of the 1024 px map) away without

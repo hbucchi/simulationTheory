@@ -496,6 +496,10 @@ class Rules:
     # Buyers trade with sellers up to this far away (px) without walking to them (like shops and
     # deliveries; the map is 1024 px wide). 0 = only when they touch.
     trade_radius: float = 600
+    # Purchasing departments: each day a business orders up to procurement_per_day inputs it is short
+    # of from sellers anywhere (World.procure_inputs), apart from its owner's personal shopping.
+    procurement_enabled: bool = True
+    procurement_per_day: int = 4
     # (Steps are days: walking apart for weeks after every deal, or ignoring the only water
     # seller nearby for two months, let agents die of thirst next to plenty of water.)
     depart_steps: int = 2              # days two traders walk apart
@@ -957,6 +961,8 @@ LIMITS = {
     "depression_factor": (0, 1, "float"),
     "contact_distance": (1, 200, "float"),
     "trade_radius": (0, 5000, "float"),
+    "procurement_enabled": (None, None, "bool"),
+    "procurement_per_day": (1, 100, "int"),
     "depart_steps": (0, 1000, "int"),
     "cooldown_steps": (0, 10000, "int"),
     "retry_steps": (0, 10000, "int"),

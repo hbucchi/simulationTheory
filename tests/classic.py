@@ -37,4 +37,5 @@ CLASSIC = {
     "distress_enabled": False,
     "personality_enabled": False,
     "savings_to_bonds": False,
+    "procurement_enabled": False,
 }
