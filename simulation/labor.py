@@ -342,8 +342,10 @@ class LaborMarket:
         if gov.enabled and world.agents:
             # The player's spending policies (income support, give-aways, public services).
             gov.policies.run(world, offers, remaining, stats)
-        if gov.balanced_budget and gov.treasury > 1e-6 and gov.debt.bonds:
-            # Taxes left over repay government debt first (soonest due first).
+        if gov.balanced_budget and gov.treasury > 1e-6 and gov.debt.bonds and gov.debt.room(world) <= 0:
+            # Over the debt limit: taxes left over repay debt first (soonest due first). Otherwise
+            # the treasury spends what it has, savers' bond money included, so savings come back
+            # into the economy as wages and transfers.
             gov.debt.repay_early(world, gov.treasury)
         if gov.balanced_budget and gov.treasury > 1e-6:
             # Whatever the treasury has left hires more idle labour: taxes go back into the economy.

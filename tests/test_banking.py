@@ -158,7 +158,8 @@ class FailureAndSwitchTests(unittest.TestCase):
         self.assertEqual(w.banking.banks, [])     # nothing left: closed, the rest is lost
 
     def test_switching_banking_off_winds_banks_down(self):
-        w = World(seed=2, rules=Rules.from_dict({"agents": 15}))
+        # (Savings stay in cash: founders who put them in bonds couldn't reopen a bank.)
+        w = World(seed=2, rules=Rules.from_dict({"agents": 15, "savings_to_bonds": False}))
         w.spawn_random_agents()
         for _ in range(30):
             w.step()

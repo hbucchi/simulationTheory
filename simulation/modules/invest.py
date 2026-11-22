@@ -37,6 +37,23 @@ class Invest(Module):
     """
 
     def on_step(self, agent, world):
+        if self._invest(agent, world) is not None:
+            return
+        # Nothing worth buying today: idle money still goes to work, in government bonds.
+        rules = world.rules
+        if not rules.savings_to_bonds or not rules.investing_enabled or agent.project:
+            return
+        if economy.is_needy(agent, rules):
+            return
+        prices = world.current_prices()
+        # It keeps cash for labor_offer_months of living costs (and its budget) before lending.
+        buffer = max(budget_needed(agent, prices, world),
+                     rules.labor_offer_months * rules.month_steps * economy.living_cost(agent, prices, rules))
+        spare = economy.money_of(agent) - buffer
+        if spare >= rules.min_investment:
+            world.government.debt.sell_to(world, agent, spare)
+
+    def _invest(self, agent, world):
         rules = world.rules
         if not rules.investing_enabled or agent.project:   # its money is going into a building project
             return
@@ -95,7 +112,7 @@ class Invest(Module):
             world.log(f"{agent.name} bought {total:.2f} {resource} asset(s) at {price:.2f} each for "
                       f"{total * price:.2f} ({sources}); "
                       f"now owns {held:.2f}, making {world.asset_output(resource, held):.2f} {resource}/day")
-            return
+            return True
 
 
 def cash_short_owners(world, prices):

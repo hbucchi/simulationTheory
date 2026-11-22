@@ -49,8 +49,11 @@ class InventoryTests(unittest.TestCase):
         w.update_stock_factors({"water": {owner: 10_000}})
         self.assertAlmostEqual(w.stock_factor["water"], 1 - w.rules.stock_adjust_speed)
         w.stock_factor["water"] = 1.0
-        w.update_stock_factors({"water": {}})
+        w.update_stock_factors({"water": {owner: 0.01}})      # almost nothing left to sell
         self.assertAlmostEqual(w.stock_factor["water"], 1 + w.rules.stock_adjust_speed)
+        w.stock_factor["water"] = 1.0
+        w.update_stock_factors({"water": {}})                 # nothing made, nothing sold: no signal
+        self.assertEqual(w.stock_factor["water"], 1.0)
 
 
 class CashFlowTests(unittest.TestCase):

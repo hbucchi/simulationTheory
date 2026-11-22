@@ -122,9 +122,24 @@ def benefit(agent, good, rules=DEFAULT_RULES, target=None):
                for need, change in rules.effects_of(good).items())
 
 
+def adaptation(agent, need, rules=DEFAULT_RULES):
+    """Diminishing returns (personality module): for needs in rules.adaptation_needs
+    (entertainment), each unit relieves less the more the agent had lately:
+    1 / (1 + adaptation_strength x lavishness x recent units). Frugal agents (lavishness 0) get the
+    same relief every time; lavish ones need ever more."""
+    if not rules.personality_enabled or need not in rules.adaptation_needs:
+        return 1.0
+    lavish = agent.personality.get("lavishness", 0.0)
+    return 1.0 / (1.0 + rules.adaptation_strength * lavish * agent.recent_fun)
+
+
 def apply_effects(agent, good, units, rules=DEFAULT_RULES):
-    """Consuming ``units`` of ``good`` changes every need it affects (relieves or worsens)."""
+    """Consuming ``units`` of ``good`` changes every need it affects (relieves or worsens); relief of
+    an adapting need shrinks with what the agent had lately (see adaptation)."""
     for need, change in rules.effects_of(good).items():
+        if change > 0 and need in rules.adaptation_needs:
+            change *= adaptation(agent, need, rules)
+            agent.recent_fun += units
         setattr(agent, need, getattr(agent, need) - units * change)
 
 
@@ -148,7 +163,8 @@ def consume(agent, rules=DEFAULT_RULES):
                 break
             if benefit(agent, good, rules, need) <= 0:
                 break
-            units = min(units_to_satisfy(level, rules, rules.relief(good, need)), agent.inventory.count(good))
+            units = min(units_to_satisfy(level, rules, rules.relief(good, need) * adaptation(agent, need, rules)),
+                        agent.inventory.count(good))
             if units:
                 agent.inventory.remove(good, units)
                 apply_effects(agent, good, units, rules)
@@ -233,6 +249,7 @@ def demand(agent, resource, rules=DEFAULT_RULES):
             continue
         level = getattr(agent, need)
         if level > rules.seek_threshold:
+            change *= adaptation(agent, need, rules)
             units = max(units, units_to_satisfy(level - held_relief(agent, need, rules), rules, change))
     return units
 

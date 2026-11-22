@@ -78,6 +78,7 @@ class Agent:
         self.experience = {}         # {good: units of labour worked in its industry} (specialization)
         self.main_good = None        # the industry it hires for (labor.py)
         self.distress = 0.0          # cash-flow discount on its sales (World.update_distress)
+        self.recent_fun = 0.0        # units of entertainment had lately (fades ~monthly; economy.adaptation)
         self.luck = {}               # {good: [output multiplier, last day]}: a lucky business (world.draw_luck)
         self.home = None             # the House it lives in (housing.py), or None: homeless
         self.houses = []             # Houses it owns

@@ -157,6 +157,19 @@ class Rules:
     # Personality: risk appetite (0 = cautious, 1 = entrepreneur): how big it builds and whether it
     # borrows to invest (from 0.3 up). (spread)
     risk_appetite: object = field(default_factory=lambda: {"dist": "uniform", "min": 0.0, "max": 1.0})
+    # Personality module: frugal (0) - lavish (1). Lavish agents spend more of their spare money on
+    # comfort (leisure_rate x lavishness a day, on leisure_needs) and adapt to entertainment (each
+    # unit relieves 1 / (1 + adaptation_strength x lavishness x recent units)); frugal ones barely
+    # spend and keep enjoying the same. risk_appetite and payout_ratio are traits too.
+    personality_enabled: bool = True
+    lavishness: object = field(default_factory=lambda: {"dist": "uniform", "min": 0.0, "max": 1.0})
+    leisure_rate: float = 0.02
+    leisure_needs: list = field(default_factory=lambda: ["boredom", "health"])
+    adaptation_needs: list = field(default_factory=lambda: ["boredom"])
+    adaptation_strength: float = 0.5
+    # Idle money is invested: what an agent can't put into businesses buys government bonds (up to
+    # the debt limit); the rest stays in the bank to be lent out.
+    savings_to_bonds: bool = True
 
     # Trading: a buyer buys a random multiple of what it needs, in [purchase_min, purchase_max]
     purchase_min: float = 1.0
@@ -401,6 +414,7 @@ class Rules:
     stock_elasticity: float = 1.0
     stock_factor_min: float = 0.2
     stock_factor_max: float = 3.0
+    price_factor_cap: float = 4.0         # demand x inventory move a price at most this many times
     # Cash flow: an owner whose cash can't cover distress_days of wages and loan payments sells at
     # up to distress_max off (in proportion to how short it is), even below cost, to keep running.
     distress_enabled: bool = True
@@ -635,6 +649,10 @@ class Rules:
                 if not isinstance(value, list) or any(g not in GOODS for g in value):
                     raise ValueError(f"{key} must be a list of industries ({', '.join(GOODS)})")
                 setattr(rules, key, sorted(set(value), key=GOODS.index))
+            elif kind == "needs":
+                if not isinstance(value, list) or any(n not in NEEDS for n in value):
+                    raise ValueError(f"{key} must be a list of needs ({', '.join(NEEDS)})")
+                setattr(rules, key, list(dict.fromkeys(value)))
             elif kind == "schedule":
                 setattr(rules, key, clean_schedule(value))
             elif kind == "policies":
@@ -722,6 +740,8 @@ MODULES = {
                   "Thirst slows walking; hunger, tiredness, illness and cold cut labour; no shelter makes illness worse."),
     "housing": ("housing_enabled", "Housing market", ("commerce",),
                 "Houses are whole assets: owned, rented or empty; homebuilders add houses; the homeless suffer."),
+    "personality": ("personality_enabled", "Personality", (),
+                    "Traits per agent: frugal-lavish (spending and enjoyment), risk appetite, payout ratio."),
     "specialization": ("specialization_enabled", "Specialization", (),
                        "Working in an industry makes a worker up to 10x more productive there, and worse at fending for itself."),
     "subsistence": ("subsistence_enabled", "Subsistence", (),
@@ -761,6 +781,7 @@ SPREADS = {
     "sleep_recovery": (None, 0, 1, False, False),
     "payout_ratio": (None, 0, 1, False, False),
     "risk_appetite": (None, 0, 1, False, False),
+    "lavishness": (None, 0, 1, False, False),
 }
 
 
@@ -789,6 +810,7 @@ LIMITS = {
     "stock_elasticity": (0, 10, "float"),
     "stock_factor_min": (0.01, 1, "float"),
     "stock_factor_max": (1, 100, "float"),
+    "price_factor_cap": (1, 1000, "float"),
     "distress_enabled": (None, None, "bool"),
     "distress_days": (0, 10000, "float"),
     "distress_max": (0, 1, "float"),
@@ -901,6 +923,12 @@ LIMITS = {
     "need_penalties_enabled": (None, None, "bool"),
     "need_priority": ((NEEDS, 0.1, 10, False), None, "map"),
     "subsistence_enabled": (None, None, "bool"),
+    "personality_enabled": (None, None, "bool"),
+    "leisure_rate": (0, 1, "float"),
+    "leisure_needs": (None, None, "needs"),
+    "adaptation_needs": (None, None, "needs"),
+    "adaptation_strength": (0, 100, "float"),
+    "savings_to_bonds": (None, None, "bool"),
     "survival_effort": (0, 1, "float"),
     "asset_owner_share": (0.001, 1, "float"),
     "working_capital_days": (0, 3600, "int"),

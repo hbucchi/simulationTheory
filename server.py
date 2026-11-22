@@ -311,7 +311,8 @@ def parse_agent_config(body):
     for key, low, high, whole in (("x", 0, world_size, False), ("y", 0, world_size, False),
                                   ("money", 0, 1e12, False), ("movement", 1, MAX_MOVEMENT, True),
                                   ("sleep_recovery", 0, 1, False), ("labor_capacity", 0, 1e6, False),
-                                  ("payout_ratio", 0, 1, False), ("risk_appetite", 0, 1, False)):
+                                  ("payout_ratio", 0, 1, False), ("risk_appetite", 0, 1, False),
+                                  ("lavishness", 0, 1, False)):
         if body.get(key) is not None:
             config[key] = _number(body[key], key, low, high, whole)
     return {k: v for k, v in config.items() if v is not None}

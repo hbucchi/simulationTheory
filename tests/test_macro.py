@@ -74,7 +74,7 @@ class TaxTests(unittest.TestCase):
         self.assertGreater(sum(g.revenue.values()), 0)
         self.assertGreater(g.spent["benefits"] + g.spent["public_works"], 0)
         # Balanced budget: nothing kept beyond the taxes collected after the day's spending.
-        self.assertLessEqual(g.treasury, sum(g.step_revenue.values()) + 1)
+        self.assertLessEqual(g.treasury, sum(g.step_revenue.values()) + g.debt.step_borrowed + 1)   # (+ savers' bonds, spent tomorrow)
         if len(w.agents) == 25:
             self.assertAlmostEqual(w.base_money(), start + w.money_issued(), places=4)
 

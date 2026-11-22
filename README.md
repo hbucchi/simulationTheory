@@ -700,7 +700,9 @@ its own price. The **final price** = base × the **demand multiplier** (buyers *
 counting min(1, its money ÷ the price), vs sellers; seller concentration; buying power) × the
 **inventory factor**: sellers' unsold stock vs `stock_target_days` (30) days of its flow (recent
 use, at least `stock_min_flow_share` of its industry's capacity); over the target the price falls,
-under it rises, by at most `stock_adjust_speed` (5%) a day. On top, per seller: **clearance**
+under it rises, by at most `stock_adjust_speed` (5%) a day (no stock and no sales: no change).
+Demand × inventory together move a price at most `price_factor_cap` (4×), so they can't compound
+through the layers of inputs. On top, per seller: **clearance**
 discounts near expiry and **cash-flow** discounts (an owner whose cash can't cover
 `distress_days` (7) of wages and loan payments sells at up to `distress_max` (30%) off, even below
 cost). All live in the Products tab (*Pricing*). Prices start from a wage of 6% of the average
@@ -839,6 +841,25 @@ labour). An industry worker makes about 4 units per unit of labour, so a job is 
 keeps the poorest alive, not comfortable. In a game without food the main hunger good takes its
 place at the same relief. The Reports tab shows the share of agents doing it and its share of all
 output (*Autonomous production*).
+
+### Personality
+
+(`personality_enabled`, module *Personality*.) Every agent has traits drawn from distributions on
+the setup screen and editable per agent: **frugal ↔ lavish** (`lavishness`, 0–1), risk appetite
+and payout ratio.
+
+- **Spending grows with wealth.** Each day an agent with money beyond its budget spends
+  `leisure_rate` (2%) × lavishness of that spare money on comfort goods (`leisure_needs`:
+  entertainment and health), buying the best relief per dollar from sellers within its radius.
+- **Diminishing returns** (hedonic adaptation) for `adaptation_needs` (entertainment): each unit
+  relieves 1 ÷ (1 + `adaptation_strength` × lavishness × recent units), recent units fading over
+  about a month. A lavish agent needs ever more for the same satisfaction; a frugal one (≈ 0)
+  enjoys the same every time.
+
+**Idle money is invested** (`savings_to_bonds`): money an agent can't put into businesses, beyond
+6 months of living costs, buys government bonds (up to the debt limit). With a balanced budget the
+treasury spends it (public works, transfers), so savings come back into the economy; leftover
+taxes repay debt early only when the debt is over its limit.
 
 ### Specialization
 

@@ -117,6 +117,31 @@ class PublicDebt:
                       f"(debt now {self.total:,.2f})")
         return raised
 
+    def sell_to(self, world, holder, amount):
+        """A saver buys bonds with idle money (up to the debt limit). Returns what it lent."""
+        gov = world.government
+        if not gov.enabled or not gov.bonds_enabled:
+            return 0.0
+        amount = min(amount, self.room(world))
+        if amount < world.rules.min_investment:
+            return 0.0
+        world.banking.cash_up(holder, amount)
+        amount = min(amount, holder.money)
+        if amount <= 0:
+            return 0.0
+        holder.money -= amount
+        rate, due = self.rate(world), world.tick + gov.bond_days
+        same = next((b for b in reversed(self.bonds) if b.holder is holder and b.due == due and b.rate == rate), None)
+        if same:
+            same.principal += amount
+        else:
+            self.bonds.append(Bond(self.next_id, holder, amount, rate, world.tick, due))
+            self.next_id += 1
+        gov.treasury += amount
+        self.issued += amount
+        self.step_borrowed += amount
+        return amount
+
     def rate_year(self, world):
         return (1 + self.rate(world)) ** world.year_steps() - 1
 

@@ -8,7 +8,7 @@ from itertools import islice
 from . import distributions, economy, penalties
 from .agent import Agent
 from .inventory import Inventory
-from .modules import Build, Consume, Invest, Mood, Navigate, NeedsDecay, Production, Rest
+from .modules import Build, Consume, Invest, Leisure, Mood, Navigate, NeedsDecay, Production, Rest
 from .banking import Banking
 from .government import Government
 from .labor import LaborMarket
@@ -135,7 +135,7 @@ class World:
 
     def create_agent(self, *, inventory=None, money=None, labor_capacity=None,
                      rates=None, sleep_recovery=None, movement=None, needs=None, name=None,
-                     x=None, y=None, assets=None, payout_ratio=None, risk_appetite=None):
+                     x=None, y=None, assets=None, payout_ratio=None, risk_appetite=None, lavishness=None):
         """Create an agent with the standard modules. Anything omitted comes from the rules.
 
         ``inventory`` overrides per good; ``labor_capacity`` is the most labour it can give per step;
@@ -161,6 +161,7 @@ class World:
                    Production(),
                    Consume()]
         modules.append(Build())
+        modules.append(Leisure())
         modules.append(Invest())
         if r.depression_enabled:
             modules.append(Mood())
@@ -181,6 +182,8 @@ class World:
             r.payout_ratio, self.personality_rng, False, 0, 1), 3) if payout_ratio is None else payout_ratio
         agent.personality["risk_appetite"] = round(distributions.sample(
             r.risk_appetite, self.personality_rng, False, 0, 1), 3) if risk_appetite is None else risk_appetite
+        agent.personality["lavishness"] = round(distributions.sample(
+            r.lavishness, self.personality_rng, False, 0, 1), 3) if lavishness is None else lavishness
         return self.add_agent(agent)
 
     # A starting stock is spread over this many batches of different ages, so it doesn't all
@@ -209,8 +212,10 @@ class World:
 
     def update_agent(self, agent, *, name=None, x=None, y=None, needs=None, inventory=None,
                      money=None, movement=None, labor_capacity=None, rates=None, sleep_recovery=None,
-                     assets=None, payout_ratio=None, risk_appetite=None):
+                     assets=None, payout_ratio=None, risk_appetite=None, lavishness=None):
         """Change any of an existing agent's settings; omitted fields stay as they are."""
+        if lavishness is not None:
+            agent.personality["lavishness"] = lavishness
         if payout_ratio is not None:
             agent.personality["payout_ratio"] = payout_ratio
         if risk_appetite is not None:
@@ -706,7 +711,10 @@ class World:
                 value = self.build_cost_money(g, last) or 0.0
                 wear = value * rules.depreciation[g] / year / out
             base = (self.unit_cost(g, prices) + wear) * (1 + margin) / keep
-            prices[g] = base * self.price_multiplier[g] * self.stock_factor[g]
+            # Demand and inventory together move the price at most price_factor_cap times (else they
+            # compound through every layer of inputs).
+            factor = self.price_multiplier[g] * self.stock_factor[g]
+            prices[g] = base * min(rules.price_factor_cap, max(1 / rules.price_factor_cap, factor))
         return prices
 
     def update_stock_factors(self, spare_by_good):
@@ -727,8 +735,11 @@ class World:
             used = sum(s["consumed"].get(g, 0) + s.get("used", {}).get(g, 0) for s in recent) / days
             flow = max(used, rules.stock_min_flow_share * capacity.get(g, 0.0), 1e-6)
             held = sum(spare_by_good.get(g, {}).values())
-            ratio = held / (rules.stock_target_days * flow)
-            target = ratio ** -rules.stock_elasticity if ratio > 0 else rules.stock_factor_max
+            if held <= 0 and used <= 1e-9:
+                target = 1.0              # nothing made, nothing sold: no signal either way
+            else:
+                ratio = held / (rules.stock_target_days * flow)
+                target = ratio ** -rules.stock_elasticity if ratio > 0 else rules.stock_factor_max
             target = min(rules.stock_factor_max, max(rules.stock_factor_min, target))
             now = self.stock_factor[g]
             step = rules.stock_adjust_speed
@@ -852,6 +863,30 @@ class World:
         if include_labor:
             prices[economy.LABOR] = self.labor.wage
         return prices
+
+    def leisure_sale(self, buyer, seller, good, units, price):
+        """A leisure purchase (modules/leisure.py): money for goods, taxed like any sale; the buyer
+        enjoys them at once."""
+        cost = units * price
+        if buyer.money < cost:
+            self.banking.cash_up(buyer, cost)
+        cost = min(cost, buyer.money)
+        units = int(cost // price) if price > 0 else 0
+        if units <= 0:
+            return
+        cost = units * price
+        economy.transfer(seller, buyer, good, units)
+        buyer.money -= cost
+        tax = self.government.tax("production", cost)
+        seller.money += cost - tax
+        self.government.collect("production", tax)
+        economy.earn(seller, cost - tax, "goods")
+        self.recorder.count("goods_deals")
+        buyer.inventory.remove(good, units)
+        economy.apply_effects(buyer, good, units, self.rules)
+        buyer.flow["consumed"][good] = buyer.flow["consumed"].get(good, 0) + units
+        for need in self.rules.consumer_needs:
+            setattr(buyer, need, max(0.0, getattr(buyer, need)))
 
     def draw_luck(self):
         """Once a month: some businesses strike lucky (see rules.luck_*); expired luck ends."""

@@ -27,6 +27,7 @@ class NeedsDecay(Module):
                 if rate > 0:
                     rate = max(rate, rules.homeless_shelter_rate)
             setattr(agent, need, getattr(agent, need) + rate * penalties.growth_factor(agent, need, rules))
+        agent.recent_fun *= 1 - 1 / rules.month_steps      # what it had lately fades over about a month
         # Unmet needs (penalties.py): slower walking, and days spent too sick to work.
         agent.speed_factor = penalties.speed_factor(agent, rules)
         if rules.need_penalties_enabled and "health" in rules.consumer_needs and agent.health >= penalties.CRITICAL:
