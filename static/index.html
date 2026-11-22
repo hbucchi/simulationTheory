@@ -346,6 +346,7 @@
             <label class="check">Government may borrow (sells bonds when taxes can't pay for its policies and the benefit) <input data-policy="bonds_enabled" type="checkbox"></label>
             <label>Debt limit <span><input data-policy="debt_limit" data-scale="100" type="number" min="0" max="1000" step="5"> % of a year's GDP</span></label>
             <label>Bond rate = central bank rate + <span><input data-policy="bond_spread" data-scale="100" data-yearly="1" type="number" min="0" step="0.1"> % a year</span></label>
+            <label>Risk premium at the debt limit <span><input data-policy="bond_risk_max" data-scale="100" type="number" min="0" step="1"> % a year (× (debt ÷ limit)²)</span></label>
             <label>Bonds repaid after <span><input data-policy="bond_days" type="number" min="1" max="3600" step="30"> days</span></label>
           </div>
           <h4 class="gov-sub">Central bank</h4>

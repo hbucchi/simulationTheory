@@ -786,6 +786,34 @@ class World:
             cache["asset_prices"] = self.asset_prices(self.current_prices())
         return cache["asset_prices"]
 
+    def industry_yield(self, good, prices=None):
+        """Measured profitability of ``good``'s industry, per day: profit per asset share at the
+        capacity it actually used lately ((price after production tax - unit cost - the asset's
+        wear) x output x share of capacity used over the last 30 days), divided by what a new
+        share costs to build (its asset price if it can't be built here). Worked out once a day."""
+        cache = self._step_cache
+        if cache is not None and ("yield", good) in cache:
+            return cache[("yield", good)]
+        prices = prices or self.current_prices()
+        rules = self.rules
+        out = self.asset_output(good, 1.0)
+        result = 0.0
+        if out > 0 and prices.get(good, 0) > 0:
+            recent = list(islice(self.recorder.history, max(0, len(self.recorder.history) - 30), None))
+            made = sum(s["produced"].get(good, 0) for s in recent) / max(1, len(recent))
+            shares = sum(a.assets.get(good, 0.0) for a in self.agents)
+            used = min(1.0, made / (out * shares)) if shares > 0 else 0.0
+            if not recent:
+                used = 1.0
+            value = self.build_cost_money(good, prices)
+            wear = (value or 0.0) * rules.depreciation.get(good, 0.0) / self.year_steps() / out
+            margin = prices[good] * (1 - self.government.tax_production) - self.unit_cost(good, prices) - wear
+            capital = value if value else self.asset_prices(prices).get(good, 0.0)
+            result = margin * out * used / capital if capital > 0 else 0.0
+        if cache is not None:
+            cache[("yield", good)] = result
+        return result
+
     def asset_prices(self, prices=None):
         """Price of one whole asset: profit per step at full capacity / effective return.
 
@@ -1307,6 +1335,8 @@ class World:
             "market": {
                 "price_stickiness": self.price_stickiness,
                 "clearance_enabled": self.rules.clearance_enabled,
+                # (A year, simple: daily yield x days. Compounding very high daily yields explodes.)
+                "industry_yield": {g: round(self.industry_yield(g) * self.year_steps(), 4) for g in self.rules.active_goods},
                 "price_mode": self.rules.price_mode,
                 "pricing": {k: getattr(self.rules, k) for k in ("cost_floor_margin", "stock_target_days",
                                                                  "stock_adjust_speed", "distress_days", "distress_max")},

@@ -842,6 +842,19 @@ keeps the poorest alive, not comfortable. In a game without food the main hunger
 place at the same relief. The Reports tab shows the share of agents doing it and its share of all
 output (*Autonomous production*).
 
+### Profitability and the cost of public debt
+
+**Investors look at real profits** (cost prices): an industry's yield is its profit per asset share
+per day at the capacity it actually used over the last 30 days ((price after production tax − unit
+cost − the asset's wear) × output × share of capacity used), divided by what a new share costs to
+build (its replacement cost, as in Tobin's q). Buying and building go to the highest yields
+first, and a business must earn more than government bonds: savers choose bonds when businesses
+pay less (*crowding out*). The Products table shows each industry's yield (a year, simple).
+
+**Savers demand more as public debt grows**: new bonds pay a risk premium of `gov_bond_risk_max`
+(10% a year) × (debt ÷ debt limit)², e.g. +0.6% at half the limit and +10% at the limit (Government
+tab, live). Higher rates make borrowing dearer and pull savings away from businesses.
+
 ### Personality
 
 (`personality_enabled`, module *Personality*.) Every agent has traits drawn from distributions on

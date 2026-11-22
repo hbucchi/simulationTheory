@@ -73,11 +73,15 @@ class Invest(Module):
             return
         # Owners short of cash: {agent: shortfall}, most short first (worked out once per step).
         short = {o: gap for o, gap in cash_short_owners(world, prices).items() if o is not agent}
+        # A business has to earn more than lending to the government (savers compare: crowding out).
+        hurdle = world.government.debt.rate(world) if rules.savings_to_bonds and world.government.bonds_enabled else -1.0
         for resource in ranked_assets(world):
             # Every industry is a candidate, best yield first (not only goods the investor uses).
             price = asset_prices[resource]
             if price <= 0:
                 continue   # worthless
+            if asset_yield(resource, world) <= hurdle:
+                break      # the rest earn even less: bonds pay better
             # Cash-short owners first (they need the money most), then owners over the cap.
             owners = world.owners_of(resource)
             limits = {o: short[o] for o in owners if o in short}
@@ -167,9 +171,14 @@ def budget_needed(agent, prices, world):
 
 
 def asset_yield(resource, world):
-    """Money earned per step per money invested: asset_return (output at the asset's price)
-    plus productivity growth (which raises its output and so its price)."""
-    return world.government.effective_return(world.rules, resource) + world.productivity_growth_per_step(resource)
+    """Money earned per day per money invested. With cost prices: the industry's measured
+    profitability (World.industry_yield: real profit at the capacity it actually used, per money
+    a new asset costs), plus productivity growth. Otherwise: asset_return (the return its asset
+    price is set at) plus productivity growth."""
+    growth = world.productivity_growth_per_step(resource)
+    if world.rules.price_mode == "cost":
+        return world.industry_yield(resource) + growth
+    return world.government.effective_return(world.rules, resource) + growth
 
 
 def ranked_assets(world):

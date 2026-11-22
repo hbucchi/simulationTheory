@@ -1155,7 +1155,7 @@ function renderGovernment() {
         ? `${(g.debt.debt_to_gdp * 100).toFixed(1)}% of a year's real GDP (limit ${Math.round(g.debt_limit * 100)}%)`
         : `limit ${Math.round(g.debt_limit * 100)}% of GDP`],
       ["Bond rate", `${(g.debt.rate_year * 100).toFixed(2)}% a year`,
-        `central bank rate + ${(perYear(g.bond_spread) * 100).toFixed(2)}% · ${g.debt.bonds} bonds`],
+        `central bank rate + ${(perYear(g.bond_spread) * 100).toFixed(2)}% + risk ${(g.debt.risk_premium_year * 100).toFixed(2)}% · ${g.debt.bonds} bonds`],
       ["Interest on debt", `${usd(g.debt.step_interest)} /day`, `${usd(g.debt.interest_paid)} paid so far`],
       ["Who lent", `banks ${usd(g.debt.holders_banks)}`, `savers ${usd(g.debt.holders_agents)}` +
         (g.debt.step_borrowed ? ` · borrowed ${usd(g.debt.step_borrowed)} yesterday` : "") +
@@ -1388,6 +1388,7 @@ const PRODUCT_COLUMNS = [
   { key: "held", title: "Held", value: r => r.held },
   { key: "owners", title: "Producers", value: r => r.owners },
   { key: "pressure", title: "Buyers : sellers", value: r => r.pressure },
+  { key: "yield", title: "Profit yield /yr", value: r => r.yield },
 ];
 
 function productRows() {
@@ -1404,6 +1405,7 @@ function productRows() {
       shares: m.assets[g] || 0, capacity: m.asset_output[g] || 0,
       buyers: m.buyers[g] || 0, sellers: m.sellers[g] || 0,
       pressure: ((m.buyers[g] || 0) + 1) / ((m.sellers[g] || 0) + 1),
+      yield: m.industry_yield?.[g] ?? 0,
       concentration: m.concentration[g] || 0, buyerPower: m.buyer_concentration?.[g] || 0,
       depreciation: state.rules.depreciation?.[g] ?? 0, shelf: state.rules.expiry_enabled ? state.rules.shelf_life[g] : 0,
     };
@@ -1475,12 +1477,12 @@ function renderProducts() {
       className: r.change > 0.02 ? "up" : r.change < -0.02 ? "down" : "" });
     tr.append(name, Object.assign(document.createElement("td"), { textContent: usd(r.price) }), change,
       ...[r.made.toFixed(2), r.consumed.toFixed(2), r.used.toFixed(2), Math.round(r.held),
-          `${r.producing} of ${r.owners}`, `${r.buyers} : ${r.sellers}`].map(v => Object.assign(document.createElement("td"), { textContent: v })));
+          `${r.producing} of ${r.owners}`, `${r.buyers} : ${r.sellers}`, pct(r.yield)].map(v => Object.assign(document.createElement("td"), { textContent: v })));
     if (productView.open === r.g) {
       const d = body.insertRow();
       d.className = "product-detail";
       const cell = d.insertCell();
-      cell.colSpan = 9;
+      cell.colSpan = 10;
       const recipe = Object.entries(state.rules.inputs[r.g] || {}).map(([k, n]) => `${n} ${label(k).toLowerCase()}`).join(" + ");
       const effects = Object.entries(r.info.effects || {}).map(([n, v]) => `${n} ${v > 0 ? "−" : "+"}${Math.abs(v).toFixed(3)}`).join(", ");
       const lines = [

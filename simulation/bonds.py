@@ -73,9 +73,21 @@ class PublicDebt:
 
     @staticmethod
     def rate(world):
-        """Daily rate on a new bond: the policy rate + the spread."""
+        """Daily rate on a new bond: the policy rate + the spread + a risk premium that grows with
+        the debt: bond_risk_max x (debt / debt limit)^2 (savers demand more as default risk rises:
+        +0.6% a year at half the limit, +10% at the limit)."""
         gov = world.government
-        return gov.min_rate + gov.bond_spread
+        return gov.min_rate + gov.bond_spread + world.government.debt.risk_premium(world)
+
+    def risk_premium(self, world):
+        """Daily risk premium on new bonds (see rate)."""
+        gov = world.government
+        gdp = self.yearly_gdp(world)
+        if gov.bond_risk_max <= 0 or gov.debt_limit <= 0 or gdp <= 0:
+            return 0.0
+        load = self.total / (gov.debt_limit * gdp)
+        yearly = gov.bond_risk_max * min(1.5, load) ** 2
+        return (1 + yearly) ** (1 / world.year_steps()) - 1
 
     # ---------- borrowing ----------
 
@@ -276,6 +288,7 @@ class PublicDebt:
                 "holders_banks": round(sum(b.principal for b in self.bonds if _is_bank(b.holder)), 2),
                 "holders_agents": round(sum(b.principal for b in self.bonds if not _is_bank(b.holder)), 2),
                 "rate": self.rate(world), "rate_year": round(self.rate_year(world), 6),
+                "risk_premium_year": round((1 + self.risk_premium(world)) ** world.year_steps() - 1, 6),
                 "gdp_year": round(gdp, 2), "debt_to_gdp": round(total / gdp, 4) if gdp > 0 else 0.0,
                 "room": round(self.room(world), 2), "issued": round(self.issued, 2), "repaid": round(self.repaid, 2),
                 "interest_paid": round(self.interest_paid, 2), "step_interest": round(self.step_interest, 2),

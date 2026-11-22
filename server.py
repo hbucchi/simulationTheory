@@ -259,7 +259,7 @@ POLICY_LIMITS = {"min_wage": (0, 1e9), "min_rate": (0, 10), "labor_purchase": (0
                  "bonds_enabled": bool, "debt_limit": (0, 10), "bond_spread": (0, 0.01), "bond_days": (1, 3600),
                  "pay_period": ("daily", "weekly", "monthly"),
                  "taylor_enabled": bool, "inflation_target": (-0.5, 1), "neutral_rate": (-0.5, 1),
-                 "taylor_unemployment": (0, 1)}
+                 "taylor_unemployment": (0, 1), "bond_risk_max": (0, 10)}
 
 
 def parse_policy(body):

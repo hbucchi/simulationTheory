@@ -308,6 +308,8 @@ class Rules:
     gov_debt_limit: float = 0.6
     gov_bond_spread: float = (1.01 ** (1 / 360)) - 1
     gov_bond_days: int = 360
+    # Risk premium: new bonds pay gov_bond_risk_max (a year) x (debt / debt limit)^2 more.
+    gov_bond_risk_max: float = 0.10
     gov_min_wage: float = 0.0          # lowest wage per unit of labour (a day's work); 0 = none
     # Public spending policies (see policies.py): what the treasury pays for, to whom, how shared.
     # Default: a safety net paying hungry or thirsty agents what they lack for food and water.
@@ -912,6 +914,7 @@ LIMITS = {
     "gov_debt_limit": (0, 10, "float"),
     "gov_bond_spread": (0, 0.01, "float"),
     "gov_bond_days": (1, 3600, "int"),
+    "gov_bond_risk_max": (0, 10, "float"),
     "gov_min_wage": (0, 1e9, "float"),
     "gov_policies": (None, None, "policies"),
     "cost_floor_margin": (0, 10, "float"),
