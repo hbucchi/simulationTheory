@@ -96,6 +96,7 @@ const SETUP_SECTIONS = [
     { path: "movement", label: "Movement (px)", kind: "spread", whole: true, min: 1, max: 200 },
     { path: "start_needs", label: "Starting needs", kind: "spread", min: 0, max: 1, step: 0.05 },
     { path: "risk_appetite", label: "Personality: risk appetite (0-1)", kind: "spread", min: 0, max: 1, step: 0.05 },
+    { path: "lavishness", label: "Personality: frugal (0) – lavish (1)", kind: "spread", min: 0, max: 1, step: 0.05 },
     { path: "payout_ratio", label: "Personality: pays out (share of profits)", kind: "spread", min: 0, max: 1, step: 0.05 },
   ]},
   { title: "Labour capacity", wide: true, hint: "Labour is the only thing agents make themselves, and it is never stored: " +

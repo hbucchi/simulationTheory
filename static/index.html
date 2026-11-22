@@ -371,6 +371,23 @@
       </section>
 
       <section id="tab-manage" class="page" role="tabpanel" hidden>
+        <details class="card fold settings">
+          <summary>Personality of a group of agents</summary>
+          <div class="panel">
+            <div class="bank-fields gov-fields">
+              <label>Who <span><select id="group-who">
+                <option value="all">Everyone</option><option value="owners">Owners (any assets)</option>
+                <option value="workers">Workers (no assets)</option><option value="richest">Richest 10%</option>
+                <option value="poorest">Poorest 10%</option></select></span></label>
+              <label>Trait <span><select id="group-trait">
+                <option value="lavishness">Frugal (0) – lavish (1)</option><option value="risk_appetite">Risk appetite</option>
+                <option value="payout_ratio">Pays out as dividends</option></select></span></label>
+              <label>Value <span><input id="group-value" type="number" min="0" max="1" step="0.05" value="0.5"> (0 – 1)</span></label>
+            </div>
+            <div class="form-actions"><span class="spacer"></span><button type="button" id="group-apply" class="primary">Apply to the group</button></div>
+            <p id="group-status" class="status" hidden></p>
+          </div>
+        </details>
         <div class="picker">
           <button id="new-agent" class="chip">+ New agent</button>
           <span id="agent-chips"></span>

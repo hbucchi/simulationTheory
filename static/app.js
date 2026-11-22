@@ -156,7 +156,9 @@ const FIELD_GROUPS = [
     { path: "payout_ratio", label: "Pays out as dividends (share of profits)", min: 0, max: 1, step: 0.05,
       get: a => a.personality.payout_ratio, placeholder: "from rules" },
     { path: "risk_appetite", label: "Risk appetite (0 cautious, 1 entrepreneur)", min: 0, max: 1, step: 0.05,
-      get: a => a.personality.risk_appetite ?? 0, placeholder: "from rules" }]},
+      get: a => a.personality.risk_appetite ?? 0, placeholder: "from rules" },
+    { path: "lavishness", label: "Frugal (0) – lavish (1)", min: 0, max: 1, step: 0.05,
+      get: a => a.personality.lavishness ?? 0, placeholder: "from rules" }]},
   { legend: "Industries owned (asset shares; 1 = one whole asset)", collapsed: true, fields: GOODS.map(r => (
     { path: `assets.${r}`, label: label(r), min: 0, step: 0.01, get: a => +(a.assets[r] ?? 0).toFixed(4) }))},
 ];
@@ -841,6 +843,22 @@ $("pricing-form").onsubmit = async (e) => {
       .map(el => [el.dataset.pricing, Number(el.value) / Number(el.dataset.scale || 1)]))));
     pricingDirty = false;
     status.textContent = "Applied from tomorrow.";
+    status.className = "status";
+  } catch (err) {
+    status.textContent = err.message;
+    status.className = "status error";
+  }
+  status.hidden = false;
+};
+
+// ---------- Personality of a group (Edit agents tab) ----------
+
+$("group-apply").onclick = async () => {
+  const status = $("group-status");
+  try {
+    render(await api("/api/personality", { group: $("group-who").value, trait: $("group-trait").value,
+                                           value: Number($("group-value").value) }));
+    status.textContent = "Applied.";
     status.className = "status";
   } catch (err) {
     status.textContent = err.message;
@@ -1675,7 +1693,7 @@ function refreshForm(force = false) {
 
 // New agents start from the game's rules (set on the setup screen). A rule that is a
 // distribution shows blank: the server draws a value from it.
-const RULE_BACKED = ["inventory", "assets", "labor_capacity", "rates", "money", "sleep_recovery", "movement", "payout_ratio", "risk_appetite"];
+const RULE_BACKED = ["inventory", "assets", "labor_capacity", "rates", "money", "sleep_recovery", "movement", "payout_ratio", "risk_appetite", "lavishness"];
 function defaultValue(path) {
   if (!RULE_BACKED.includes(path.split(".")[0])) return "";  // name, x, y, needs: server picks
   const spec = getPath(state.rules, path);

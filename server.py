@@ -177,6 +177,30 @@ class Simulation:
                 self.world.log("Clearance sales: " + (steps if rules.clearance_enabled and steps else "off"))
             return self.world.to_dict(self.detail)
 
+    def set_personality(self, body):
+        """Set a personality trait for a group of agents: everyone, owners, workers (no assets), the
+        richest or the poorest 10%."""
+        from simulation import economy
+        group, trait = body.get("group"), body.get("trait")
+        if group not in ("all", "owners", "workers", "richest", "poorest"):
+            raise ValueError("group must be all, owners, workers, richest or poorest")
+        if trait not in ("lavishness", "risk_appetite", "payout_ratio"):
+            raise ValueError("trait must be lavishness, risk_appetite or payout_ratio")
+        value = _number(body.get("value"), "value", 0, 1)
+        with self.lock:
+            agents = list(self.world.agents)
+            if group == "owners":
+                agents = [a for a in agents if a.assets]
+            elif group == "workers":
+                agents = [a for a in agents if not a.assets]
+            elif group in ("richest", "poorest"):
+                agents.sort(key=economy.money_of, reverse=group == "richest")
+                agents = agents[:max(1, len(agents) // 10)]
+            for a in agents:
+                a.personality[trait] = value
+            self.world.log(f"Personality: {trait.replace('_', ' ')} set to {value:g} for {len(agents)} agents ({group})")
+            return self.world.to_dict(self.detail)
+
     def set_housing(self, changes):
         """Change the housing market's rules while the game runs."""
         with self.lock:
@@ -409,6 +433,8 @@ class Handler(SimpleHTTPRequestHandler):
                     else:
                         raise ValueError(f"unknown market setting: {key}")
                 return self.sim.set_market(changes)
+            if self.path == "/api/personality":
+                return self.sim.set_personality(body)
             if self.path == "/api/housing":
                 limits = {"min_multiple": (0, 1e6), "rent_yield": (0, 0.01), "eviction_days": (1, 3600)}
                 changes = {}
