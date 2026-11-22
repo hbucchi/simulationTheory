@@ -69,7 +69,14 @@ const SETUP_SECTIONS = [
       "people consume costs the money supply × velocity. With velocity 4 money changes hands 4 times a year, so an " +
       "average agent's cash lasts about 3 months. Fixed: the prices below.", fields: [
     { path: "price_mode", label: "Price rule", kind: "choice", full: true,
-      options: [["scarcity", "Scarcity (changes with supply)"], ["fixed", "Fixed prices"]] },
+      options: [["cost", "Cost + margin, × demand and inventory"], ["scarcity", "Scarcity (older formula)"], ["fixed", "Fixed prices"]] },
+    { path: "cost_floor_margin", label: "Margin over cost (base price)", kind: "float", min: 0, max: 10, step: 0.01 },
+    { path: "stock_target_days", label: "Inventory target (days of sales)", kind: "float", min: 0.1, step: 5,
+      enabledWhen: v => v.price_mode === "cost" },
+    { path: "stock_adjust_speed", label: "Prices move with inventory by up to (share a day)", kind: "float", min: 0, max: 1, step: 0.01,
+      enabledWhen: v => v.price_mode === "cost" },
+    { path: "distress_max", label: "Sellers short of cash give up to (share off)", kind: "float", min: 0, max: 1, step: 0.05 },
+    { path: "distress_days", label: "… when cash can't cover (days of wages and loans)", kind: "float", min: 0, step: 1 },
     { path: "price_stickiness", label: "Price stickiness (0 = perfectly flexible; 0.8 = close 20% of the gap a day)",
       kind: "float", min: 0, max: 0.99, step: 0.05, enabledWhen: v => v.price_mode !== "fixed" },
     { path: "money_velocity", label: "Money velocity (times a year; 0 = off)", kind: "float", min: 0, max: 1000, step: 0.5,

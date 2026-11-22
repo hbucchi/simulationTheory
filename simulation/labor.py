@@ -189,7 +189,9 @@ class LaborMarket:
         """What a unit of labour makes in autonomous production (the best of its goods at today's
         prices): the least anyone works for. 0 without autonomous production."""
         rules = world.rules
-        if not (rules.subsistence_enabled and rules.industries_enabled):
+        if not (rules.subsistence_enabled and rules.industries_enabled) or rules.price_mode == "cost":
+            # (With cost prices every price is proportional to the wage, so a floor tied to the
+            # price of water either never binds or lifts wages without end.)
             return 0.0
         return max((rate * prices.get(g, 0.0) for g, rate in self.subsistence_options(rules)), default=0.0)
 
@@ -276,7 +278,10 @@ class LaborMarket:
             # wage_adjust_speed a day. Not tied to output prices, so prices and wages can't chase
             # each other upwards (the value of output only sets the first day's wage).
             gap = (stats["wanted"] - stats["offered"]) / max(stats["offered"], stats["wanted"], 1e-9)
-            wage = self.wage * (1 + rules.wage_adjust_speed * max(-1.0, min(1.0, gap)))
+            gap = max(-1.0, min(1.0, gap))
+            # Wages are sticky downward (firms rarely cut pay): they fall at most wage_down_speed a day.
+            speed = rules.wage_adjust_speed if gap > 0 else rules.wage_down_speed
+            wage = self.wage * (1 + speed * gap)
         else:
             wage = base * self.multiplier
         # Floors: the minimum wage (government policy) and the reservation wage (nobody works for

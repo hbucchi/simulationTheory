@@ -56,7 +56,7 @@ class StartingStockTests(unittest.TestCase):
 
 class PriceFloorTests(unittest.TestCase):
     def test_every_good_covers_its_full_unit_cost(self):
-        w = World(seed=2, rules=Rules.from_dict({"agents": 40}))
+        w = World(seed=2, rules=Rules.from_dict({"agents": 40, "price_mode": "scarcity"}))   # (the floor of that model)
         w.spawn_random_agents()
         for _ in range(30):
             w.step()

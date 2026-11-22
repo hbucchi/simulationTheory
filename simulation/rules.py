@@ -22,7 +22,7 @@ RESOURCES = GOODS                     # what agents hold and trade face to face
 PRICED = GOODS + (LABOR,)             # everything with a price (labour's price is the wage)
 # Sleep is recovered by resting; every other need is relieved by consuming goods.
 NEEDS = ("hunger", "sleep", "thirst", "boredom", "health", "energy", "shelter")
-PRICE_MODES = ("scarcity", "fixed")
+PRICE_MODES = ("cost", "scarcity", "fixed")
 MAX_LAYERS = 10
 
 
@@ -110,6 +110,7 @@ class Rules:
     # below the reservation wage (what labour makes in autonomous production). 0 = the old rule
     # (labor_share x value of output x the demand multiplier).
     wage_adjust_speed: float = 0.05
+    wage_down_speed: float = 0.002       # ... but they fall at most this a day (sticky downward)
     # Specialization (labour module): working in an industry builds experience there. A worker's
     # time is worth skill = 1 + (skill_max - 1) x (1 - e^(-experience / skill_scale)) units of
     # labour in that industry (up to 10x; experience in units of labour worked), employers hire the
@@ -358,7 +359,10 @@ class Rules:
     loan_income_share: float = 0.4
 
     # Prices
-    price_mode: str = "scarcity"       # "scarcity": money/units*(1-share); "fixed": fixed_prices
+    # "cost" (default): base price = (inputs + labour) x (1 + cost_floor_margin), x demand pressure x
+    # an inventory factor (see World.update_stock_factors); "scarcity": the older money / units x
+    # (1 - share) x the price level (M x V = P x Y); "fixed": fixed_prices.
+    price_mode: str = "cost"
     # Price level (quantity theory of money, M x V = P x Y): the scarcity formula sets relative
     # prices; all of them are then scaled so that a year of what people consume costs
     # money supply x money_velocity. With velocity 4, money changes hands 4 times a year and an
@@ -388,6 +392,22 @@ class Rules:
     # Sticky prices: 0 = perfectly flexible (default); 0.9 = posted prices close only 10% of the gap
     # to the market price each day (menu costs: why real inflation is slow). Changeable in game.
     price_stickiness: float = 0.0
+    # Inventory factor (cost prices): sellers' unsold stock of a good vs stock_target_days of its
+    # flow (recent use, or stock_min_flow_share of its industry's capacity if more). Over the target
+    # its price falls, under it rises, at most stock_adjust_speed a day, within stock_factor_min/max.
+    stock_target_days: float = 30.0
+    stock_min_flow_share: float = 0.05
+    stock_adjust_speed: float = 0.05
+    stock_elasticity: float = 1.0
+    stock_factor_min: float = 0.2
+    stock_factor_max: float = 3.0
+    # Cash flow: an owner whose cash can't cover distress_days of wages and loan payments sells at
+    # up to distress_max off (in proportion to how short it is), even below cost, to keep running.
+    distress_enabled: bool = True
+    distress_days: float = 7.0
+    distress_max: float = 0.3
+    # Cost prices start from a wage of start_wage_share x the average starting money.
+    start_wage_share: float = 0.06
     # Clearance sales: goods about to expire sell at a discount, even below cost. A list of
     # [days before expiry, discount]: [[5, 0.8]] = 80% off in the last 5 days; gradual, e.g.
     # [[30, 0.05], [20, 0.1], [15, 0.2], [1, 0.8]]. Changeable in game (Products tab).
@@ -763,6 +783,16 @@ LIMITS = {
     "price_level_speed": (0.001, 1, "float"),
     "price_adjust_speed": (0.01, 1, "float"),
     "price_stickiness": (0, 0.99, "float"),
+    "stock_target_days": (0.1, 10000, "float"),
+    "stock_min_flow_share": (0, 10, "float"),
+    "stock_adjust_speed": (0, 1, "float"),
+    "stock_elasticity": (0, 10, "float"),
+    "stock_factor_min": (0.01, 1, "float"),
+    "stock_factor_max": (1, 100, "float"),
+    "distress_enabled": (None, None, "bool"),
+    "distress_days": (0, 10000, "float"),
+    "distress_max": (0, 1, "float"),
+    "start_wage_share": (0, 10, "float"),
     "clearance_enabled": (None, None, "bool"),
     "clearance_schedule": (None, None, "schedule"),
     "price_floor": (0.01, 1, "float"),
@@ -777,6 +807,7 @@ LIMITS = {
     "labor_saving": ((GOODS, -1, 0.99, False), None, "map"),
     "labor_share": (0, 1, "float"),
     "wage_adjust_speed": (0, 1, "float"),
+    "wage_down_speed": (0, 1, "float"),
     "specialization_enabled": (None, None, "bool"),
     "skill_max": (1, 1000, "float"),
     "skill_scale": (0.01, 1e6, "float"),

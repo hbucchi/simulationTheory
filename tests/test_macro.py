@@ -169,7 +169,7 @@ class PriceLevelTests(unittest.TestCase):
     def test_velocity_zero_is_the_plain_scarcity_formula(self):
         from simulation import economy
         w = World(seed=1, rules=Rules.from_dict({"agents": 10, "money_velocity": 0, "demand_pricing_enabled": False,
-                                                 "cost_floor": False}))
+                                                 "cost_floor": False, "price_mode": "scarcity"}))
         w.spawn_random_agents()
         self.assertAlmostEqual(w.current_prices()["water"], economy.market_prices(w.agents, w.rules)["water"])
 

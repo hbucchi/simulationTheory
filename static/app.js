@@ -244,6 +244,7 @@ function render(next) {
   } else if (activeTab === "products") {
     fillStickiness();
     fillClearance();
+    fillPricing();
     renderProducts();
   } else if (activeTab === "banks") {
     renderBanking();
@@ -810,6 +811,35 @@ $("clear-apply").onclick = async () => {
     render(await api("/api/market", { clearance_enabled: $("clear-on").checked, clearance_schedule: steps }));
     clearDirty = false;
     fillClearance(true);
+    status.textContent = "Applied from tomorrow.";
+    status.className = "status";
+  } catch (err) {
+    status.textContent = err.message;
+    status.className = "status error";
+  }
+  status.hidden = false;
+};
+
+// ---------- Pricing settings (Products tab) ----------
+
+let pricingDirty = false;
+$("pricing-form").addEventListener("input", () => { pricingDirty = true; });
+
+function fillPricing() {
+  const p = state.market.pricing;
+  if (!p || pricingDirty) return;
+  for (const el of $("pricing-form").querySelectorAll("[data-pricing]")) {
+    el.value = +(p[el.dataset.pricing] * Number(el.dataset.scale || 1)).toFixed(3);
+  }
+}
+
+$("pricing-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const status = $("pricing-status");
+  try {
+    render(await api("/api/market", Object.fromEntries([...$("pricing-form").querySelectorAll("[data-pricing]")]
+      .map(el => [el.dataset.pricing, Number(el.value) / Number(el.dataset.scale || 1)]))));
+    pricingDirty = false;
     status.textContent = "Applied from tomorrow.";
     status.className = "status";
   } catch (err) {

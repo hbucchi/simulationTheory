@@ -127,7 +127,7 @@ class InputTradingTests(unittest.TestCase):
 
 class PricingTests(unittest.TestCase):
     def test_secondary_good_never_sells_below_its_inputs(self):
-        world = world_with()
+        world = world_with(price_mode="scarcity")       # (the cost floor of the scarcity model)
         world.create_agent(needs=CALM, inventory={**NO_STOCK, "food": 1000, "water": 10, "games": 10, "grain": 1, "wood": 10})
         world.labor.wage = 5.0
         prices = world.current_prices()

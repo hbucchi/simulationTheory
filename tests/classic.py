@@ -33,4 +33,6 @@ CLASSIC = {
     "wage_adjust_speed": 0,
     "specialization_enabled": False,
     "clearance_enabled": False,
+    "price_mode": "scarcity",
+    "distress_enabled": False,
 }

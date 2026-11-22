@@ -177,6 +177,23 @@
             </select></label>
         </div>
         <details class="card fold settings">
+          <summary>Pricing: base price, inventory and cash flow</summary>
+          <form id="pricing-form" class="panel" novalidate>
+            <p class="field-help">Base price = (inputs + labour + depreciation) × (1 + margin, after profit tax) ÷ (1 − production
+              tax). The final price adds demand (buyers who can pay vs sellers, concentration) and inventory (unsold stock vs a
+              target number of days of sales).</p>
+            <div class="bank-fields gov-fields">
+              <label>Margin over cost <span><input data-pricing="cost_floor_margin" data-scale="100" type="number" min="0" step="1"> %</span></label>
+              <label>Inventory target <span><input data-pricing="stock_target_days" type="number" min="1" step="5"> days of sales</span></label>
+              <label>Prices move with inventory by up to <span><input data-pricing="stock_adjust_speed" data-scale="100" type="number" min="0" max="100" step="1"> % a day</span></label>
+              <label>Cash flow: sellers short of cash for <span><input data-pricing="distress_days" type="number" min="0" step="1"> days of wages and loans</span></label>
+              <label>… sell at up to <span><input data-pricing="distress_max" data-scale="100" type="number" min="0" max="100" step="5"> % off</span></label>
+            </div>
+            <div class="form-actions"><span class="spacer"></span><button type="submit" class="primary">Apply</button></div>
+            <p id="pricing-status" class="status" hidden></p>
+          </form>
+        </details>
+        <details class="card fold settings">
           <summary>Clearance sales: discounts on goods about to expire</summary>
           <div class="panel">
             <label class="bank-toggle"><input id="clear-on" type="checkbox"> Sellers discount goods close to expiry (even below cost)</label>

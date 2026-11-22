@@ -165,6 +165,13 @@ class Simulation:
                 rules.clearance_enabled = changes["clearance_enabled"]
             if "clearance_schedule" in changes:
                 rules.clearance_schedule = changes["clearance_schedule"]
+            for key in PRICING_LIMITS:
+                if key in changes:
+                    setattr(rules, key, changes[key])
+            if set(PRICING_LIMITS) & set(changes):
+                self.world.log(f"Pricing: base = cost + {rules.cost_floor_margin:.0%} margin; stock target "
+                               f"{rules.stock_target_days:g} days, prices move up to {rules.stock_adjust_speed:.0%} a day; "
+                               f"sellers short of cash give up to {rules.distress_max:.0%} off")
             if {"clearance_enabled", "clearance_schedule"} & set(changes):
                 steps = ", ".join(f"{d:.0%} off from {n} days before expiry" for n, d in rules.clearance_schedule)
                 self.world.log("Clearance sales: " + (steps if rules.clearance_enabled and steps else "off"))
@@ -216,6 +223,9 @@ class Simulation:
         with self.lock:
             return self.world.to_dict(self.detail)
 
+
+# Pricing settings (cost prices) that can be changed live in the Products tab: name -> (low, high).
+PRICING_LIMITS = {'cost_floor_margin': (0, 10), 'stock_target_days': (0.1, 10000), 'stock_adjust_speed': (0, 1), 'distress_days': (0, 10000), 'distress_max': (0, 1)}
 
 # Government / central bank settings that can be changed live: name -> (low, high) or bool.
 POLICY_LIMITS = {"min_wage": (0, 1e9), "min_rate": (0, 10), "labor_purchase": (0, 1e6), "capital_ratio": (0, 1),
@@ -393,6 +403,8 @@ class Handler(SimpleHTTPRequestHandler):
                         changes[key] = value
                     elif key == "price_stickiness":
                         changes[key] = _number(value, key, 0, 0.99)
+                    elif key in PRICING_LIMITS:
+                        changes[key] = _number(value, key, *PRICING_LIMITS[key])
                     else:
                         raise ValueError(f"unknown market setting: {key}")
                 return self.sim.set_market(changes)

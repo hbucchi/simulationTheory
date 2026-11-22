@@ -686,7 +686,28 @@ Goods that relieve no need are never kept for the band: producers sell all of th
 (The band used to be "100 units of each good"; with many goods per need and expiry
 that hoarded raw grain as food and let perishables rot.)
 
-### Prices
+### Prices (cost prices, the default)
+
+`price_mode` "cost": each good's **base price** covers what a unit costs to make:
+
+    base = (inputs + wage ÷ productivity + depreciation per unit)
+           × (1 + margin ÷ (1 − profit tax)) ÷ (1 − production tax)
+
+The margin (`cost_floor_margin`, 10%) is what is left after profit tax; the production tax is
+paid on the sale; depreciation is what the asset loses per day (at yesterday's build cost) ÷ what
+it makes per day. Goods are priced from the shallowest layer up, so every input already carries
+its own price. The **final price** = base × the **demand multiplier** (buyers *who can pay*, each
+counting min(1, its money ÷ the price), vs sellers; seller concentration; buying power) × the
+**inventory factor**: sellers' unsold stock vs `stock_target_days` (30) days of its flow (recent
+use, at least `stock_min_flow_share` of its industry's capacity); over the target the price falls,
+under it rises, by at most `stock_adjust_speed` (5%) a day. On top, per seller: **clearance**
+discounts near expiry and **cash-flow** discounts (an owner whose cash can't cover
+`distress_days` (7) of wages and loan payments sells at up to `distress_max` (30%) off, even below
+cost). All live in the Products tab (*Pricing*). Prices start from a wage of 6% of the average
+starting money; after that wages follow the labour market (up to 5% a day up, but **sticky
+downward**: at most 0.2% a day down, as real firms rarely cut pay).
+
+### Prices (scarcity model, `price_mode` "scarcity")
 
 Relative prices come from what everyone holds:
 

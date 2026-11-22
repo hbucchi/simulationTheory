@@ -658,8 +658,10 @@ def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, mar
                    project_need(buyer, resource))
         markup = (markups or {}).get(resource, 0)
         while buyer.inventory.count(resource) < goal and spare(seller, resource, rules, scarcity) > 0:
-            unit_price = (prices[resource] * (1 + markup) ** bought.get(resource, 0)
-                          * (1 - clearance_discount(seller, resource, rules)))
+            # Discounts: clearance (about to expire) or cash flow (a seller short of cash for wages
+            # and loans, World.update_distress): the bigger one.
+            off = max(clearance_discount(seller, resource, rules), getattr(seller, "distress", 0.0))
+            unit_price = prices[resource] * (1 + markup) ** bought.get(resource, 0) * (1 - off)
             for_reserve = buyer.inventory.count(resource) >= need_goal
             if for_reserve and (no_reserves or spent_on_reserve + unit_price > budget):
                 break

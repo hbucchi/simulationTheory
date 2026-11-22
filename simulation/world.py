@@ -60,6 +60,9 @@ class World:
         self.events = []  # newest last; trimmed to keep the payload small
         self.cooldowns = {}  # frozenset({id_a, id_b}) -> (tick until which they ignore each other, after a deal?)
         self.labor = LaborMarket()
+        if self.rules.price_mode == "cost":
+            # Cost prices need a wage from day 1: start_wage_share of the average starting money.
+            self.labor.wage = self.rules.start_wage_share * distributions.mean(self.rules.money)
         # Sticky prices (0 = perfectly flexible): each day posted prices move only (1 - stickiness)
         # of the way to what the market says. Changeable in game (Products tab).
         self.price_stickiness = self.rules.price_stickiness
@@ -92,6 +95,8 @@ class World:
         self.buyer_agents = {r: [] for r in economy.RESOURCES}  # who wants each resource (this step)
         self.sellers = {r: 0 for r in economy.RESOURCES}
         self.price_multiplier = {r: 1.0 for r in economy.RESOURCES}
+        self.stock_factor = {r: 1.0 for r in economy.RESOURCES}     # inventory factor (cost prices)
+        self._dep_prices = None      # yesterday's prices: what assets are worth for depreciation
         # Concentration of each resource's available (sellable) supply: 0 even, 1 one holder.
         self.concentration = {r: 0.0 for r in economy.RESOURCES}
         self.buyer_concentration = {r: 0.0 for r in economy.RESOURCES}   # of buying power
@@ -499,8 +504,8 @@ class World:
         """Move the price level toward money supply x velocity / (a year's consumption at the
         scarcity formula's prices): M x V = P x Y."""
         rules = self.rules
-        if rules.money_velocity <= 0 or rules.price_mode == "fixed" or not self.agents:
-            self.price_level = 1.0
+        if rules.money_velocity <= 0 or rules.price_mode != "scarcity" or not self.agents:
+            self.price_level = 1.0     # (cost prices are anchored by costs, not by M x V)
             return
         base = economy.market_prices(self.agents, rules)
         spending = sum(units * base[g] * self.price_multiplier[g] for g, units in self.yearly_basket().items())
@@ -545,11 +550,23 @@ class World:
             power = [purse[a] for a in self.buyer_agents[r]]
             self.buyer_concentration[r] = economy.concentration(power + [0] * (n_agents - len(power)))
             if rules.demand_pricing_enabled:
-                target = economy.demand_multiplier_target(self.buyers[r], self.sellers[r], r, rules,
+                # Effective demand: a buyer counts as far as it can pay for a unit (wanting without
+                # money doesn't push prices up). (Cost prices; the scarcity model counts heads.)
+                buyers = self.buyers[r]
+                if rules.price_mode == "cost" and self.price_history[r]:
+                    price = self.price_history[r][-1]
+                    if price > 0:
+                        buyers = sum(min(1.0, purse[a] / price) for a in self.buyer_agents[r])
+                target = economy.demand_multiplier_target(buyers, self.sellers[r], r, rules,
                                                           self.concentration[r], self.buyer_concentration[r])
                 self.price_multiplier[r] += rules.price_adjust_speed * (target - self.price_multiplier[r])
             else:
                 self.price_multiplier[r] = 1.0
+        self.update_stock_factors(spare_by_good)
+        self.update_distress()
+        if rules.price_mode == "cost":
+            self._dep_prices = None
+            self._dep_prices = self.cost_prices()      # (fixed for the day: assets valued at these)
         for r, price in self.current_prices().items():
             self.price_history[r].append(price)
 
@@ -669,6 +686,69 @@ class World:
         recent = list(islice(reversed(self.recorder.history), steps))
         return {g: sum(s.get(key, {}).get(g, 0) for s in recent) / len(recent) if recent else 0.0 for g in economy.GOODS}
 
+    def cost_prices(self):
+        """Cost prices. Base price = (inputs + labour at the wage + depreciation per unit)
+        x (1 + margin / (1 - profit tax)) / (1 - production tax): it covers what a unit costs to
+        make, the wear of the asset making it, a normal margin left after profit tax, and the
+        production tax on the sale. Final price = base x the demand multiplier (buyers vs sellers,
+        concentration, buying power) x the inventory factor. Shallow layers first, so each good's
+        inputs already carry their own prices; depreciation values assets at yesterday's prices."""
+        rules, gov = self.rules, self.government
+        last = self._dep_prices
+        margin = rules.cost_floor_margin / max(0.05, 1 - gov.tax_profit)
+        keep = max(0.05, 1 - gov.tax_production)
+        year = self.year_steps()
+        prices = {r: 0.0 for r in economy.RESOURCES}
+        for g in sorted(rules.active_goods, key=rules.layer):
+            wear = 0.0
+            out = self.asset_output(g, 1.0)
+            if last and out > 0 and rules.depreciation.get(g, 0) > 0:
+                value = self.build_cost_money(g, last) or 0.0
+                wear = value * rules.depreciation[g] / year / out
+            base = (self.unit_cost(g, prices) + wear) * (1 + margin) / keep
+            prices[g] = base * self.price_multiplier[g] * self.stock_factor[g]
+        return prices
+
+    def update_stock_factors(self, spare_by_good):
+        """Inventory factor per good: sellers' unsold stock vs stock_target_days of its flow (recent
+        use: consumption + industry use, over 30 days; at least stock_min_flow_share of its
+        industry's daily capacity, so stock is also judged against the assets that make it). The
+        factor moves toward (stock / target) ^ -stock_elasticity, at most stock_adjust_speed a day."""
+        rules = self.rules
+        if rules.price_mode != "cost":
+            return
+        recent = list(islice(self.recorder.history, max(0, len(self.recorder.history) - 30), None))
+        days = max(1, len(recent))
+        capacity = {}
+        for a in self.agents:
+            for g, shares in a.assets.items():
+                capacity[g] = capacity.get(g, 0.0) + self.asset_output(g, shares)
+        for g in rules.active_goods:
+            used = sum(s["consumed"].get(g, 0) + s.get("used", {}).get(g, 0) for s in recent) / days
+            flow = max(used, rules.stock_min_flow_share * capacity.get(g, 0.0), 1e-6)
+            held = sum(spare_by_good.get(g, {}).values())
+            ratio = held / (rules.stock_target_days * flow)
+            target = ratio ** -rules.stock_elasticity if ratio > 0 else rules.stock_factor_max
+            target = min(rules.stock_factor_max, max(rules.stock_factor_min, target))
+            now = self.stock_factor[g]
+            step = rules.stock_adjust_speed
+            self.stock_factor[g] = min(now * (1 + step), max(now * (1 - step), target))
+
+    def update_distress(self):
+        """Cash flow: owners whose cash (and company cash) can't cover distress_days of wages and
+        loan payments sell at a discount (agent.distress, up to distress_max) to raise money."""
+        rules = self.rules
+        wage = self.labor.wage
+        for a in self.agents:
+            a.distress = 0.0
+            if not rules.distress_enabled or not a.assets:
+                continue
+            need = rules.distress_days * (a.labor_need * wage + (self.banking.payments_of(a) if a.debt else 0.0))
+            if need <= 0:
+                continue
+            cash = economy.money_of(a) + a.company_cash
+            a.distress = rules.distress_max * min(1.0, max(0.0, (need - cash) / need))
+
     def unit_cost(self, good, prices):
         """Cost of making one unit of ``good``: its inputs plus the labour it takes at the wage."""
         productivity = self.productivity_now[good]
@@ -753,6 +833,11 @@ class World:
                 if include_labor:
                     prices[economy.LABOR] = self.labor.wage
                 cache[key] = prices
+            return prices
+        if self.rules.price_mode == "cost":
+            prices = self.cost_prices()
+            if include_labor:
+                prices[economy.LABOR] = self.labor.wage
             return prices
         base = economy.market_prices(self.agents, self.rules)
         level = self.price_level if self.rules.price_mode != "fixed" else 1.0
@@ -1187,6 +1272,10 @@ class World:
             "market": {
                 "price_stickiness": self.price_stickiness,
                 "clearance_enabled": self.rules.clearance_enabled,
+                "price_mode": self.rules.price_mode,
+                "pricing": {k: getattr(self.rules, k) for k in ("cost_floor_margin", "stock_target_days",
+                                                                 "stock_adjust_speed", "distress_days", "distress_max")},
+                "stock_factor": {g: round(self.stock_factor[g], 3) for g in self.rules.active_goods},
                 "clearance_schedule": self.rules.clearance_schedule,
                 "prices": self.current_prices(),
                 "base_prices": economy.market_prices(self.agents, self.rules),
