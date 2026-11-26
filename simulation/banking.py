@@ -188,7 +188,10 @@ class Banking:
         return max(self.deposit_rate, world.government.min_rate)
 
     def loan_rate_now(self, world):
-        return self.deposit_rate_now(world) + self.loan_spread
+        base = self.deposit_rate_now(world) + self.loan_spread
+        if world.rules.expectations_enabled and world.expected_inflation > 0:
+            base += (1 + world.expected_inflation) ** (1 / max(1, world.year_steps())) - 1
+        return base
 
     def open_banks(self):
         return [b for b in self.banks if b.status == "open"]
