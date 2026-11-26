@@ -94,7 +94,7 @@ class Loan:
 
 
 class Bank:
-    def __init__(self, bank_id, owner, capital, tick):
+    def __init__(self, bank_id, owner, capital, tick, deposit_rate=0.0):
         self.id = bank_id
         self.owner_id = owner.id
         self.name = f"Bank of {owner.name}"
@@ -104,6 +104,7 @@ class Bank:
         self.bonds = 0.0                 # government bonds it holds (lent to the government; bonds.py)
         self.cb_interest = 0.0           # interest paid to the central bank so far
         self.capital_in = capital        # what the founder put in
+        self.deposit_rate = deposit_rate # this bank's own daily deposit rate (competes when enabled)
         self.deposits = {}               # agent id -> balance
         self.loans = []
         self.status = "open"             # open | winding down | failed
@@ -133,6 +134,7 @@ class Bank:
         owner = world.agent_by_id(self.owner_id)
         return {"id": self.id, "name": self.name, "owner": owner.name if owner else None,
                 "status": self.status, "opened": self.opened,
+                "deposit_rate": world.banking.bank_deposit_rate(world, self),
                 "reserves": round(self.reserves, 2), "deposits": round(self.deposit_total, 2),
                 "cb_reserves": round(self.cb_reserves, 2), "cb_loans": round(self.cb_loans, 2),
                 "bonds": round(self.bonds, 2),
@@ -157,6 +159,7 @@ class Banking:
         self.gov = government
         self.enabled = rules.banking_enabled
         self.deposit_rate = rules.deposit_rate
+        self.rate_competition = rules.bank_rate_competition
         self.loan_spread = rules.loan_spread
         self.liquidity = rules.bank_liquidity   # vault cash each bank keeps (share of deposits)
         self.min_capital = rules.bank_min_capital
@@ -213,15 +216,38 @@ class Banking:
     def debt_of(self, agent):
         return sum(l.balance for b in self.banks for l in b.loans if l.borrower_id == agent.id)
 
+    def bank_deposit_rate(self, world, bank):
+        """Effective daily deposit rate paid by ``bank`` (never below the floor or policy rate)."""
+        base = bank.deposit_rate if self.rate_competition else self.deposit_rate
+        return max(base, self.deposit_rate, world.government.min_rate)
+
+    def choose_deposit_bank(self, world, agent):
+        """Pick an open bank to deposit in: highest deposit interest first, closest on ties."""
+        banks = self.open_banks()
+        if not banks:
+            return None
+
+        def key(b):
+            owner = world.agent_by_id(b.owner_id)
+            dist = math.hypot(owner.x - agent.x, owner.y - agent.y) if owner else math.inf
+            return (-round(self.bank_deposit_rate(world, b), 10), dist)
+
+        return min(banks, key=key)
+
     # ---------- deposits ----------
 
     def deposit(self, world, agent, amount):
-        bank = self.nearest_open(world, agent)
+        bank = self.choose_deposit_bank(world, agent)
         if bank is None or amount < MIN_DEPOSIT:
             return 0.0
         amount = min(amount, agent.money)
         agent.money -= amount
-        bank.reserves += amount
+        # Immediately set aside the central bank's required reserve share on new deposits so the
+        # bank stays eligible to lend right away instead of waiting until the next day's settlement.
+        req_ratio = self.gov.reserve_requirement if self.gov else 0.0
+        to_cb = amount * req_ratio
+        bank.cb_reserves += to_cb
+        bank.reserves += amount - to_cb
         bank.deposits[agent.id] = bank.deposits.get(agent.id, 0.0) + amount
         _sync(agent, self)
         return amount
@@ -310,8 +336,7 @@ class Banking:
             by_reserves = 0.0
         basel = world.government.capital_ratio    # set by the central bank
         by_capital = (bank.equity / basel - bank.loan_total if basel > 0 else math.inf)
-        # (A cent of slack: dividends leave equity at exactly the minimum, give or take float noise.)
-        if bank.equity < self.min_capital - 0.01:
+        if bank.equity <= 0:
             by_capital = 0.0
         by_services = owner.inventory.count("banking") * world.rules.loan_per_service
         return max(0.0, min(by_reserves, by_capital, by_services))
@@ -460,6 +485,7 @@ class Banking:
                     world.log(f"{bank.name} is winding down" +
                               (" (banking switched off)" if owner else " (its owner died)"))
             if bank.status == "open":
+                self._compete_rates(world, bank)
                 self._pay_interest(world, bank)
                 self._pay_dividend(world, bank, owner)
             else:
@@ -519,7 +545,7 @@ class Banking:
                               f"needs {self.min_capital:.2f} of its own capital")
                 continue
             agent.money -= self.min_capital
-            bank = Bank(self.next_bank_id, agent, self.min_capital, world.tick)
+            bank = Bank(self.next_bank_id, agent, self.min_capital, world.tick, deposit_rate=self.deposit_rate)
             self.next_bank_id += 1
             self.banks.append(bank)
             self.blocked.discard(agent.id)
@@ -593,18 +619,43 @@ class Banking:
         bank.loans.remove(loan)
         world.log(f"{bank.name} wrote off {loan.balance:.2f} lent to {loan.borrower_name} ({why})")
 
-    def _pay_interest(self, world, bank):
-        """Depositors earn the deposit rate on the part of deposits the bank has lent out (a bank
-        can only pay interest it earns: cash sitting in its vault earns nothing)."""
-        rate = self.deposit_rate_now(world)
-        total = bank.deposit_total
-        if rate <= 0 or total <= 0 or not bank.loans:
+    def _compete_rates(self, world, bank):
+        """Automatic deposit-rate competition: banks with high loan/bond utilization raise their
+        deposit rate to attract funds; banks with idle deposits lower it back toward the floor."""
+        floor = self.deposit_rate_now(world)
+        if not self.rate_competition:
+            bank.deposit_rate = floor
             return
-        rate *= min(1.0, bank.loan_total / total)
+        ceiling = floor + 0.5 * self.loan_spread
+        total = bank.deposit_total
+        util = (bank.loan_total + bank.bonds) / total if total > 0 else 0.0
+        # ~1% yearly rate adjustment per month of sustained high or low utilization.
+        step = 0.01 / max(1, world.year_steps()) / max(1, world.rules.month_steps)
+        if util > 0.70:
+            bank.deposit_rate = min(ceiling, max(floor, bank.deposit_rate) + step)
+        elif util < 0.30:
+            bank.deposit_rate = max(floor, bank.deposit_rate - step)
+        else:
+            bank.deposit_rate = min(ceiling, max(floor, bank.deposit_rate))
+
+    def _pay_interest(self, world, bank):
+        """Depositors earn the bank's deposit rate on all deposits, giving banks a real funding
+        cost that pressures them to lend (idle banks erode equity and eventually fail)."""
+        rate = self.bank_deposit_rate(world, bank)
+        total = bank.deposit_total
+        if rate <= 0 or total <= 0:
+            return
+        paid = 0.0
         for agent_id, balance in bank.deposits.items():
             interest = balance * rate
             bank.deposits[agent_id] = balance + interest
             bank.interest_paid += interest
+            paid += interest
+        req_ratio = self.gov.reserve_requirement if self.gov else 0.0
+        if req_ratio > 0 and paid > 0:
+            topup = min(max(0.0, bank.reserves), paid * req_ratio)
+            bank.reserves -= topup
+            bank.cb_reserves += topup
         for agent_id in bank.deposits:
             agent = world.agent_by_id(agent_id)
             if agent is not None:
@@ -723,7 +774,7 @@ class Banking:
         return {
             "enabled": self.enabled, "available": self.available(world),
             "industry_active": world.rules.is_active("banking"),
-            "deposit_rate": self.deposit_rate, "loan_spread": self.loan_spread,
+            "deposit_rate": self.deposit_rate, "rate_competition": self.rate_competition, "loan_spread": self.loan_spread,
             "liquidity": self.liquidity, "reserve_requirement": world.government.reserve_requirement,
             "capital_ratio": world.government.capital_ratio,
             "lender_of_last_resort": world.government.lender_of_last_resort,

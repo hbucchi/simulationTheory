@@ -1530,6 +1530,7 @@ function fillBanking(force = false) {
   bankDirty = false;
   const b = state.banking;
   ui.bankEnabled.checked = b.enabled;
+  $("bank-compete").checked = !!b.rate_competition;
   ui.bankDeposit.value = +(perYear(b.deposit_rate) * 100).toFixed(2);   // shown % a year, kept per day
   ui.bankSpread.value = +(perYear(b.loan_spread) * 100).toFixed(2);
   ui.bankReserve.value = +(b.liquidity * 100).toFixed(2);
@@ -1577,8 +1578,9 @@ function renderBanking() {
     head.append(Object.assign(document.createElement("b"), { textContent: bank.name }),
                 Object.assign(document.createElement("span"), { className: "bank-status", textContent: bank.status }));
     const ratio = bank.loans > 0 ? `${(bank.equity / bank.loans * 100).toFixed(0)}% of loans` : "no loans";
+    const depRate = `${(perYear(bank.deposit_rate ?? b.deposit_rate_now) * 100).toFixed(2)}%/yr`;
     const lines = [
-      `Equity ${usd(bank.equity)} (${ratio}; founder put in ${usd(bank.capital_in)})`,
+      `Equity ${usd(bank.equity)} (${ratio}; founder put in ${usd(bank.capital_in)}) · deposit rate ${depRate}`,
       `Deposits ${usd(bank.deposits)} from ${bank.depositors} · reserves ${usd(bank.reserves)}`,
       `Loans ${usd(bank.loans)} to ${bank.borrowers} · banking services ${bank.services} units · plant ${bank.shares} shares`,
       `Interest in ${usd(bank.interest_received)} · out ${usd(bank.interest_paid)} · dividends ${usd(bank.dividends)}` +
@@ -1597,6 +1599,7 @@ ui.bankForm.onsubmit = async (e) => {
   try {
     const next = await api("/api/banking", {
       enabled: ui.bankEnabled.checked,
+      rate_competition: $("bank-compete").checked,
       deposit_rate: perDay(Number(ui.bankDeposit.value) / 100),
       loan_spread: perDay(Number(ui.bankSpread.value) / 100),
       liquidity: Number(ui.bankReserve.value) / 100,

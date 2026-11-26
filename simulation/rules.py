@@ -343,7 +343,8 @@ class Rules:
     starting_bank_shares: float = 1.0  # banking shares each of them starts with
     bank_min_capital: float = 1000.0   # founder's own money a bank needs to open (and to lend)
     bank_liquidity: float = 0.05       # vault cash each bank keeps itself (x deposits) before lending
-    deposit_rate: float = 0.00008211      # 3% a year (rates are per step = per day)
+    deposit_rate: float = (1.01 ** (1 / 360)) - 1   # 1% a year base deposit rate (cost on all deposits)
+    bank_rate_competition: bool = True # banks adjust their deposit rates to compete for deposits
     loan_spread: float = 0.00013554       # 5% a year: loan rate = deposit rate + this
     loan_steps: int = 300              # loans are repaid over this many steps
     max_loan_to_value: float = 0.6     # debt <= this x the borrower's asset shares (+ what it builds)
@@ -878,6 +879,7 @@ LIMITS = {
     "industries_enabled": (None, None, "bool"),
     "reserve_ratio": (0, 1, "float"),
     "deposit_rate": (0, 1, "float"),
+    "bank_rate_competition": (None, None, "bool"),
     "loan_spread": (0, 1, "float"),
     "loan_steps": (1, 100000, "int"),
     "mortgage_years": (0, 100, "float"),

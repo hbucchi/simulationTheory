@@ -225,8 +225,9 @@
           <summary>Bank settings: rates, cash buffer, minimum capital, credit limit</summary>
         <form id="bank-form" class="panel" novalidate>
           <label class="bank-toggle"><input id="bank-enabled" type="checkbox"> Banking on</label>
+          <label class="bank-toggle"><input id="bank-compete" type="checkbox"> Banks compete on deposit rates</label>
           <div class="bank-fields">
-            <label>Deposit rate <span><input id="bank-deposit" type="number" min="0" step="0.1"> % a year</span></label>
+            <label>Base deposit rate <span><input id="bank-deposit" type="number" min="0" step="0.1"> % a year</span></label>
             <label>Loan spread <span><input id="bank-spread" type="number" min="0" step="0.1"> % a year</span></label>
             <label>Vault cash kept <span><input id="bank-reserve" type="number" min="0" max="100" step="1"> % of deposits</span></label>
             <label>Minimum capital <span>$ <input id="bank-min-capital" type="number" min="0" step="500"></span></label>
