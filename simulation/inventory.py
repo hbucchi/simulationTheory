@@ -69,6 +69,10 @@ class Inventory:
 
     def remove(self, item, quantity=1):
         """Remove ``quantity`` of ``item``. Returns False if there isn't enough."""
+        if quantity < 0:
+            raise ValueError("quantity must be non-negative")
+        if quantity == 0:
+            return True
         self.version += 1
         if self.amount(item) + 1e-9 < quantity:
             return False

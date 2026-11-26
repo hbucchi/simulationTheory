@@ -87,13 +87,13 @@ def skill(agent, good, rules):
     return 1.0 + (rules.skill_max - 1.0) * (1.0 - math.exp(-xp / rules.skill_scale)) if xp > 0 else 1.0
 
 
-def autonomous_factor(agent, rules):
+def autonomous_factor(agent, rules, good=None):
     """Share of its starting productivity in autonomous production the agent keeps: specialised
-    workers lose the knack of fending for themselves, down to auto_skill_floor (5%) as their total
-    experience grows (same learning curve as skill)."""
+    workers lose the knack of fending for themselves in unrelated goods, down to auto_skill_floor
+    (5%) as their experience in other industries grows (same learning curve as skill)."""
     if not rules.specialization_enabled:
         return 1.0
-    xp = sum(agent.experience.values())
+    xp = sum(v for k, v in agent.experience.items() if good is None or k != good)
     if xp <= 0:
         return 1.0
     learned = 1.0 - math.exp(-xp / rules.skill_scale)
@@ -223,8 +223,10 @@ class LaborMarket:
             a.output_capacity = {g: world.asset_output(g, s) for g, s in a.assets.items() if g in economy.GOODS}
             for g, j in jobs.items():
                 jobs_by_good[g] = jobs_by_good.get(g, 0) + j
-            own = min(a.capacity_now, a.labor_need)
-            a.labor_available = own
+            own_skill = skill(a, a.main_good, rules) if a.main_good else 1.0
+            own = min(a.capacity_now, a.labor_need / own_skill) if own_skill > 0 else 0.0
+            own_effective = own * own_skill
+            a.labor_available = own_effective
             a.own_labor = own
             if own > 0 and a.main_good and rules.specialization_enabled:
                 a.experience[a.main_good] = a.experience.get(a.main_good, 0.0) + own
@@ -234,7 +236,7 @@ class LaborMarket:
             stats["capacity"] += a.capacity_now
             stats["own_use"] += own
             a.flow["labor_made"] += a.capacity_now
-            a.flow["labor_used"] += own
+            a.flow["labor_used"] += own_effective
             free = a.capacity_now - own
             a.offered = free * (rules.participation_floor + (1 - rules.participation_floor) * a.job_need)
             # Fewer than labor_offer_months of living costs left (money + goods for its needs):
@@ -365,8 +367,8 @@ class LaborMarket:
 
         # Unused capacity = withheld (not offered: the agent didn't need to work) + idle
         # (offered but nobody hired it).
-        stats["unused"] = (stats["capacity"] - stats["own_use"] - stats["hired"] - stats["gov_hired"]
-                           - stats.get("subsistence", 0.0))     # (autonomous production uses labour too)
+        stats["unused"] = max(0.0, stats["capacity"] - stats["own_use"] - stats["hired"] - stats["gov_hired"]
+                              - stats.get("subsistence", 0.0))     # (autonomous production uses labour too)
         stats["idle"] = max(0.0, stats["offered"] - stats["hired"] - stats["gov_hired"])
         stats["withheld"] = max(0.0, stats["unused"] - stats["idle"])
         stats["workers_hired"] = sum(1 for a in offers if a.labor_sold > 1e-9)
@@ -448,7 +450,11 @@ class LaborMarket:
                 need = rules.need_of(opt[0])
                 return (economy.urgency(a, need, rules) - economy.held_relief(a, need, rules), opt[1])
             good, rate = max(options, key=score)
-            made = spare * rate * autonomous_factor(a, rules)     # specialists fend less well for themselves
+            # Producing a good autonomously builds experience in it and raises output per labour;
+            # experience in unrelated industries still reduces self-sufficiency (autonomous_factor).
+            made = spare * rate * skill(a, good, rules) * autonomous_factor(a, rules, good)
+            if rules.specialization_enabled:
+                a.experience[good] = a.experience.get(good, 0.0) + spare
             done = a.subsistence.get(good, 0.0) + made
             whole = int(done + 1e-9)
             if whole:

@@ -48,6 +48,7 @@ const SETUP_SECTIONS = [
     { path: "agents", label: "Agents", kind: "int", min: 1, max: 5000 },
     { path: "seed", label: "Seed", kind: "int", optional: true, placeholder: "random" },
     { path: "contact_distance", label: "Touch distance (px)", kind: "float", min: 1, max: 200, step: 1 },
+    { path: "trade_radius", label: "Trading / perception radius (px; 0 = touch only)", kind: "float", min: 0, max: 5000, step: 25 },
     { path: "depart_steps", label: "Walk apart (days)", kind: "int", min: 0, max: 1000 },
     { path: "cooldown_steps", label: "Ignore each other after a deal (days)", kind: "int", min: 0, max: 10000 },
     { path: "retry_steps", label: "… after no deal (days)", kind: "int", min: 0, max: 10000 },
