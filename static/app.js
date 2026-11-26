@@ -234,6 +234,7 @@ function render(next) {
   if (editingId !== null && !agentById(editingId)) editingId = null;
   ui.tick.textContent = state.tick;
   ui.calDate.textContent = calendar(state.tick);
+  updateRegimeBadge();
   recordTrend();
   if (typeof refreshReport === "function") refreshReport();
   if (typeof reportVisible !== "undefined" && reportVisible) return;
@@ -1868,6 +1869,38 @@ document.addEventListener("keydown", (e) => {
   if (e.code === "ArrowRight" && !playing) step(1);
 });
 
+function updateRegimeBadge() {
+  const el = $("regime-badge");
+  if (!el || !state) return;
+  const macro = state.macro;
+  const l = state.market?.labor;
+  const unemp = l && l.offered > 0 ? Math.max(0, l.idle) / l.offered : 0;
+  let labelText = "Early cycle", tone = "neutral";
+  if (macro && macro.accounts_steps >= DAYS_PER_MONTH()) {
+    const inf = macro.inflation || 0;
+    if (inf > 0.12 && unemp > 0.15) { labelText = "Stagflation"; tone = "bad"; }
+    else if (inf > 0.12) { labelText = "Overheating"; tone = "warn"; }
+    else if (unemp > 0.15) { labelText = "Recession"; tone = "bad"; }
+    else if (inf < -0.02) { labelText = "Deflation"; tone = "warn"; }
+    else { labelText = "Expansion"; tone = "good"; }
+  }
+  el.textContent = labelText;
+  el.className = `regime-badge ${tone}`;
+}
+
+const themeBtn = $("theme-toggle");
+function applyTheme(mode) {
+  document.documentElement.dataset.theme = mode;
+  try { localStorage.setItem("econsim-theme", mode); } catch (_) {}
+  if (themeBtn) themeBtn.textContent = mode === "dark" ? "Light mode" : "Dark mode";
+}
+if (themeBtn) {
+  const saved = (() => { try { return localStorage.getItem("econsim-theme"); } catch (_) { return null; } })();
+  const initial = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  applyTheme(initial);
+  themeBtn.onclick = () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+}
+
 async function triggerShock(payload) {
   try {
     render(await api("/api/shock", payload));
@@ -1885,4 +1918,5 @@ api("/api/state").then(s => {
   state = s;
   refreshForm(true);
   render(s);
+  updateRegimeBadge();
 });
