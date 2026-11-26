@@ -10,6 +10,7 @@ from .agent import Agent
 from .inventory import Inventory
 from .modules import Build, Consume, Invest, Leisure, Mood, Navigate, NeedsDecay, Production, Rest
 from .banking import Banking
+from .firms import FirmRegistry
 from .government import Government
 from .labor import LaborMarket
 from .housing import HousingMarket
@@ -74,6 +75,7 @@ class World:
         self.government = Government.from_rules(self.rules)
         self.banking = Banking(self.rules, self.government)
         self.shocks = Shocks(self.rules, seed=seed)
+        self.firms = FirmRegistry(self.rules)
         self.retained_total = 0.0
         self.sell_through = {}        # good -> share of recent output that didn't expire
         self.price_level = 1.0        # scales every price (money_velocity: M x V = P x Y)
@@ -790,6 +792,15 @@ class World:
             cache["asset_prices"] = self.asset_prices(self.current_prices())
         return cache["asset_prices"]
 
+    def contract_wage_multiplier(self):
+        """Expected effective wage multiplier from mandatory contract length and early-termination
+        severance fees (1.0 in a gig economy; higher with rigid contracts + severance)."""
+        days = self.government.min_contract_days
+        sev = self.government.severance_rate
+        if days <= 0 or sev <= 0:
+            return 1.0
+        return 1.0 + 0.5 * sev * min(1.0, days / max(1, self.year_steps()))
+
     def industry_yield(self, good, prices=None):
         """Measured profitability of ``good``'s industry, per day: profit per asset share at the
         capacity it actually used lately ((price after production tax - unit cost - the asset's
@@ -811,7 +822,9 @@ class World:
                 used = 1.0
             value = self.build_cost_money(good, prices)
             wear = (value or 0.0) * rules.depreciation.get(good, 0.0) / self.year_steps() / out
-            margin = prices[good] * (1 - self.government.tax_production) - self.unit_cost(good, prices) - wear
+            prod = self.productivity_now[good] * self.shocks.productivity_factor(good)
+            extra_labour = (self.labor.wage / prod * (self.contract_wage_multiplier() - 1.0)) if prod > 0 else 0.0
+            margin = prices[good] * (1 - self.government.tax_production) - self.unit_cost(good, prices) - extra_labour - wear
             capital = value if value else self.asset_prices(prices).get(good, 0.0)
             result = margin * out * used / capital if capital > 0 else 0.0
         if cache is not None:
@@ -821,16 +834,18 @@ class World:
     def asset_prices(self, prices=None):
         """Price of one whole asset: profit per step at full capacity / effective return.
 
-        Profit = output x (price of the good - its inputs) - labour it employs x the wage. The effective
-        return is the asset's return, or the government's minimum rate if higher. Never below 0.
+        Profit = output x (price of the good - its inputs) - labour it employs x effective wage.
+        The effective return is the asset's return, or the government's minimum rate if higher.
+        Never below 0.
         """
         prices = prices or self.current_prices()
+        wage_mult = self.contract_wage_multiplier()
         out = {}
         for g in economy.GOODS:
             # Output that expires unsold earns nothing: value only what sells (sell-through).
             sold = self.sell_through.get(g, 1.0)
             profit = (self.asset_output(g, 1) * sold * self.value_added(g, prices)
-                      - self.asset_jobs(g, 1) * sold * prices[economy.LABOR])
+                      - self.asset_jobs(g, 1) * sold * prices[economy.LABOR] * wage_mult)
             out[g] = max(0.0, profit) / self.government.effective_return(self.rules, g)
         return out
 
@@ -1052,6 +1067,7 @@ class World:
         finally:
             self._step_cache = None
         self.retain_earnings()
+        self.firms.step(self)
         if self.rules.housing_enabled:
             self.housing.step(self)          # new houses, rent, evictions, buying and renting
         self.banking.step(self)
@@ -1432,6 +1448,7 @@ class World:
             "government": self.government.to_dict(self),
             "housing": self.housing.to_dict(self) if self.rules.housing_enabled else None,
             "shocks": self.shocks.to_dict(),
+            "firms": self.firms.to_dict(self),
             "expected_inflation": round(self.expected_inflation, 4),
             "market": {
                 "price_stickiness": self.price_stickiness,

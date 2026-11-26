@@ -41,6 +41,7 @@ policy rate, no capital or reserve rules and no lender of last resort.
 POLICY = ("min_wage", "min_rate", "labor_purchase", "capital_ratio", "tax_production", "tax_wage", "tax_profit",
           "benefit_rate", "balanced_budget", "reserve_requirement", "reserve_rate", "lender_of_last_resort",
           "llr_penalty", "bonds_enabled", "debt_limit", "bond_spread", "bond_days", "pay_period",
+          "min_contract_days", "severance_rate",
           "taylor_enabled", "inflation_target", "neutral_rate", "taylor_unemployment", "bond_risk_max")
 TAXES = ("production", "wage", "profit")
 
@@ -66,7 +67,8 @@ class Government:
                         "balanced_budget": False, "reserve_requirement": 0.0, "reserve_rate": 0.0,
                         "lender_of_last_resort": False, "llr_penalty": 0.0,
                         "bonds_enabled": False, "debt_limit": 0.0, "bond_spread": 0.0, "bond_days": 360,
-                        "pay_period": "daily", "taylor_enabled": False, "inflation_target": 0.02,
+                        "pay_period": "daily", "min_contract_days": 0, "severance_rate": 0.0,
+                        "taylor_enabled": False, "inflation_target": 0.02,
                         "neutral_rate": 0.02, "taylor_unemployment": 0.05, "bond_risk_max": 0.0}
         self._policy.update(policy)
         self.money_created = 0.0   # total new money paid out so far (public works the treasury couldn't pay)
@@ -101,6 +103,7 @@ class Government:
                    lender_of_last_resort=rules.lender_of_last_resort, llr_penalty=rules.llr_penalty,
                    bonds_enabled=rules.gov_bonds_enabled, debt_limit=rules.gov_debt_limit,
                    bond_spread=rules.gov_bond_spread, bond_days=rules.gov_bond_days, pay_period=rules.pay_period,
+                   min_contract_days=rules.min_contract_days, severance_rate=rules.severance_rate,
                    taylor_enabled=rules.taylor_enabled, inflation_target=rules.inflation_target,
                    neutral_rate=rules.neutral_rate, taylor_unemployment=rules.taylor_unemployment,
                    bond_risk_max=rules.gov_bond_risk_max)
@@ -124,11 +127,13 @@ class Government:
     bond_spread = _policy("bond_spread")
     bond_days = _policy("bond_days")
     pay_period = _policy("pay_period")
+    min_contract_days = _policy("min_contract_days")
+    severance_rate = _policy("severance_rate")
     taylor_enabled = _policy("taylor_enabled")
     inflation_target = _policy("inflation_target")
     neutral_rate = _policy("neutral_rate")
     taylor_unemployment = _policy("taylor_unemployment")
-    bond_risk_max = _policy("bond_risk_max")      # yearly risk premium on bonds at the debt limit      # labour law: wages paid "daily", "weekly" or "monthly"
+    bond_risk_max = _policy("bond_risk_max")
 
     def set(self, name, value):
         if name not in POLICY:

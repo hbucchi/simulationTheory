@@ -112,6 +112,8 @@ class LaborMarket:
         self.unpaid_last = 0.0    # ... and what employers couldn't pay then (arrears)
         self.wage_streak_dir = 0  # +1 upward pressure, -1 downward pressure, 0 neutral
         self.wage_streak_days = 0 # consecutive days with pressure in the same direction
+        self.contracts = []       # active employment contracts: {employer_id, worker_id, units, wage, good, end_tick}
+        self.severance_total = 0.0
 
     @staticmethod
     def pay_days(world):
@@ -312,12 +314,62 @@ class LaborMarket:
                                 self.wage * min(3.0, max(0.1, 1 + rules.bargaining_spread * (a.wellbeing - a.job_need))))
         offers.sort(key=lambda a: a.asking_wage)
         remaining = {a: a.offered for a in offers}
+        # Honor active employment contracts first; early termination pays severance.
+        stats["severance_paid"] = 0.0
+        still_contracts = []
+        for c in self.contracts:
+            if world.tick > c["end_tick"]:
+                continue
+            emp = world.agent_by_id(c["employer_id"])
+            wrk = world.agent_by_id(c["worker_id"])
+            if emp is None or wrk is None or emp not in world.alive or wrk not in world.alive:
+                continue
+            rem_worker = remaining.get(wrk, 0.0)
+            s = skill(wrk, c["good"], rules)
+            want = max(0.0, emp.labor_need - emp.labor_available)
+            need = cash_needed(emp, prices, rules)
+            avail_cash = max(0.0, economy.money_of(emp) + emp.company_cash - need - owed.get(emp.id, 0.0))
+            units = min(c["units"], rem_worker, want / s if s > 0 else 0.0,
+                        avail_cash / c["wage"] if c["wage"] > 0 else c["units"])
+            if units >= c["units"] * 0.5 and units > 1e-9:
+                if emp.company_cash:
+                    economy.draw_company_cash(emp, units * c["wage"])
+                if emp.deposits and emp.money < need + units * c["wage"]:
+                    world.banking.cash_up(emp, need + units * c["wage"])
+                affordable = max(0.0, emp.money - need - owed.get(emp.id, 0.0)) / c["wage"] if c["wage"] > 0 else units
+                units = min(units, affordable)
+                if units > 1e-9:
+                    self._hire(emp, wrk, units, c["wage"], stats, world.government,
+                               self.payroll if period > 1 else None, effective=units * s, good=c["good"])
+                    remaining[wrk] = max(0.0, rem_worker - units)
+                    still_contracts.append(c)
+                    continue
+            # Early termination before end_tick: employer owes severance_rate x remaining contracted wages.
+            rem_days = max(0, c["end_tick"] - world.tick)
+            sev_rate = world.government.severance_rate
+            if rem_days > 0 and sev_rate > 0:
+                fee = rem_days * c["units"] * c["wage"] * sev_rate
+                if emp.company_cash:
+                    economy.draw_company_cash(emp, fee)
+                if emp.deposits and emp.money < fee:
+                    world.banking.cash_up(emp, fee)
+                pay = min(fee, max(0.0, emp.money))
+                if pay > 0:
+                    emp.money -= pay
+                    wrk.money += pay
+                    economy.earn(wrk, pay, "wages")
+                    emp.flow["wages_paid"] = emp.flow.get("wages_paid", 0.0) + pay
+                    stats["severance_paid"] += pay
+                    self.severance_total += pay
+        self.contracts = still_contracts
+
         # Employers whose labour creates the most value hire first (as if they outbid the
         # others): a good that becomes scarce gets dearer, and its producers get workers first.
         # Ties (and equal values) are broken at random.
         world.rng.shuffle(employers)
         if rules.labor_priority == "value":
             employers.sort(key=lambda e: world.labor_value(e, prices), reverse=True)
+        min_contract = world.government.min_contract_days
         for employer in employers:
             want = employer.labor_need - employer.labor_available
             need = cash_needed(employer, prices, rules)
@@ -343,11 +395,18 @@ class LaborMarket:
                 s = skill(worker, good, rules)
                 affordable = budget / worker.asking_wage if worker.asking_wage > 0 else remaining[worker]
                 units = min(remaining[worker], want / s, affordable)       # units of the worker's time
+                if units <= 1e-9:
+                    continue
                 self._hire(employer, worker, units, worker.asking_wage, stats, world.government,
                            self.payroll if period > 1 else None, effective=units * s, good=good)
                 remaining[worker] -= units
                 want -= units * s
                 budget -= units * worker.asking_wage
+                if min_contract > 0:
+                    self.contracts.append({
+                        "employer_id": employer.id, "worker_id": worker.id, "units": units,
+                        "wage": worker.asking_wage, "good": good, "end_tick": world.tick + min_contract,
+                    })
 
         # Government spending (public works, then unemployment benefits; see government.py).
         gov = world.government
@@ -532,5 +591,6 @@ class LaborMarket:
 
     def to_dict(self):
         return {"wage": self.wage, "multiplier": self.multiplier, **self.stats,
+                "active_contracts": len(self.contracts), "severance_total": round(self.severance_total, 2),
                 "wages_owed": round(sum(self.payroll.values()), 2), "paid_last": round(self.paid_last, 2),
                 "unpaid_last": round(self.unpaid_last, 2)}

@@ -389,6 +389,8 @@
             <label>Minimum wage <span>$ <input data-policy="min_wage" type="number" min="0" step="5"> per day's work (0 = none)</span></label>
             <label>Wages are paid <span><select data-policy="pay_period" data-choice="1"><option value="daily">every day</option>
               <option value="weekly">every week</option><option value="monthly">every month</option></select> (salary tax withheld on payday)</span></label>
+            <label>Minimum contract <span><input data-policy="min_contract_days" type="number" min="0" max="3600" step="30"> days (0 = gig economy, 360 = annual)</span></label>
+            <label>Early-termination severance <span><input data-policy="severance_rate" data-scale="100" type="number" min="0" max="200" step="5"> % of remaining contracted wages</span></label>
             <label>Production tax <span><input data-policy="tax_production" data-scale="100" type="number" min="0" max="100" step="1"> % of every sale</span></label>
             <label>Salary tax <span><input data-policy="tax_wage" data-scale="100" type="number" min="0" max="100" step="1"> % of wages</span></label>
             <label>Profit tax <span><input data-policy="tax_profit" data-scale="100" type="number" min="0" max="100" step="1"> % of profits</span></label>

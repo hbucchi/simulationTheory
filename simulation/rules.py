@@ -523,6 +523,16 @@ class Rules:
     expectations_enabled: bool = False
     expectations_speed: float = 0.05   # daily EMA weight toward trailing CPI inflation
 
+    # Labour law: minimum employment contract length (0 = gig economy, 360 = annual) and early
+    # termination severance fee (share of remaining contracted wages). Factored into investment yield.
+    min_contract_days: int = 0
+    severance_rate: float = 0.0
+
+    # Firm Entity module: when off, assets act as simplified local stores on agents; when on, each
+    # business tracks Income Statement, Balance Sheet, Cash Flow Statement, and Market Cap.
+    firms_enabled: bool = False
+    firm_overhead_rate: float = 0.0    # optional yearly fixed overhead as share of plant value
+
     # ---- derived tables (layers, relief per unit, which goods relieve which need) ----
     # Cached; assigning any field clears the cache. Change dicts by assigning a new dict.
 
@@ -776,6 +786,8 @@ MODULES = {
                "Random resource shortages, housing disasters and contagious epidemics (manual triggers always available)."),
     "expectations": ("expectations_enabled", "Inflation expectations", (),
                      "Trailing CPI inflation feeds into wage demands and nominal interest rates (off = spot info only)."),
+    "firms": ("firms_enabled", "Firm entities & financials", ("industries",),
+              "Tracks each business as a corporate entity with Income Statement, Balance Sheet, Cash Flow and Market Cap (off = simplified local stores)."),
 }
 
 
@@ -997,6 +1009,10 @@ LIMITS = {
     "shock_chance_year": (0, 50, "float"),
     "expectations_enabled": (None, None, "bool"),
     "expectations_speed": (0, 1, "float"),
+    "min_contract_days": (0, 3600, "int"),
+    "severance_rate": (0, 2, "float"),
+    "firms_enabled": (None, None, "bool"),
+    "firm_overhead_rate": (0, 1, "float"),
 }
 
 
