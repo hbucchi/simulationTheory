@@ -124,7 +124,9 @@ const SETUP_SECTIONS = [
       "labour wanted ÷ capacity offered (labour elasticity in Market dynamics). Agents offer more and ask less when they " +
       "need a job more; healthy agents ask more.", fields: [
     { path: "labor_share", label: "Labour share of output value (first day's wage)", kind: "float", min: 0, max: 1, step: 0.05 },
-    { path: "wage_adjust_speed", label: "Wages move with supply and demand by up to (share a day)", kind: "float", min: 0, max: 1, step: 0.01 },
+    { path: "wage_adjust_speed", label: "Wages move with supply and demand (base share a month; doubles each persistent month)", kind: "float", min: 0, max: 1, step: 0.005 },
+    { path: "wage_down_speed", label: "… downward base share a month (same as upward by default)", kind: "float", min: 0, max: 1, step: 0.005 },
+    { path: "wage_speed_max", label: "… cap on accelerated monthly wage adjustment", kind: "float", min: 0, max: 10, step: 0.05 },
     { path: "labor_offer_months", label: "Offer all spare labour below (months of living costs)", kind: "float", min: 0, max: 1000, step: 1 },
     { path: "skill_max", label: "… up to (× productivity in an industry)", kind: "float", min: 1, max: 1000, step: 0.5,
       enabledWhen: v => v.specialization_enabled },

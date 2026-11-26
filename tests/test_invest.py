@@ -29,6 +29,7 @@ class AssetTests(unittest.TestCase):
 
     def test_asset_price_is_profit_over_return(self):
         world = world_with(asset_labor={"food": 1}, asset_return={"food": 0.01}, price_mode="fixed",
+                           productivity_growth={"food": 0.05}, productivity_growth_steps=50,
                            demand_pricing_enabled=False, fixed_prices={"food": 1, "water": 1, "games": 1, "labor": 0.5})
         world.labor.clear(world)                                          # sets the wage (fixed at 0.5)
         self.assertAlmostEqual(world.asset_prices()["food"], 50)          # (1 x 1 - 1 x 0.5) / 1%

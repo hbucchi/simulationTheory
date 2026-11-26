@@ -110,6 +110,8 @@ class LaborMarket:
         self.paid_last = 0.0      # wages paid on the latest payday
         self.reservation = 0.0    # the reservation wage (see reservation_wage)
         self.unpaid_last = 0.0    # ... and what employers couldn't pay then (arrears)
+        self.wage_streak_dir = 0  # +1 upward pressure, -1 downward pressure, 0 neutral
+        self.wage_streak_days = 0 # consecutive days with pressure in the same direction
 
     @staticmethod
     def pay_days(world):
@@ -275,15 +277,23 @@ class LaborMarket:
         else:
             self.multiplier = 1.0
         if rules.wage_adjust_speed > 0 and self.wage > 0 and rules.price_mode != "fixed":
-            # Wages follow the labour market (excess demand): up when employers want more paid
-            # labour than is offered, down when workers outnumber jobs, by at most
-            # wage_adjust_speed a day. Not tied to output prices, so prices and wages can't chase
-            # each other upwards (the value of output only sets the first day's wage).
+            # Wages follow the labour market symmetrically (excess demand or supply): starting at
+            # wage_adjust_speed (or wage_down_speed) per month, doubling each consecutive month the
+            # pressure persists in the same direction (2% -> 4% -> 8% ...) up to wage_speed_max.
             gap = (stats["wanted"] - stats["offered"]) / max(stats["offered"], stats["wanted"], 1e-9)
             gap = max(-1.0, min(1.0, gap))
-            # Wages are sticky downward (firms rarely cut pay): they fall at most wage_down_speed a day.
-            speed = rules.wage_adjust_speed if gap > 0 else rules.wage_down_speed
-            wage = self.wage * (1 + speed * gap)
+            direction = 1 if gap > 1e-6 else (-1 if gap < -1e-6 else 0)
+            if direction == 0:
+                self.wage_streak_dir, self.wage_streak_days = 0, 0
+            elif direction == self.wage_streak_dir:
+                self.wage_streak_days += 1
+            else:
+                self.wage_streak_dir, self.wage_streak_days = direction, 1
+            months = (self.wage_streak_days - 1) // max(1, rules.month_steps) if self.wage_streak_days else 0
+            base_monthly = rules.wage_adjust_speed if gap > 0 else rules.wage_down_speed
+            monthly_speed = min(rules.wage_speed_max, base_monthly * (2 ** months))
+            daily_speed = (1 + monthly_speed) ** (1 / max(1, rules.month_steps)) - 1
+            wage = self.wage * (1 + daily_speed * gap)
         else:
             wage = base * self.multiplier
         # Floors: the minimum wage (government policy) and the reservation wage (nobody works for
