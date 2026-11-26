@@ -403,9 +403,9 @@ class Handler(SimpleHTTPRequestHandler):
                 for key, value in body.items():
                     if key == "detail":
                         continue
-                    if key == "enabled":
+                    if key in ("enabled", "rate_competition"):
                         if not isinstance(value, bool):
-                            raise ValueError("enabled must be true or false")
+                            raise ValueError(f"{key} must be true or false")
                         changes[key] = value
                     elif key in limits:
                         changes[key] = _number(value, key, *limits[key])

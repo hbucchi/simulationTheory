@@ -267,6 +267,33 @@ class CentralBankTests(unittest.TestCase):
         sim.set_policy({"enabled": True})
         self.assertAlmostEqual(w.government.capital_ratio, 0.24)                 # remembered
 
+    def test_deposits_immediately_fund_cb_reserves_and_keep_bank_lendable(self):
+        w = bank_world(bank_min_capital=1000, reserve_ratio=0.10, bank_liquidity=0.05)
+        _, bank = open_bank(w, money=1000, services=100)
+        saver = w.create_agent(needs=CALM, money=5000)
+        w.banking.deposit(w, saver, 2000)
+        self.assertAlmostEqual(bank.cb_reserves, 200.0)
+        self.assertAlmostEqual(bank.reserves, 2800.0)
+        self.assertGreater(w.banking.lendable(w, bank), 0)
+
+    def test_idle_bank_pays_deposit_interest_and_depositors_pick_higher_rate(self):
+        w = bank_world(bank_min_capital=1000, deposit_rate=0.01, loan_spread=0.02, bank_rate_competition=True)
+        owner1, b1 = open_bank(w, money=1000, services=100)
+        owner2, b2 = open_bank(w, money=1000, services=100)
+        owner1.x, owner1.y = 0, 0
+        owner2.x, owner2.y = 500, 500
+        # Bank 2 offers a higher deposit rate even though Bank 1 is closer.
+        b2.deposit_rate = 0.02
+        saver = w.create_agent(needs=CALM, money=5000, x=1, y=1)
+        w.banking.deposit(w, saver, 1000)
+        self.assertIn(saver.id, b2.deposits)
+        self.assertNotIn(saver.id, b1.deposits)
+        # Idle Bank 2 still pays deposit interest, eroding its equity when it makes no loans.
+        eq_before = b2.equity
+        w.banking._pay_interest(w, b2)
+        self.assertGreater(b2.interest_paid, 0)
+        self.assertLess(b2.equity, eq_before)
+
 
 if __name__ == "__main__":
     unittest.main()
