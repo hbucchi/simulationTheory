@@ -37,6 +37,7 @@
         </div>
       </div>
       <nav class="tabs nav-list" role="tablist">
+        <div class="nav-group-label">Overview</div>
         <button role="tab" data-tab="dashboard" class="active">
           <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
           <span>Dashboard</span>
@@ -45,6 +46,7 @@
           <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>
           <span>Map &amp; people</span>
         </button>
+        <div class="nav-group-label">Economy</div>
         <button role="tab" data-tab="products">
           <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></svg>
           <span>Products</span>
@@ -57,6 +59,7 @@
           <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11M20 10v11M8 14v3M12 14v3M16 14v3"/></svg>
           <span>Banks</span>
         </button>
+        <div class="nav-group-label">Policy &amp; Tools</div>
         <button role="tab" data-tab="government">
           <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1ZM2 16l3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1ZM7 21h10M12 3v18M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></svg>
           <span>Government</span>
@@ -329,9 +332,36 @@
       </section>
 
       <section id="tab-government" class="page" role="tabpanel" hidden>
-        <p class="hint">The central government and its central bank set a minimum interest rate for every asset,
-          the capital rule commercial banks must meet (Basel), and can inject money by buying labour each day.
-          Changes apply from tomorrow.</p>
+        <p class="hint">Monthly fiscal overview (30-day projected budget), citizen approval rating, taxes, public spending, and central bank policy.</p>
+        <div class="gov-overview-grid">
+          <div class="card approval-card" id="gov-approval-card">
+            <div class="card-head">
+              <div>
+                <div class="card-title">Government approval</div>
+                <p class="card-sub">Driven by citizen wellbeing, jobs, inflation, and tax burden.</p>
+              </div>
+              <div id="gov-approval-pct" class="approval-pct mono">50%</div>
+            </div>
+            <div id="gov-approval-bars" class="approval-bars"></div>
+          </div>
+          <div class="card budget-summary-card">
+            <div class="card-title">Monthly budget (30-day projection)</div>
+            <p class="card-sub">Projected inflows vs. outflows based on the last 30 days.</p>
+            <div id="gov-monthly-summary" class="policy-budget"></div>
+          </div>
+        </div>
+        <div class="gov-flow-grid">
+          <div class="card gov-flow-card">
+            <div class="card-title">Where money comes from · 30d</div>
+            <p class="card-sub">Drag any tax slider to adjust rates live (applies from tomorrow).</p>
+            <div id="gov-tax-sliders" class="tax-sliders"></div>
+          </div>
+          <div class="card gov-flow-card">
+            <div class="card-title">Where money goes · 30d</div>
+            <p class="card-sub">Monthly spending breakdown across programs, benefits, and debt service.</p>
+            <div id="gov-outflows" class="outflow-bars"></div>
+          </div>
+        </div>
         <div id="gov-stats" class="stat-grid wide-stats"></div>
         <div class="card policies-card">
           <div class="card-head">

@@ -1071,6 +1071,7 @@ class World:
         if self.rules.housing_enabled:
             self.housing.step(self)          # new houses, rent, evictions, buying and renting
         self.banking.step(self)
+        self.government.update_approval(self)
         self.recorder.end_step(self, self._dead_flows)
 
     # ---- spatial grid: contacts are only looked for in the 3 x 3 cells around an agent ----

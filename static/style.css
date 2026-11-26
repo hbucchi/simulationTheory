@@ -1014,4 +1014,33 @@ button { border-radius: var(--radius-sm); }
   .setup-nav { position: static; display: flex; overflow-x: auto; gap: 4px; }
   .setup-nav-btn { width: auto; white-space: nowrap; }
   .setup-studio .spread-row { grid-template-columns: 1fr 1fr; }
+  .nav-group-label { display: none; }
 }
+
+/* Segmented Sidebar Group Labels */
+.nav-group-label {
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+  color: #6b829e; padding: 12px 12px 4px;
+}
+.nav-group-label:first-child { padding-top: 2px; }
+
+/* Government Approval & 30-Day Monthly Budget Panels */
+.gov-overview-grid, .gov-flow-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px;
+}
+@media (max-width: 960px) {
+  .gov-overview-grid, .gov-flow-grid { grid-template-columns: 1fr; }
+}
+.approval-card, .budget-summary-card, .gov-flow-card { padding: 18px 20px; }
+.approval-pct { font-size: 32px; font-weight: 800; letter-spacing: -0.02em; }
+.approval-pct.good { color: var(--good); }
+.approval-pct.warn { color: var(--warn); }
+.approval-pct.bad { color: var(--bad); }
+.approval-bars, .tax-sliders, .outflow-bars { display: grid; gap: 11px; margin-top: 14px; }
+.factor-row, .tax-slider-row { display: grid; gap: 5px; }
+.factor-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12.5px; color: var(--text); }
+.factor-head .muted-amt { margin-left: auto; color: var(--muted); font-size: 12px; }
+.tax-slider-row input[type=range] { width: 100%; margin: 2px 0; }
+.budget-track { width: 100%; height: 7px; border-radius: 999px; background: var(--panel-2); overflow: hidden; }
+.budget-track.thin { height: 4px; }
+.budget-fill { height: 100%; border-radius: 999px; transition: width .25s ease; }
