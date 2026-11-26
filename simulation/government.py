@@ -84,6 +84,10 @@ class Government:
         self.llr_lent = 0.0          # all it has lent so far
         self.cb_income = 0.0         # interest banks paid on those loans (goes to the treasury)
         self.revenue_days = []      # taxes collected on each of the last 30 days
+        self.rev_by_day = []        # {production, wage, profit} per day (last 30 days)
+        self.spend_by_day = []      # {public_works, benefits, ...} per day (last 30 days)
+        self.approval = 0.5         # 0..1 government approval rating (foundation for elections)
+        self.approval_breakdown = {"wellbeing": 0.5, "employment": 0.5, "inflation": 0.5, "taxes": 0.5}
         self.taylor_last = None     # the latest Taylor-rule decision and its inputs
         self.policies = Policies(policies or ())   # public spending the player designed (policies.py)
 
@@ -146,12 +150,70 @@ class Government:
     # ---------- taxes ----------
 
     def begin_step(self):
-        # Taxes of each of the last 30 days (for "taxes per month", what policies can be paid from).
+        # Taxes & spending of each of the last 30 days (for monthly budget breakdown).
         self.revenue_days.append(sum(self.step_revenue.values()))
         del self.revenue_days[:-30]
+        self.rev_by_day.append(dict(self.step_revenue))
+        del self.rev_by_day[:-30]
+        self.spend_by_day.append(dict(self.step_spent))
+        del self.spend_by_day[:-30]
         self.step_revenue = {t: 0.0 for t in TAXES}
         self.step_spent = {k: 0.0 for k in SPENDING}
         self.last_spent = 0.0
+
+    def update_approval(self, world):
+        """Compute government approval rating (0..1) from citizen wellbeing, employment,
+        price stability, and tax burden — smoothed over time for future election mechanics."""
+        if not world.agents:
+            return
+        wb = sum(a.wellbeing for a in world.agents) / len(world.agents)
+        l = world.labor.stats
+        unemp = (max(0.0, l.get("idle", 0.0)) / l["offered"]) if l.get("offered", 0.0) > 1e-9 else 0.0
+        emp = max(0.0, min(1.0, 1.0 - unemp))
+        hist = world.recorder.history
+        inf = hist[-1].get("inflation", 0.0) if hist else 0.0
+        inf_score = max(0.0, min(1.0, 1.0 - abs(inf - self.inflation_target) / 0.25))
+        tax_sum = self.tax_production + self.tax_wage + self.tax_profit
+        tax_score = max(0.0, min(1.0, 1.0 - tax_sum / 1.2))
+        target = max(0.0, min(1.0, 0.45 * wb + 0.25 * emp + 0.15 * inf_score + 0.15 * tax_score))
+        self.approval_breakdown = {
+            "wellbeing": round(wb, 3),
+            "employment": round(emp, 3),
+            "inflation": round(inf_score, 3),
+            "taxes": round(tax_score, 3),
+        }
+        if world.tick <= 1:
+            self.approval = target
+        else:
+            self.approval += 0.10 * (target - self.approval)
+
+    def budget_month(self, world):
+        """30-day projected monthly inflows (by tax) and outflows (by spending category)."""
+        month = world.rules.month_steps if world is not None else 30
+        rev_rows = self.rev_by_day + ([self.step_revenue] if any(self.step_revenue.values()) else [])
+        rev_rows = rev_rows[-month:]
+        days_r = max(1, len(rev_rows))
+        scale_r = month / days_r
+        inflows = {t: round(sum(r.get(t, 0.0) for r in rev_rows) * scale_r, 2) for t in TAXES}
+        inflows["total"] = round(sum(inflows.values()), 2)
+
+        sp_rows = self.spend_by_day + ([self.step_spent] if any(self.step_spent.values()) else [])
+        sp_rows = sp_rows[-month:]
+        days_s = max(1, len(sp_rows))
+        scale_s = month / days_s
+        outflows = {k: round(sum(r.get(k, 0.0) for r in sp_rows) * scale_s, 2)
+                    for k in ("public_works", "benefits", "interest", "transfers", "reserve_interest", "debt_repaid")}
+        pol_days = max((len(p.daily) for p in self.policies.items), default=0)
+        pol_sum = sum(sum(p.daily) for p in self.policies.items)
+        outflows["policies"] = round(pol_sum * (month / pol_days), 2) if pol_days > 0 else 0.0
+        outflows["total"] = round(sum(v for k, v in outflows.items() if k != "debt_repaid"), 2)
+        return {
+            "days": days_r,
+            "month_steps": month,
+            "inflows": inflows,
+            "outflows": outflows,
+            "net": round(inflows["total"] - outflows["total"], 2),
+        }
 
     def tax(self, kind, base):
         """The tax due on ``base`` money of ``kind`` ("production", "wage" or "profit")."""
@@ -217,6 +279,9 @@ class Government:
         return {"enabled": self.enabled, **self._policy,
                 "money_created": self.money_created, "labor_bought": self.labor_bought,
                 "last_spent": self.last_spent, "treasury": round(self.treasury, 2),
+                "approval": round(self.approval, 4),
+                "approval_breakdown": dict(self.approval_breakdown),
+                "budget_month": self.budget_month(world),
                 "revenue": {k: round(v, 2) for k, v in self.revenue.items()},
                 "step_revenue": {k: round(v, 2) for k, v in self.step_revenue.items()},
                 "spent": {k: round(v, 2) for k, v in self.spent.items()},

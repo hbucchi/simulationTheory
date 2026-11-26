@@ -64,6 +64,21 @@ class LabourPurchaseTests(unittest.TestCase):
         self.assertEqual(world.government.money_created, 0)
         self.assertGreater(sum(world.government.revenue.values()), 0)
 
+    def test_approval_rate_and_monthly_budget_breakdown(self):
+        world = World(seed=2, rules=Rules.from_dict({"agents": 10}))
+        world.spawn_random_agents()
+        for _ in range(15):
+            world.step()
+        gov = world.to_dict()["government"]
+        self.assertGreaterEqual(gov["approval"], 0.0)
+        self.assertLessEqual(gov["approval"], 1.0)
+        for key in ("wellbeing", "employment", "inflation", "taxes"):
+            self.assertIn(key, gov["approval_breakdown"])
+        bm = gov["budget_month"]
+        self.assertIn("inflows", bm)
+        self.assertIn("outflows", bm)
+        self.assertAlmostEqual(bm["net"], bm["inflows"]["total"] - bm["outflows"]["total"], places=2)
+
 
 if __name__ == "__main__":
     unittest.main()
