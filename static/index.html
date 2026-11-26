@@ -646,17 +646,19 @@
     <div class="setup-card">
       <div class="setup-head">
         <div>
-          <h1>Game rules</h1>
-          <p class="hint">These rules apply to the whole game. Every agent starts from them and can still be edited
-            individually later in <b>Agents</b>.</p>
+          <h1>Scenario Studio</h1>
+          <p class="hint">Configure modules, industries, asset distributions, and policies. Every agent can still be edited individually later.</p>
         </div>
         <label class="preset">Preset <select id="setup-preset"></select></label>
       </div>
       <form id="setup-form" novalidate>
-        <div id="setup-sections" class="setup-grid"></div>
-        <div class="setup-preview">
-          <h2>What these rules mean</h2>
-          <div id="setup-preview"></div>
+        <div class="setup-studio">
+          <nav id="setup-nav" class="setup-nav" aria-label="Rule categories"></nav>
+          <div id="setup-sections" class="setup-grid"></div>
+          <aside class="setup-preview">
+            <h2>Live Economy Brief</h2>
+            <div id="setup-preview"></div>
+          </aside>
         </div>
         <p id="setup-status" class="status error" hidden></p>
         <div class="form-actions sticky">

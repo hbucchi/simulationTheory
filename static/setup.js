@@ -90,7 +90,7 @@ const SETUP_SECTIONS = [
       group: `Starting stock · layer ${catalogLayer(r)} goods` })),
     ...per(GOODS, r => ({ path: `assets.${r}`, label: `${label(r)} (shares)`, kind: "spread", tiered: true,
       min: 0, step: 0.1, group: `Starting industries (asset shares) · layer ${catalogLayer(r)}` })),
-    { path: "asset_owner_share", label: "Share of agents that start owning assets (rest: only their labour)",
+    { path: "asset_owner_share", label: "Restrict all assets to a fixed share of agents (1 = follow each asset's distribution freely; 0.1 = 10% own all)",
       kind: "float", min: 0.001, max: 1, step: 0.05 },
     { path: "working_capital_days", label: "Companies start with working capital for (days of wages)", kind: "int", min: 0, max: 3600 },
     { path: "money", label: "Money", kind: "spread", tiered: true, min: 0, step: 0.01 },
@@ -489,21 +489,66 @@ function buildSpreadRow(f) {
   return row;
 }
 
-// The setup screen opens on the essentials; every other section is folded under its title.
-const SETUP_ESSENTIALS = ["World", "Modules: what this economy has", "Game size: layers and industries"];
+const SETUP_CATEGORIES = [
+  { id: "modules",    label: "1. Modules",            match: ["Modules: what this economy has"] },
+  { id: "world",      label: "2. World & People",     match: ["World", "Starting agents"] },
+  { id: "industries", label: "3. Industries & Stock", match: ["Game size: layers and industries", "Industries", "Assets and investment", "Asset returns"] },
+  { id: "labour",     label: "4. Labour & Needs",     match: ["Labour capacity", "Labour market", "Efficiency and wellbeing", "Resource consumption", "Need thresholds", "Life and death"] },
+  { id: "markets",    label: "5. Markets & Housing",  match: ["Prices", "Trading", "Market dynamics", "Housing market"] },
+  { id: "policy",     label: "6. Banks & Government", match: ["Banking", "Central government"] },
+];
+
+const MODULE_TAG = {
+  commerce: "Core", industries: "Core", selling: "Markets", pricing: "Markets", stockpiling: "Markets",
+  investing: "Capital", building: "Capital", banking: "Finance", consumer_credit: "Finance",
+  government: "Policy", housing: "Markets", expiry: "Realism", death: "Realism", penalties: "Realism",
+  personality: "Agents", specialization: "Agents", subsistence: "Core", depression: "Agents",
+  inheritance: "Realism", shocks: "Trainer", expectations: "Macro", firms: "Corporate",
+};
+
+function categoryFor(title) {
+  const found = SETUP_CATEGORIES.find(c => c.match.some(m => title.toLowerCase().includes(m.toLowerCase())));
+  return found ? found.id : "markets";
+}
+
+let activeSetupCat = "modules";
+
+function selectSetupCategory(catId) {
+  activeSetupCat = catId;
+  const nav = $("setup-nav");
+  if (nav) {
+    for (const btn of nav.querySelectorAll("button")) {
+      btn.classList.toggle("active", btn.dataset.cat === catId);
+    }
+  }
+  for (const box of setupUi.sections.querySelectorAll(".setup-section")) {
+    const show = box.dataset.cat === catId;
+    box.hidden = !show;
+    if (show) box.open = true;
+  }
+}
 
 function buildSetupForm() {
-  let advanced = false;
-  for (const section of SETUP_SECTIONS) {
-    const essential = SETUP_ESSENTIALS.includes(section.title);
-    if (!essential && !advanced) {
-      advanced = true;
-      setupUi.sections.append(Object.assign(document.createElement("h2"), { className: "setup-divider",
-        textContent: "Advanced settings (open any section to adjust it)" }));
+  const nav = $("setup-nav");
+  if (nav) {
+    nav.innerHTML = "";
+    for (const cat of SETUP_CATEGORIES) {
+      const btn = Object.assign(document.createElement("button"), {
+        type: "button", className: "setup-nav-btn" + (cat.id === activeSetupCat ? " active" : ""),
+        textContent: cat.label,
+      });
+      btn.dataset.cat = cat.id;
+      btn.onclick = () => selectSetupCategory(cat.id);
+      nav.append(btn);
     }
+  }
+  for (const section of SETUP_SECTIONS) {
+    const catId = categoryFor(section.title);
     const box = document.createElement("details");
-    box.open = essential;
-    box.className = "setup-section" + (section.wide || !essential ? " wide" : "");
+    box.open = true;
+    box.dataset.cat = catId;
+    box.hidden = catId !== activeSetupCat;
+    box.className = "setup-section wide" + (catId === "modules" ? " modules-section" : "");
     const h = document.createElement("summary");
     h.className = "setup-section-title";
     h.textContent = section.title;
@@ -511,13 +556,17 @@ function buildSetupForm() {
     hint.className = "section-hint";
     hint.textContent = section.hint;
     const grid = document.createElement("div");
-    grid.className = section.wide && section.fields.some(f => f.kind === "spread") ? "spread-list" : "setup-fields";
+    const isModules = section.fields.some(f => f.module);
+    grid.className = isModules ? "module-cards" : (section.wide && section.fields.some(f => f.kind === "spread") ? "spread-list" : "setup-fields");
     // Fields with a `group` go into a collapsible block of that name inside the section.
     const groups = new Map();
     const gridFor = (f) => {
       if (!f.group) return grid;
       if (!groups.has(f.group)) {
-        const details = Object.assign(document.createElement("details"), { className: "setup-group" });
+        const details = Object.assign(document.createElement("details"), {
+          className: "setup-group",
+          open: f.group.includes("asset shares") && f.group.includes("layer 1"),
+        });
         details.append(Object.assign(document.createElement("summary"), { textContent: f.group }));
         const inner = Object.assign(document.createElement("div"), { className: f.kind === "spread" ? "spread-list" : "setup-fields" });
         details.append(inner);
@@ -528,7 +577,19 @@ function buildSetupForm() {
     };
     for (const f of section.fields) {
       f.section = section;
-      if (f.kind === "spread") { gridFor(f).append(buildSpreadRow(f)); continue; }
+      if (f.kind === "spread") {
+        const row = buildSpreadRow(f);
+        if (f.path.startsWith("assets.")) {
+          // Editing any asset's distribution unlocks full per-asset distribution (asset_owner_share = 1)
+          // so the 10% owner cap doesn't silently overwrite custom distributions.
+          row.addEventListener("change", () => {
+            const shareEl = setupInput("asset_owner_share");
+            if (shareEl && Number(shareEl.value) < 1) shareEl.value = 1;
+          });
+        }
+        gridFor(f).append(row);
+        continue;
+      }
       if (f.kind === "industries") { gridFor(f).append(buildIndustryPicker(f)); continue; }
       if (f.kind === "game-types") { gridFor(f).append(buildGameTypes()); continue; }
       const label = document.createElement("label");
@@ -550,13 +611,18 @@ function buildSetupForm() {
       }
       el.name = f.path;
       if (f.module) {
-        // A module: its name, what it does, and (filled in by updateSetup) what it needs.
-        label.classList.add("module-item");
+        // A module card: category tag, toggle switch, title, description, and dependency note.
+        label.classList.add("module-item", "module-card");
+        const head = Object.assign(document.createElement("span"), { className: "module-card-head" });
+        const tag = Object.assign(document.createElement("span"), {
+          className: "module-tag", textContent: MODULE_TAG[f.module.key] || "Module",
+        });
+        head.append(tag, el);
         const text = Object.assign(document.createElement("span"), { className: "module-text" });
         text.append(Object.assign(document.createElement("b"), { textContent: f.label }),
                     Object.assign(document.createElement("small"), { textContent: f.module.about }),
                     Object.assign(document.createElement("small"), { className: "module-needs" }));
-        label.append(el, text);
+        label.append(head, text);
         gridFor(f).append(label);
         continue;
       }
@@ -884,7 +950,7 @@ function fillSetup(rules, seed = "") {
     if (f.kind === "spread") { fillSpread(f, getPath(rules, f.path)); continue; }
     if (f.kind === "industries") { fillIndustryPicker(rules.excluded_industries); continue; }
     if (f.kind === "game-types") continue;
-    if (f.path === "#autosize") { setupInput(f.path).checked = true; continue; }
+    if (f.path === "#autosize") { setupInput(f.path).checked = false; continue; }
     const el = setupInput(f.path);
     const value = f.path === "seed" ? seed : getPath(rules, f.path);
     if (f.kind === "bool") el.checked = value;
