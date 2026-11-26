@@ -46,7 +46,7 @@ class Production(Module):
             # "value": fill the most valuable industries first; "even": every industry gets the same share.
             employed = min(jobs[good], labour) if world.rules.labor_priority == "value" else jobs[good] * ratio
             labour -= employed
-            fresh = employed * world.productivity_now[good]
+            fresh = employed * world.productivity_now[good] * world.shocks.productivity_factor(good)
             for item, per_unit in recipes.get(good, {}).items():
                 self._use(agent, item, fresh * per_unit)
             # A lucky business (world.draw_luck) makes many times more from the same labour and inputs.

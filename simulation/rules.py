@@ -508,6 +508,21 @@ class Rules:
     cooldown_steps: int = 7            # days a pair ignores each other after a deal
     retry_steps: int = 2               # ... and after a meeting where nothing could be traded
 
+    # Inheritance: when on, a dead agent's money, deposits, inventory, assets and houses pass to an
+    # heir (currently "nearest" living agent) instead of being liquidated/destroyed.
+    inheritance_enabled: bool = False
+    inheritance_rule: str = "nearest"
+
+    # Shocks, disasters & epidemics (simulation/shocks.py): manual triggers always work via API/UI;
+    # when shocks_enabled is on, random shocks also occur at shock_chance_year events per year.
+    shocks_enabled: bool = False
+    shock_chance_year: float = 0.5
+
+    # Adaptive inflation expectations: when on, trailing CPI inflation feeds into wage demands and
+    # nominal loan/bond rates (Fisher effect) so players can compare spot-only vs expectations.
+    expectations_enabled: bool = False
+    expectations_speed: float = 0.05   # daily EMA weight toward trailing CPI inflation
+
     # ---- derived tables (layers, relief per unit, which goods relieve which need) ----
     # Cached; assigning any field clears the cache. Change dicts by assigning a new dict.
 
@@ -755,6 +770,12 @@ MODULES = {
     "subsistence": ("subsistence_enabled", "Subsistence", (),
                     "Agents with no assets make a little water, grain, wood, herbs or stone with the labour nobody hired."),
     "depression": ("depression_enabled", "Depression", (), "Boredom at 1.00 depresses (slower, less efficient)."),
+    "inheritance": ("inheritance_enabled", "Inheritance", ("death",),
+                    "A dead agent's money, goods, shares and houses pass to its heir (nearest living agent) instead of vanishing."),
+    "shocks": ("shocks_enabled", "Shocks, disasters & epidemics", (),
+               "Random resource shortages, housing disasters and contagious epidemics (manual triggers always available)."),
+    "expectations": ("expectations_enabled", "Inflation expectations", (),
+                     "Trailing CPI inflation feeds into wage demands and nominal interest rates (off = spot info only)."),
 }
 
 
@@ -970,6 +991,12 @@ LIMITS = {
     "depart_steps": (0, 1000, "int"),
     "cooldown_steps": (0, 10000, "int"),
     "retry_steps": (0, 10000, "int"),
+    "inheritance_enabled": (None, None, "bool"),
+    "inheritance_rule": (("nearest",), None, "choice"),
+    "shocks_enabled": (None, None, "bool"),
+    "shock_chance_year": (0, 50, "float"),
+    "expectations_enabled": (None, None, "bool"),
+    "expectations_speed": (0, 1, "float"),
 }
 
 

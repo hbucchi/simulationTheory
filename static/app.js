@@ -1363,6 +1363,15 @@ function renderDashboard() {
     return row;
   }));
 
+  const sh = state.shocks;
+  const dashShocks = $("dash-shocks");
+  if (dashShocks && sh) {
+    const active = [];
+    for (const s of sh.shortages || []) active.push(`Shortage: ${s.goods.join(", ")} -${Math.round(s.severity * 100)}% (ends day ${s.ends})`);
+    for (const e of sh.epidemics || []) active.push(`Epidemic: ${e.infected} infected, ${e.immune} immune, ${e.total_deaths} died`);
+    dashShocks.textContent = active.length ? `Active: ${active.join(" · ")}` : "No active shocks.";
+  }
+
   ui.dashEvents.replaceChildren(...[...state.events].reverse().slice(0, 6).map(ev => {
     const li = document.createElement("li");
     li.append(Object.assign(document.createElement("span"), { className: "ev-day", textContent: calendar(ev.tick) }),
@@ -1858,6 +1867,17 @@ document.addEventListener("keydown", (e) => {
   if (e.code === "Space") { e.preventDefault(); setPlaying(!playing); }
   if (e.code === "ArrowRight" && !playing) step(1);
 });
+
+async function triggerShock(payload) {
+  try {
+    render(await api("/api/shock", payload));
+  } catch (err) {
+    alert(err.message);
+  }
+}
+if ($("shock-shortage")) $("shock-shortage").onclick = () => triggerShock({ kind: "shortage", severity: 0.5, days: 60 });
+if ($("shock-disaster")) $("shock-disaster").onclick = () => triggerShock({ kind: "disaster", house_loss: 0.2 });
+if ($("shock-epidemic")) $("shock-epidemic").onclick = () => triggerShock({ kind: "epidemic", initial_infected: 3, contagion_rate: 0.15, lethality_rate: 0.01 });
 
 buildForm();
 api("/api/state").then(s => {

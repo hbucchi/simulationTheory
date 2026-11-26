@@ -86,6 +86,20 @@
             </section>
           </div>
           <section class="card">
+            <div class="card-head">
+              <div>
+                <h2 class="card-title">Shocks &amp; events</h2>
+                <p class="card-sub">Inject a sudden shock to test how the economy responds.</p>
+              </div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px">
+                <button type="button" class="soft" id="shock-shortage">Resource shortage (-50% · 60d)</button>
+                <button type="button" class="danger" id="shock-disaster">Housing disaster (-20% homes)</button>
+                <button type="button" class="danger" id="shock-epidemic">Epidemic outbreak</button>
+              </div>
+            </div>
+            <div id="dash-shocks" class="card-sub" style="margin-top:10px"></div>
+          </section>
+          <section class="card">
             <h2 class="card-title">Latest events</h2>
             <ol id="dash-events" class="events short"></ol>
           </section>

@@ -293,7 +293,10 @@ class LaborMarket:
             base_monthly = rules.wage_adjust_speed if gap > 0 else rules.wage_down_speed
             monthly_speed = min(rules.wage_speed_max, base_monthly * (2 ** months))
             daily_speed = (1 + monthly_speed) ** (1 / max(1, rules.month_steps)) - 1
-            wage = self.wage * (1 + daily_speed * gap)
+            exp_daily = 0.0
+            if rules.expectations_enabled and world.expected_inflation > 0:
+                exp_daily = (1 + world.expected_inflation) ** (1 / max(1, world.year_steps())) - 1
+            wage = self.wage * (1 + daily_speed * gap + exp_daily)
         else:
             wage = base * self.multiplier
         # Floors: the minimum wage (government policy) and the reservation wage (nobody works for
