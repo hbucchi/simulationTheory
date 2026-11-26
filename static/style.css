@@ -4,65 +4,95 @@
    ========================================================================== */
 
 :root {
-  --bg: #f3f5f8;
+  --bg: #f6f5f0;
   --panel: #ffffff;
-  --panel-2: #f2f4f8;
-  --panel-3: #e9edf3;
-  --text: #14213d;
-  --muted: #56657d;
-  --faint: #8693a8;
-  --border: #dde2ea;
-  --box: #fafbfd;
+  --panel-2: #f1f0ea;
+  --panel-3: #e7e5dd;
+  --text: #102033;
+  --muted: #526277;
+  --faint: #8290a3;
+  --border: #dfddd5;
+  --box: #faf9f5;
 
-  --accent: #1d5fbf;
-  --accent-strong: #164c9a;
-  --accent-soft: #e7eefa;
-  --good: #1f8a5b;
-  --good-soft: #e3f3ec;
+  --accent: #1b5599;
+  --accent-strong: #133f75;
+  --accent-soft: #e6eff9;
+  --gold: #d4a03c;
+  --good: #18794e;
+  --good-soft: #e3f4ec;
   --bad: #c0392b;
   --bad-soft: #fbeae8;
-  --warn: #b7791f;
-  --warn-soft: #fbf2e2;
-  --violet: #9b6ad8;
-  --sky: #3f8fd6;
+  --warn: #b4690e;
+  --warn-soft: #fdf2e0;
+  --violet: #7c5cc4;
+  --sky: #2f7ec4;
 
   /* Chart series (validated categorical palette, fixed order) */
-  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #9b59d0; --s6: #7a8a2e;
+  --s1: #1b5599; --s2: #d96432; --s3: #18794e; --s4: #d4961a; --s5: #7c5cc4; --s6: #5f7a2a;
 
   --radius-lg: 10px;
   --radius: 8px;
   --radius-sm: 6px;
-  --shadow: 0 1px 2px rgba(16, 24, 40, .05), 0 2px 8px rgba(16, 24, 40, .05);
-  --shadow-sm: 0 1px 2px rgba(16, 24, 40, .06);
+  --shadow: 0 1px 2px rgba(16, 32, 51, .05), 0 4px 12px rgba(16, 32, 51, .04);
+  --shadow-sm: 0 1px 2px rgba(16, 32, 51, .05);
   --ring: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
   color-scheme: light;
 }
 
+:root[data-theme="dark"] {
+  --bg: #0c141f;
+  --panel: #131e2c;
+  --panel-2: #192636;
+  --panel-3: #203044;
+  --text: #e8edf4;
+  --muted: #9aa8bc;
+  --faint: #6f7e94;
+  --border: #253447;
+  --box: #101926;
+  --accent: #5b9cf0;
+  --accent-strong: #7fb2f5;
+  --accent-soft: #1a2d47;
+  --gold: #eab954;
+  --good: #4ec493;
+  --good-soft: #173327;
+  --bad: #ef8a83;
+  --bad-soft: #3a2224;
+  --warn: #e2ab55;
+  --warn-soft: #3a2f1c;
+  --violet: #b892f0;
+  --sky: #6fb0ec;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 8px 28px rgba(0, 0, 0, .28);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .3);
+  --s1: #4b94ec; --s2: #e06d3b; --s3: #2cb583; --s4: #e0a526; --s5: #b07de0; --s6: #a3b54a;
+  color-scheme: dark;
+}
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0f1622;
-    --panel: #16202e;
-    --panel-2: #1c2838;
-    --panel-3: #223044;
-    --text: #e6ebf2;
+    --bg: #0c141f;
+    --panel: #131e2c;
+    --panel-2: #192636;
+    --panel-3: #203044;
+    --text: #e8edf4;
     --muted: #9aa8bc;
     --faint: #6f7e94;
-    --border: #273548;
-    --box: #131c29;
+    --border: #253447;
+    --box: #101926;
     --accent: #5b9cf0;
     --accent-strong: #7fb2f5;
-    --accent-soft: #1b2c46;
-    --good: #5fc79f;
-    --good-soft: #1d3329;
+    --accent-soft: #1a2d47;
+    --gold: #eab954;
+    --good: #4ec493;
+    --good-soft: #173327;
     --bad: #ef8a83;
     --bad-soft: #3a2224;
     --warn: #e2ab55;
     --warn-soft: #3a2f1c;
     --violet: #b892f0;
     --sky: #6fb0ec;
-    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 28px rgba(0, 0, 0, .25);
+    --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 8px 28px rgba(0, 0, 0, .28);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, .3);
-    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #b07de0; --s6: #a3b54a;
+    --s1: #4b94ec; --s2: #e06d3b; --s3: #2cb583; --s4: #e0a526; --s5: #b07de0; --s6: #a3b54a;
     color-scheme: dark;
   }
 }
@@ -75,8 +105,8 @@ body {
   font: 14px/1.5 "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
 }
-.mono { font-variant-numeric: tabular-nums; }
-h1, h2, h3 { margin: 0; letter-spacing: -0.01em; }
+.mono { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+h1, h2, h3, .brand-name, .card-title { font-family: "Plus Jakarta Sans", "Inter", system-ui, sans-serif; margin: 0; letter-spacing: -0.015em; }
 [hidden] { display: none !important; }
 
 /* ---------- Controls ---------- */
@@ -644,34 +674,43 @@ input.recipe-input { width: 190px; }
    App shell: navigation on the left, page header with calendar and playback,
    one page per section. (Corporate theme: navy, white, one blue accent.)
    ========================================================================== */
-:root { --nav: #0b2545; --nav-text: #c9d4e5; --nav-active: #13315c; }
+:root { --nav: #0c1b2e; --nav-text: #b9c7da; --nav-active: #152b47; }
 button { border-radius: var(--radius-sm); }
-.app { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100vh; }
+.app { display: grid; grid-template-columns: 236px minmax(0, 1fr); min-height: 100vh; }
 .sidenav {
   position: sticky; top: 0; height: 100vh; overflow-y: auto;
   background: var(--nav); color: var(--nav-text);
-  display: flex; flex-direction: column; padding: 18px 12px; gap: 18px;
+  display: flex; flex-direction: column; padding: 20px 12px; gap: 18px;
+  border-right: 1px solid rgba(255, 255, 255, .06);
 }
 .sidenav .brand { padding: 0 8px; }
-.sidenav .brand-name { color: #fff; letter-spacing: .02em; }
-.sidenav .brand-sub { color: var(--nav-text); font-size: 11.5px; }
-.logo {
-  width: 32px; height: 32px; border-radius: 6px;
-  background: linear-gradient(135deg, #2f7de1, #0e3a75);
-  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .18);
-}
-.nav-list { display: grid; grid-template-columns: 1fr; gap: 2px; background: none; padding: 0; margin: 0; border-radius: 0; }
+.sidenav .brand-name { color: #fff; letter-spacing: .01em; font-size: 16.5px; }
+.sidenav .brand-sub { color: #8ea3be; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+.logo { width: 32px; height: 32px; border-radius: 7px; background: none; box-shadow: 0 2px 6px rgba(0, 0, 0, .25); display: inline-flex; }
+.nav-list { display: grid; grid-template-columns: 1fr; gap: 3px; background: none; padding: 0; margin: 0; border-radius: 0; }
 .nav-list button {
   display: flex; gap: 10px; align-items: center; width: 100%; text-align: left;
   border: none; border-radius: 6px; padding: 9px 12px; background: transparent;
   color: var(--nav-text); font-weight: 500; box-shadow: none;
 }
 .nav-list button:hover { background: rgba(255, 255, 255, .06); color: #fff; }
-.nav-list button.active { background: var(--nav-active); color: #fff; box-shadow: inset 3px 0 0 #4c8ff0; font-weight: 600; }
-.nav-ico { width: 18px; text-align: center; opacity: .85; }
-.nav-foot { margin-top: auto; }
+.nav-list button.active { background: var(--nav-active); color: #fff; box-shadow: inset 3px 0 0 var(--gold); font-weight: 600; }
+.nav-ico { width: 17px; height: 17px; flex: none; opacity: .82; }
+.nav-list button.active .nav-ico { opacity: 1; color: var(--gold); }
+.nav-foot { margin-top: auto; display: grid; gap: 8px; }
 .nav-foot button { width: 100%; background: rgba(255, 255, 255, .08); color: #fff; border: 1px solid rgba(255, 255, 255, .14); }
-.nav-foot button:hover { background: rgba(255, 255, 255, .14); }
+.nav-foot button:hover { background: rgba(255, 255, 255, .15); }
+.nav-foot button.theme-btn { background: transparent; color: var(--nav-text); border-color: rgba(255, 255, 255, .1); font-size: 12.5px; padding: 6px 10px; }
+.nav-foot button.theme-btn:hover { color: #fff; background: rgba(255, 255, 255, .08); }
+
+.regime-badge {
+  font-size: 11.5px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase;
+  padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--panel-2); color: var(--muted);
+}
+.regime-badge.good { background: var(--good-soft); color: var(--good); border-color: color-mix(in srgb, var(--good) 28%, transparent); }
+.regime-badge.warn { background: var(--warn-soft); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 28%, transparent); }
+.regime-badge.bad { background: var(--bad-soft); color: var(--bad); border-color: color-mix(in srgb, var(--bad) 28%, transparent); }
 
 .workspace { min-width: 0; display: flex; flex-direction: column; }
 .workspace .topbar {
