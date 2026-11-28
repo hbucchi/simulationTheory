@@ -1,0 +1,5 @@
+rule                         in_need  in_need_core          food           cpi         built         hired          ginireal_wage_days
+lottery (0) mean               0.904         0.777       343.596        50.174         4.429        13.579         0.937         1.294
+lottery (0) sd                 0.005         0.059       133.471        14.325         3.115         5.387         0.004         0.289
+balanced (3) mean              0.905         0.709       145.520        50.201         8.141         9.914         0.918         1.425
+balanced (3) sd                0.006         0.055        26.643         2.945         2.988         1.594         0.004         0.040

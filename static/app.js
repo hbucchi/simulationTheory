@@ -1363,7 +1363,7 @@ function recordTrend() {
     day: state.tick,
     gdp: state.macro?.gdp_real ?? 0,
     inflation: state.macro?.inflation ?? 0,
-    unemployment: L.offered ? L.idle / L.offered : 0,
+    unemployment: state.indicators?.lf_unemployment ?? (L.offered ? L.idle / L.offered : 0),
     wage: state.market.prices.labor,
     people: state.agents.length,
   });
@@ -1384,10 +1384,16 @@ function gini(values) {
   return v.reduce((a, x, i) => a + (2 * (i + 1) - n - 1) * x, 0) / (n * total);
 }
 
-function kpiTile(label, value, note, delta = null, good = null) {
+function kpiTile(label, value, note, delta = null, good = null, why = null) {
   const tile = Object.assign(document.createElement("div"), { className: "kpi" });
-  tile.append(Object.assign(document.createElement("div"), { className: "kpi-label", textContent: label }),
-              Object.assign(document.createElement("div"), { className: "kpi-value", textContent: value }));
+  const head = Object.assign(document.createElement("div"), { className: "kpi-label", textContent: label });
+  if (why) {
+    const btn = Object.assign(document.createElement("button"), { type: "button", className: "why-btn", textContent: "Why?",
+      title: `What is behind ${label.toLowerCase()}` });
+    btn.onclick = () => openExplain(why);
+    head.append(btn);
+  }
+  tile.append(head, Object.assign(document.createElement("div"), { className: "kpi-value", textContent: value }));
   if (delta) {
     const tone = good === null ? "" : good ? " good" : " bad";
     tile.append(Object.assign(document.createElement("div"), { className: "kpi-delta" + tone, textContent: delta }));
@@ -1395,6 +1401,81 @@ function kpiTile(label, value, note, delta = null, good = null) {
   tile.append(Object.assign(document.createElement("div"), { className: "kpi-note", textContent: note }));
   return tile;
 }
+
+// ---------- Where labour goes (dashboard) ----------
+const LOSS_LABELS = { hunger: "Hunger", thirst: "Thirst", sleep: "Tiredness", health: "Sickness", energy: "No energy",
+                      shelter: "No shelter", boredom: "Boredom", depression: "Depression" };
+const USE_PARTS = [["own_business", "Own business", "var(--s2)"], ["hired_private", "Hired by firms", "var(--s5)"],
+                   ["hired_public", "Hired by government", "var(--s4)"], ["autonomous", "Autonomous production", "var(--s3)"],
+                   ["looking", "Looking for work", "var(--s6)"], ["not_offered", "Not offered", "var(--panel-3)"]];
+function renderLabourBreakdown() {
+  const box = $("dash-labour");
+  const L = state.market?.labor;
+  if (!box || !L?.breakdown) return;
+  const b = L.breakdown, lost = L.lost_by || {};
+  const full = b.full_capacity || 1;
+  const segs = [["lost", "Lost to unmet needs", "var(--accent)", b.lost], ...USE_PARTS.map(([k, l, c]) => [k, l, c, b[k] || 0])];
+  const bar = Object.assign(document.createElement("div"), { className: "stack-bar" });
+  for (const [, l, c, v] of segs) {
+    if (v <= 1e-6) continue;
+    const s = Object.assign(document.createElement("span"), { title: `${l}: ${v.toFixed(1)} units (${(100 * v / full).toFixed(0)}%)` });
+    s.style.width = `${(100 * v / full).toFixed(2)}%`; s.style.background = c;
+    bar.append(s);
+  }
+  const legend = Object.assign(document.createElement("div"), { className: "stack-legend" });
+  for (const [, l, c, v] of segs) {
+    const item = document.createElement("span");
+    item.innerHTML = `<i style="background:${c}"></i>${l} <b>${(100 * v / full).toFixed(0)}%</b>`;
+    legend.append(item);
+  }
+  const causes = Object.entries(lost).filter(([, v]) => v > 1e-6).sort((a, b2) => b2[1] - a[1]);
+  const top = causes[0]?.[1] || 1;
+  const list = Object.assign(document.createElement("div"), { className: "cause-list" });
+  for (const [k, v] of causes) {
+    const row = Object.assign(document.createElement("div"), { className: "cause" });
+    row.innerHTML = `<span>${LOSS_LABELS[k] || k}</span><span class="cause-bar"><i style="width:${(100 * v / top).toFixed(1)}%"></i></span>` +
+                    `<b class="mono">${(100 * v / full).toFixed(1)}%</b>`;
+    list.append(row);
+  }
+  const sick = L.workers_sick ? ` · ${L.workers_sick} too ill or sick` : "";
+  box.replaceChildren(
+    Object.assign(document.createElement("p"), { className: "card-sub",
+      textContent: `${full.toFixed(1)} units of labour a day at full health${sick}. Lost labour is what unmet needs take away.` }),
+    bar, legend,
+    Object.assign(document.createElement("div"), { className: "kpi-label", textContent: "What takes labour away" }), list);
+}
+
+// ---------- "Why?" explanations of headline numbers ----------
+async function openExplain(metric) {
+  const dlg = $("explain-dialog");
+  if (!dlg) return;
+  let e;
+  try {
+    e = await (await fetch(`/api/explain?metric=${encodeURIComponent(metric)}`)).json();
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+  if (e.error) { alert(e.error); return; }
+  $("explain-title").textContent = e.title;
+  $("explain-summary").textContent = e.summary;
+  const parts = $("explain-parts");
+  const max = Math.max(1e-9, ...e.parts.map(p => Math.abs(p.value)));
+  parts.replaceChildren(...e.parts.map(p => {
+    const row = Object.assign(document.createElement("div"), { className: "cause" + (p.value < 0 ? " neg" : "") });
+    const shown = p.share != null ? `${(p.share * 100).toFixed(1)}%`
+      : Math.abs(p.value) < 5 ? `${p.value >= 0 ? "+" : ""}${(p.value * 100).toFixed(1)}${metric === "inflation" ? " pts" : "%"}`
+      : p.value.toLocaleString(undefined, { maximumFractionDigits: 1 });
+    row.innerHTML = `<span>${p.label}${p.note ? `<small>${p.note}</small>` : ""}</span>` +
+      `<span class="cause-bar"><i style="width:${(100 * Math.abs(p.value) / max).toFixed(1)}%"></i></span><b class="mono">${shown}</b>`;
+    return row;
+  }));
+  $("explain-notes").replaceChildren(...e.notes.map(n => Object.assign(document.createElement("li"), { textContent: n })));
+  dlg.showModal();
+}
+if ($("explain-close")) $("explain-close").onclick = () => $("explain-dialog").close();
+if ($("labour-why")) $("labour-why").onclick = () => openExplain("labour");
+if ($("mortgage-why")) $("mortgage-why").onclick = () => openExplain("mortgages");
 
 function renderDashboard() {
   const m = state.market, macro = state.macro, b = state.banking, g = state.government;
@@ -1411,24 +1492,44 @@ function renderDashboard() {
   const tiles = [];
   const [popD, popG] = arrow(state.agents.length, month?.people, v => `${Math.round(v)}`, true);
   tiles.push(kpiTile("Population", `${state.agents.length}`, "people alive", popD, popG));
+  const ind = state.indicators || {};
   if (macro) {
     const [gD, gG] = arrow(macro.gdp_real, month?.gdp, v => money(v), true);
     tiles.push(kpiTile("Real GDP", money(macro.gdp_real), "last year's output at year-ago prices", gD, gG));
-    const sinceStart = macro.accounts_steps < DAYS_PER_YEAR();
-    tiles.push(kpiTile("Inflation", `${(macro.inflation * 100).toFixed(1)}%`,
-                       sinceStart ? `consumer prices vs day 1 (first year: ${span(macro.accounts_steps)} so far)` : "consumer prices vs a year ago", null,
-                       Math.abs(macro.inflation) < 0.1 ? null : false));
+    const days = macro.cpi_days || 0;
+    const ann = macro.inflation_annualised;
+    const infNote = !days ? `measured from day ${(state.cpi_warmup_days || 0) + 1} (price discovery first)`
+      : days < DAYS_PER_YEAR() ? `since the base day (${span(days)})${ann != null ? ` · ${(ann * 100).toFixed(1)}% a year lately` : ""}`
+      : `over 12 months${ann != null ? ` · ${(ann * 100).toFixed(1)}% a year lately` : ""}`;
+    tiles.push(kpiTile("Inflation", `${(macro.inflation * 100).toFixed(1)}%`, infNote, null,
+                       Math.abs(macro.inflation) < 0.1 ? null : false, "inflation"));
   }
-  const [uD, uG] = arrow(unemp * 100, month ? month.unemployment * 100 : null, v => `${v.toFixed(1)} pts`, false);
-  tiles.push(kpiTile("Unemployment", `${(unemp * 100).toFixed(1)}%`, "work offered that nobody hired", uD, uG));
+  if (ind.lf_unemployment != null) {
+    tiles.push(kpiTile("Unemployment", `${(ind.lf_unemployment * 100).toFixed(1)}%`,
+                       `of the labour force (people) · participation ${(ind.lf_participation * 100).toFixed(0)}%`,
+                       null, null, "labour"));
+  } else {
+    const [uD, uG] = arrow(unemp * 100, month ? month.unemployment * 100 : null, v => `${v.toFixed(1)} pts`, false);
+    tiles.push(kpiTile("Unemployment", `${(unemp * 100).toFixed(1)}%`, "work offered that nobody hired", uD, uG, "labour"));
+  }
+  if (ind.in_need_core != null) {
+    tiles.push(kpiTile("In need", `${(ind.in_need_core * 100).toFixed(0)}%`,
+                       `survival or security needs · ${(ind.need_wellbeing * 100).toFixed(0)}% short of wellbeing`,
+                       null, ind.in_need_core > 0.25 ? false : null, "need"));
+  }
   const [wD, wG] = arrow(m.prices.labor, month?.wage, v => usd(v), true);
-  tiles.push(kpiTile("Wage", usd(m.prices.labor), "per unit of labour (a day's work)", wD, wG));
+  tiles.push(kpiTile("Wage", usd(m.prices.labor), ind.real_wage_days != null
+    ? `a day's work buys ${ind.real_wage_days.toFixed(2)} days of living` : "per unit of labour (a day's work)", wD, wG, "wage"));
   tiles.push(kpiTile("Inequality", gini(state.agents.map(a => a.money + (a.deposits || 0))).toFixed(2),
                      "Gini of money: 0 = equal, 1 = one person has it all"));
   if (b?.industry_active) tiles.push(kpiTile("Bank loans", money(b.loans), `${b.open} banks open · money supply ${money(b.money_supply)}`));
   if (g?.enabled) tiles.push(kpiTile("Taxes", money(Object.values(g.step_revenue).reduce((a, v) => a + v, 0)) + " / day",
                                      `treasury ${money(g.treasury)}`));
+  if (g?.enabled && g.debt) tiles.push(kpiTile("Public debt", money(g.debt.debt), `${(g.debt.debt_to_gdp * 100).toFixed(0)}% of real GDP · bonds at ${(g.debt.rate_year * 100).toFixed(1)}%`,
+                                               null, null, "debt"));
+  if (g?.enabled) tiles.push(kpiTile("Approval", `${Math.round((g.approval || 0) * 100)}%`, "of the government", null, null, "approval"));
   ui.dashKpis.replaceChildren(...tiles);
+  renderLabourBreakdown();
 
   // Trend lines (as recorded while playing).
   const charts = [

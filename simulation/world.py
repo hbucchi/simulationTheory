@@ -304,16 +304,33 @@ class World:
             owners = set(chosen)              # bank founders always keep their banks
             if k > len(owners):
                 owners |= set(pick.sample([i for i in range(n) if i not in owners], k - len(owners)))
-            for good, shares in assets.items():
-                total = sum(shares)
-                kept = sum(shares[i] for i in owners)
-                for i in range(n):
-                    if i not in owners:
-                        shares[i] = 0.0
-                    elif kept > 0:
-                        shares[i] *= total / kept
+            if r.industry_owners > 0:
+                # Balanced: each industry goes to industry_owners owners in equal stakes, taking
+                # owners in turn (a shuffled order) so industries are spread evenly between them.
+                order = sorted(owners)
+                pick.shuffle(order)
+                turn = 0
+                for good, shares in assets.items():
+                    total = sum(shares)
+                    if good == "banking" and chosen:
+                        holders = list(chosen)        # bank founders hold the starting banks
                     else:
-                        shares[i] = total / len(owners)
+                        m = min(r.industry_owners, len(order))
+                        holders = [order[(turn + j) % len(order)] for j in range(m)]
+                        turn += m
+                    for i in range(n):
+                        shares[i] = total / len(holders) if i in holders and total > 0 else 0.0
+            else:
+                for good, shares in assets.items():
+                    total = sum(shares)
+                    kept = sum(shares[i] for i in owners)
+                    for i in range(n):
+                        if i not in owners:
+                            shares[i] = 0.0
+                        elif kept > 0:
+                            shares[i] *= total / kept
+                        else:
+                            shares[i] = total / len(owners)
         if r.housing_enabled and "housing" in stock:
             stock["housing"] = [0] * n         # houses, not loose housing units (housing.py)
         for i in range(n):
@@ -1469,6 +1486,12 @@ class World:
                                  "inflation_policy", "cpi_days", "accounts_steps")}
                       if self.recorder.history else None),
             "cpi_warmup_days": self.rules.cpi_warmup_days,
+            # Headline indicators of the latest day (report.py: labour force, deprivation, real wage).
+            "indicators": ({k: self.recorder.history[-1].get(k) for k in
+                            ("lf_unemployment", "lf_participation", "lf_employment_rate", "lf_underutilisation", "lf",
+                             "in_need", "in_need_core", "need_survival", "need_security", "need_wellbeing",
+                             "real_wage_days", "living_cost_day", "owners", "smes", "asset_holders")}
+                           if self.recorder.history else {}),
             # Industries left out because their recipe needs a good that isn't in this game.
             "auto_excluded": list(self.rules.auto_excluded),
             "government": self.government.to_dict(self),

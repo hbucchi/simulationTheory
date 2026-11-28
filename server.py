@@ -243,6 +243,11 @@ class Simulation:
         with self.lock:
             return build_report(self.world, window)
 
+    def explain(self, metric):
+        from simulation.explain import explain
+        with self.lock:
+            return explain(self.world, metric)
+
     def trigger_shock(self, body):
         """Trigger a resource shortage, disaster, or epidemic live (for trainer workshops)."""
         kind = body.get("kind")
@@ -408,6 +413,12 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(self.sim.report(int(window) if window.isdigit() and int(window) > 0 else None))
         if self.path == "/api/rules":
             return self._json({"current": self.sim.rules(), "factory": Rules().to_dict()})
+        if self.path.startswith("/api/explain"):
+            query = dict(p.split("=", 1) for p in self.path.partition("?")[2].split("&") if "=" in p)
+            try:
+                return self._json(self.sim.explain(query.get("metric", "")))
+            except ValueError as err:
+                return self._json({"error": str(err)}, 400)
         return super().do_GET()
 
     def do_POST(self):

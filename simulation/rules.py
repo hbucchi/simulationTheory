@@ -464,6 +464,12 @@ class Rules:
     # their labour (and their starting money and goods). 1 = everyone gets a draw. Only the start:
     # ownership then moves with the market.
     asset_owner_share: float = 0.1
+    # How each industry's starting capital is split among the starting owners: industry_owners
+    # owners each (equal stakes), spread so every owner gets about the same number of industries.
+    # The seed then only decides *who* the owners are, not how concentrated each market is.
+    # 0 = the old lottery: each industry's shares go to whichever owners drew them (from 1 owner,
+    # a monopoly, to all of them), which made seeds differ wildly.
+    industry_owners: int = 3
     # Starting companies hold working capital: company cash for this many days of their full wage
     # bill at the starting wage, so owners can hire before their first sales come in. 0 = none.
     working_capital_days: int = 30
@@ -1035,6 +1041,7 @@ LIMITS = {
     "savings_to_bonds": (None, None, "bool"),
     "survival_effort": (0, 1, "float"),
     "asset_owner_share": (0.001, 1, "float"),
+    "industry_owners": (0, 10000, "int"),
     "working_capital_days": (0, 3600, "int"),
     "luck_enabled": (None, None, "bool"),
     "luck_chance_year": (0, 1, "float"),

@@ -92,6 +92,8 @@ const SETUP_SECTIONS = [
       min: 0, step: 0.1, group: `Starting industries (asset shares) · layer ${catalogLayer(r)}` })),
     { path: "asset_owner_share", label: "Restrict all assets to a fixed share of agents (1 = follow each asset's distribution freely; 0.1 = 10% own all)",
       kind: "float", min: 0.001, max: 1, step: 0.05 },
+    { path: "industry_owners", label: "Owners per industry at the start (equal stakes, spread evenly; 0 = random lottery: from a monopoly to all owners)",
+      kind: "int", min: 0, max: 10000 },
     { path: "working_capital_days", label: "Companies start with working capital for (days of wages)", kind: "int", min: 0, max: 3600 },
     { path: "money", label: "Money", kind: "spread", tiered: true, min: 0, step: 0.01 },
     { path: "movement", label: "Movement (px)", kind: "spread", whole: true, min: 1, max: 200 },
