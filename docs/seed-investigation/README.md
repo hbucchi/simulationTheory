@@ -104,3 +104,30 @@ positions, traits). That is the kind of variation a teaching tool should keep, a
 - **Positions**: with a 600 px trade radius on a 1,024 px map, geography decides who can trade with
   whom. A fixed layout option (for example a grid, or clustered towns) would remove it if wanted.
 - **Traits**: need rates and starting needs. These are the "people" of the economy; keep them.
+
+## The default economy after all of today's changes (3 seeds, 270 days)
+
+Script [`after.py`](after.py), data [`after_270.json`](after_270.json).
+
+| Day 270 | Seed 11 | Seed 12 | Seed 13 |
+|---|---|---|---|
+| Deaths | 0 | 0 | 0 |
+| CPI (100 = day 31) | 48.5 | 51.0 | 42.5 |
+| Policy rate | 0% | 0% | 0% |
+| Wage | $87 | $82 | $85 |
+| Food | $168 | $151 | $142 |
+| Real wage (days of living per day's work) | 1.39 | 1.45 | 1.60 |
+| Labour lost to unmet needs | 7% | 4% | 5% |
+| Unemployment (people) | 0% | 0% | 0% |
+| In need: survival & security | 81% | 84% | 85% |
+| Treasury cash held | $619k | $629k | $631k |
+| Public debt | $641k | $612k | $572k |
+| Capital built | 31.2 | 18.6 | 19.0 |
+
+The three seeds now tell the same story, and the story is **deflation**. The treasury holds
+about $620k of idle cash, close to the whole starting money stock (200 × $3,000). The cause is two
+defaults together: savers lend their idle money to the government (`savings_to_bonds` on), and the
+treasury now keeps what it doesn't spend (no surplus rule chosen). Money leaves circulation, so
+prices halve after the warm-up, and the central bank sits at 0% (the zero lower bound). This is
+the player's choice to make now. Turning off "savers may buy bonds", or allocating the treasury's
+cash, restarts circulation.
