@@ -11,7 +11,8 @@ EMPTY = {g: 0 for g in GOODS}
 class LuckTests(unittest.TestCase):
     def test_a_lucky_business_makes_ten_times_more_until_its_luck_runs_out(self):
         w = World(seed=1, rules=Rules.from_dict({"assets": EMPTY, "starting_banks": 0, "investing_enabled": False,
-                                                 "gov_policies": [], "selling_enabled": False}))
+                                                 "gov_policies": [], "selling_enabled": False,
+                                                 "subsistence_enabled": False}))   # count the business's output only
         a = w.create_agent(needs=CALM, rates=CALM, money=1e6, inventory=EMPTY, assets={"water": 1}, labor_capacity=10)
         production = a.modules[2]
 
