@@ -133,7 +133,8 @@ class DepositAndLoanTests(unittest.TestCase):
         self.assertTrue(any("defaulted" in e["message"] for e in w.events))
 
     def test_base_money_is_conserved(self):
-        w = World(seed=5, rules=Rules.from_dict({"agents": 20}))
+        # (The treasury spends what it collects, so money keeps circulating into deposits.)
+        w = World(seed=5, rules=Rules.from_dict({"agents": 20, "surplus_public_works": 1, "surplus_transfers": 1}))
         w.spawn_random_agents()
         start = w.base_money()          # (cash + companies' working capital)
         for _ in range(200):

@@ -20,8 +20,84 @@ Definitions
   hired / labour offered; capacity used = labour used on assets / capacity;
   unfilled jobs = jobs employers wanted but couldn't fill / jobs wanted.
 - in need = share of agents with a need above the seek threshold; struggling =
-  share whose need for a job is above 0.5.
+  share whose need for a job is above 0.5. Deprivation tiers split it (DEPRIVATION_TIERS):
+  survival (thirst, hunger), security (health, shelter, sleep), wellbeing (energy, boredom).
+- labour force (ILO-style, people, not units; labour_force): each agent is counted once, by
+  its main activity today: employee (hired by a firm), public employee, self-employed (works its
+  own business), own-use producer (only autonomous production), unemployed (offered work, got
+  none, did nothing else), unable to work (too ill), or not in the labour force (didn't look).
+  Unemployment rate = unemployed / (employed + unemployed); participation = (employed +
+  unemployed) / population. Own-use production isn't employment (ILO 2013 standard), but it is
+  shown, and so is the broad underutilisation rate that counts it with the unemployed.
+- real wage: how many days of a typical agent's living costs a day's full work at the market
+  wage pays for (wage x average labour capacity / average living cost per day).
 """
+
+# Needs grouped by how serious going without them is (the deprivation tiers).
+DEPRIVATION_TIERS = {"survival": ("thirst", "hunger"), "security": ("health", "shelter", "sleep"),
+                     "wellbeing": ("energy", "boredom")}
+
+
+def deprivation(agents, rules):
+    """{tier: share of agents with a need of that tier above the seek threshold}, plus
+    "in_need_core" (survival or security) and "by_need" (agents per need)."""
+    n = len(agents) or 1
+    live = [need for need in rules.consumer_needs]
+    by_need = {need: sum(1 for a in agents if getattr(a, need) > rules.seek_threshold) for need in live}
+    out = {}
+    for tier, needs in DEPRIVATION_TIERS.items():
+        ns = [x for x in needs if x in live]
+        out[f"need_{tier}"] = sum(1 for a in agents if any(getattr(a, x) > rules.seek_threshold for x in ns)) / n
+    core = [x for t in ("survival", "security") for x in DEPRIVATION_TIERS[t] if x in live]
+    out["in_need_core"] = sum(1 for a in agents if any(getattr(a, x) > rules.seek_threshold for x in core)) / n
+    out["need_by"] = by_need
+    return out
+
+
+LF_CLASSES = ("employee", "public", "self_employed", "own_use", "unemployed", "unable", "outside")
+
+
+def labour_force(world):
+    """ILO-style labour statistics (see the module docstring)."""
+    from . import penalties
+    counts = {c: 0 for c in LF_CLASSES}
+    for a in world.agents:
+        public = a.employers.get("Government", 0.0) if a.employers else 0.0
+        if a.labor_sold - public > 1e-9:
+            c = "employee"
+        elif public > 1e-9:
+            c = "public"
+        elif getattr(a, "own_labor", 0.0) > 1e-9:
+            c = "self_employed"
+        elif a.offered > 1e-9:
+            c = "unemployed"
+        elif getattr(a, "subsistence_labor", 0.0) > 1e-9:
+            c = "own_use"
+        elif penalties.labor_factors(a, world.rules).get("health") == 0.0 or a.capacity_now <= 1e-9:
+            c = "unable"
+        else:
+            c = "outside"
+        counts[c] += 1
+    n = len(world.agents) or 1
+    employed = counts["employee"] + counts["public"] + counts["self_employed"]
+    force = employed + counts["unemployed"]
+    return {"lf": counts,
+            "lf_unemployment": counts["unemployed"] / force if force else 0.0,
+            "lf_participation": force / n,
+            "lf_employment_rate": employed / n,
+            "lf_underutilisation": (counts["unemployed"] + counts["own_use"]) / (force + counts["own_use"])
+                                   if force + counts["own_use"] else 0.0}
+
+
+def real_wage(world, prices):
+    """(days of living a day's full work buys, average living cost per day)."""
+    agents = world.agents
+    if not agents:
+        return 0.0, 0.0
+    cost = sum(economy.living_cost(a, prices, world.rules) for a in agents) / len(agents)
+    capacity = sum(a.labor_capacity for a in agents) / len(agents)
+    wage = world.labor.wage
+    return (wage * capacity / cost if cost > 0 else 0.0), cost
 
 INCOME_SOURCES = ("wages", "goods", "assets", "government", "benefits", "transfers", "banking", "rent")
 SMOOTHING = 0.05   # weight of the latest step in agents' smoothed income / consumption
@@ -68,6 +144,23 @@ def lorenz(values):
     return points
 
 
+def ownership_classes(rows, cohort=0.8):
+    """(big owners, SMEs) as sets of agents: ranked by asset value (shares if no value), largest
+    first, the smallest top group holding ``cohort`` of the total are the owners; the others with
+    any assets are SMEs."""
+    holders = [r for r in rows if r["shares"] > 1e-9]
+    key = "assets" if sum(r["assets"] for r in holders) > 0 else "shares"
+    holders.sort(key=lambda r: r[key], reverse=True)
+    total = sum(r[key] for r in holders)
+    owners, running = set(), 0.0
+    for r in holders:
+        if running >= cohort * total - 1e-9:
+            break
+        owners.add(r["agent"])
+        running += r[key]
+    return owners, {r["agent"] for r in holders} - owners
+
+
 def bottom_share(values, fraction=0.5):
     """Share of the total held by the bottom ``fraction`` of agents."""
     values = sorted(values)
@@ -91,6 +184,11 @@ def agent_values(world):
     return rows
 
 
+def _ownership_counts(rows, cohort):
+    big, smes = ownership_classes(rows, cohort)
+    return {"owners": len(big), "smes": len(smes), "asset_holders": len(big) + len(smes)}
+
+
 class NationalAccounts:
     """GDP and price indexes over the last year (a year = 12 x month_steps steps).
 
@@ -98,8 +196,18 @@ class NationalAccounts:
     - real GDP = the same goods x the prices of a year ago (before a year has passed: of the
       first step), so it moves only with quantities;
     - GDP deflator = 100 x nominal / real: how much prices of what is produced changed;
-    - CPI = 100 x (last year's consumption at today's prices) / (at a year-ago prices): how
-      much the cost of what people buy changed; inflation = CPI / 100 - 1 (over a year).
+    - CPI: a chained monthly index, like statistics offices publish. The first ``warmup`` days
+      are price discovery (markets finding their level from the starting prices) and are not
+      counted: the index is 100 at the end of them (the base day). Each month's link compares the
+      cost of the basket (consumption over the last year) at today's prices with its cost at the
+      prices of the start of the month; the links multiply.
+    - inflation (the headline): the CPI's change over the last 12 months, or since the base day
+      while there is less than a year of index (``cpi_days`` says how long);
+    - inflation_annualised: the change over the last 3 months (or since the base day, if at least
+      a month) at a yearly rate: (CPI now / CPI then)^(year / days) - 1;
+    - inflation_policy: what the central bank and price expectations read: the 12-month rate
+      once there is a year of index, before that the annualised rate since the base day (once
+      there are 3 months), else None (no reading yet).
     Running sums keep this cheap (no re-adding a year of steps)."""
 
     def __init__(self):
@@ -107,10 +215,14 @@ class NationalAccounts:
         self.made = {g: 0.0 for g in economy.GOODS}
         self.used = {g: 0.0 for g in economy.GOODS}
         self.price_log = deque()
+        self.steps = 0
+        self.level_log = deque()      # chained CPI level on each day since the base day (a year + 1 kept)
+        self.link_prices = None       # prices at the start of the current month's link
+        self.link_level = 100.0
 
-    def update(self, produced, consumed, prices, year):
+    def update(self, produced, consumed, prices, year, month=30, warmup=0):
+        self.steps += 1
         self.window.append((produced, consumed))
-        self.price_log.append({g: prices[g] for g in economy.GOODS})
         for g in economy.GOODS:
             self.made[g] += produced[g]
             self.used[g] += consumed[g]
@@ -119,17 +231,43 @@ class NationalAccounts:
             for g in economy.GOODS:
                 self.made[g] -= old_p[g]
                 self.used[g] -= old_c[g]
-        while len(self.price_log) > year + 1:
-            self.price_log.popleft()
-        then = self.price_log[0]
+        measured = self.steps > warmup
+        if measured:
+            self.price_log.append({g: prices[g] for g in economy.GOODS})
+            while len(self.price_log) > year + 1:
+                self.price_log.popleft()
+        then = self.price_log[0] if self.price_log else prices
         nominal = sum(self.made[g] * prices[g] for g in economy.GOODS)
         real = sum(self.made[g] * then[g] for g in economy.GOODS)
-        basket_now = sum(self.used[g] * prices[g] for g in economy.GOODS)
-        basket_then = sum(self.used[g] * then[g] for g in economy.GOODS)
-        cpi = 100 * basket_now / basket_then if basket_then > 0 else 100.0
+        level = 100.0
+        if measured:
+            if self.link_prices is None:                       # the base day
+                self.link_prices, self.link_level = dict(prices), 100.0
+            basket_now = sum(self.used[g] * prices[g] for g in economy.GOODS)
+            basket_link = sum(self.used[g] * self.link_prices[g] for g in economy.GOODS)
+            level = self.link_level * basket_now / basket_link if basket_link > 0 else self.link_level
+            self.level_log.append(level)
+            while len(self.level_log) > year + 1:
+                self.level_log.popleft()
+            days = self.steps - warmup
+            if days % month == 0:                               # month end: start the next link
+                self.link_prices, self.link_level = dict(prices), level
+        days = len(self.level_log) - 1 if self.level_log else 0        # days of index since the base
+        start = self.level_log[0] if self.level_log else 100.0
+        headline = level / start - 1 if self.level_log else 0.0
+        back = min(days, 3 * month)
+        annualised = ((level / self.level_log[-1 - back]) ** (year / back) - 1
+                      if back >= month and self.level_log[-1 - back] > 0 else None)
+        if days >= year:
+            policy = headline
+        elif days >= 3 * month:
+            policy = (level / 100.0) ** (year / days) - 1
+        else:
+            policy = None
         return {"gdp_nominal": nominal, "gdp_real": real,
                 "deflator": 100 * nominal / real if real > 0 else 100.0,
-                "cpi": cpi, "inflation": cpi / 100 - 1,
+                "cpi": level, "inflation": headline, "inflation_annualised": annualised,
+                "inflation_policy": policy, "cpi_days": days,
                 "accounts_steps": len(self.window)}
 
 
@@ -165,7 +303,8 @@ class Recorder:
         sources = {k: sum(f["sources"].get(k, 0.0) for f in flows) for k in INCOME_SOURCES}
         output_value = sum(produced[g] * prices[g] for g in economy.GOODS)
         consumed = {g: sum(f["consumed"].get(g, 0) for f in flows) for g in economy.GOODS}
-        accounts = self.national.update(produced, consumed, prices, world.year_steps())
+        accounts = self.national.update(produced, consumed, prices, world.year_steps(), world.rules.month_steps,
+                                        world.rules.cpi_warmup_days)
         worked = sum(1 for a in agents if a.labor_sold > 1e-9 or min(a.capacity_now, a.labor_need) > 1e-9)
         offering = sum(1 for a in agents if a.offered > 1e-9)
         self.history.append({
@@ -185,7 +324,7 @@ class Recorder:
             "gini_consumption": gini([a.consumption_avg for a in agents]),
             "top10_wealth": top_share([r["wealth"] for r in rows]),
             "bottom50_wealth": bottom_share([r["wealth"] for r in rows]),
-            "owners": sum(1 for r in rows if r["shares"] > 1e-9),
+            **_ownership_counts(rows, world.rules.owner_cohort_share),
             "income_sources": sources,
             "output_value": output_value,
             "labor_share_output": (sources["wages"] / output_value) if output_value else 0.0,
@@ -199,6 +338,11 @@ class Recorder:
             "supply_vs_jobs": (L["capacity"] / L["job_capacity"]) if L["job_capacity"] else 0.0,
             "unfilled_jobs": (max(0.0, L["wanted"] - L["hired"]) / L["wanted"]) if L["wanted"] else 0.0,
             "in_need": sum(1 for a in agents if economy.is_needy(a, world.rules)) / n,
+            **deprivation(agents, world.rules),
+            **labour_force(world),
+            **dict(zip(("real_wage_days", "living_cost_day"), real_wage(world, prices))),
+            "labour_breakdown": dict(world.labor.stats.get("breakdown", {})),
+            "labour_lost_by": dict(world.labor.stats.get("lost_by", {})),
             "struggling": sum(1 for a in agents if a.job_need > 0.5) / n,
             "deaths_hunger": sc["deaths_hunger"],
             "deaths_thirst": sc["deaths_thirst"],
@@ -248,8 +392,9 @@ def _average(snapshots):
     def mean(values):
         first = values[0]
         if isinstance(first, dict):
-            return {k: mean([v[k] for v in values]) for k in first}
-        return sum(values) / len(values)
+            return {k: mean([v.get(k) for v in values if isinstance(v, dict)]) for k in first}
+        nums = [v for v in values if isinstance(v, (int, float))]
+        return sum(nums) / len(nums) if nums else values[-1]     # (None: no reading yet)
     out = {k: mean([s[k] for s in snapshots]) for k in snapshots[0] if k != "tick"}
     out["tick"] = snapshots[-1]["tick"]
     return out
@@ -313,7 +458,9 @@ def build_report(world, window=None):
                 "worked": sum(1 for r in members if r["agent"].labor_sold > 1e-9
                               or min(r["agent"].capacity_now, r["agent"].labor_need) > 1e-9) / k,
                 "share": sum(r["wealth"] for r in members) / total_wealth}
-    groups = {"owners": group([r for r in rows if r["shares"] > 1e-9]),
+    big, smes = ownership_classes(rows, world.rules.owner_cohort_share)
+    groups = {"owners": group([r for r in rows if r["agent"] in big]),
+              "smes": group([r for r in rows if r["agent"] in smes]),
               "workers": group([r for r in rows if r["shares"] <= 1e-9])}
     ordered = sorted(rows, key=lambda r: r["wealth"])
     quintiles = []
@@ -340,7 +487,7 @@ def build_report(world, window=None):
             "gini_wealth": gini([r["wealth"] for r in rows]),
             "top10_wealth": top_share([r["wealth"] for r in rows]),
             "bottom50_wealth": bottom_share([r["wealth"] for r in rows]),
-            "owners": sum(1 for r in rows if r["shares"] > 1e-9),
+            **_ownership_counts(rows, world.rules.owner_cohort_share),
             "goods_value": sum(r["goods"] for r in rows),
         },
         "lorenz": {"money": lorenz([r["money"] for r in rows]), "assets": lorenz([r["shares"] for r in rows]),

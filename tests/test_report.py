@@ -95,7 +95,7 @@ class DistributionReportTests(unittest.TestCase):
         self.assertEqual(report["end"]["tick"], world.tick)
         self.assertEqual(report["start"]["tick"], world.tick - 9)
         groups = report["groups"]
-        self.assertEqual(groups["owners"]["count"] + groups["workers"]["count"], len(world.agents))
+        self.assertEqual(groups["owners"]["count"] + groups["smes"]["count"] + groups["workers"]["count"], len(world.agents))
         self.assertEqual(len(report["quintiles"]), 5)
         self.assertAlmostEqual(sum(q["share"] for q in report["quintiles"]), 1)
         shares = [q["wealth"] for q in report["quintiles"]]

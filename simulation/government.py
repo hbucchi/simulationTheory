@@ -12,9 +12,9 @@ Fiscal policy (the government):
        offered and nobody hired (pro rata if the treasury runs short);
     3. the player's public spending policies, in order (policies.py: income support, resources
        given away, public services; by default a food and water safety net);
-    4. with ``balanced_budget``, whatever is left hires more idle labour for public works, and what
-       is still left (nobody idle) is paid out equally to every agent (transfers), so taxes go
-       back into the economy instead of sitting in the treasury.
+    4. what is left in the treasury is the player's call (``surplus_*`` shares, applied in order):
+       repay debt early, hire idle labour for public works, pay out equally to every agent. Whatever
+       they don't allocate stays in the treasury. Nothing is spent this way by default.
 
 - ``min_wage``: the lowest wage per unit of labour (a day's work) anyone may be paid; workers
   never ask for less and employers pay at least this. 0 = no minimum wage.
@@ -39,7 +39,7 @@ policy rate, no capital or reserve rules and no lender of last resort.
 """
 
 POLICY = ("min_wage", "min_rate", "labor_purchase", "capital_ratio", "tax_production", "tax_wage", "tax_profit",
-          "benefit_rate", "balanced_budget", "reserve_requirement", "reserve_rate", "lender_of_last_resort",
+          "benefit_rate", "savings_to_bonds", "surplus_repay_debt", "surplus_public_works", "surplus_transfers", "reserve_requirement", "reserve_rate", "lender_of_last_resort",
           "llr_penalty", "bonds_enabled", "debt_limit", "bond_spread", "bond_days", "pay_period",
           "min_contract_days", "severance_rate",
           "taylor_enabled", "inflation_target", "neutral_rate", "taylor_unemployment", "bond_risk_max")
@@ -53,6 +53,15 @@ SPENDING = ("public_works", "benefits", "reserve_interest", "transfers", "intere
 POLICY_OPTIONS = {"kinds": KINDS, "audiences": AUDIENCES, "distributions": DISTRIBUTIONS}
 
 
+def inflation_score(inflation, target, half=0.10):
+    """How happy agents are with inflation (1 = on target), on a log scale: the excess is
+    d = |ln((1 + inflation) / (1 + target))| and the score 1 / (1 + d / ln(1 + half)). With half
+    = 10%: 12% inflation (target 2%) scores 0.5, 39% scores 0.24, 316% 0.06, 1,000% 0.04."""
+    import math
+    d = abs(math.log(max(1e-9, 1 + inflation)) - math.log(max(1e-9, 1 + target)))
+    return 1.0 / (1.0 + d / math.log(1 + half))
+
+
 def _policy(name):
     """A policy setting that reads as 0 / False while the government is switched off."""
     return property(lambda self: self._policy[name] if self.enabled else type(self._policy[name])(),
@@ -64,7 +73,9 @@ class Government:
         self.enabled = enabled
         self._policy = {"min_rate": min_rate, "labor_purchase": labor_purchase, "capital_ratio": capital_ratio,
                         "min_wage": 0.0, "tax_production": 0.0, "tax_wage": 0.0, "tax_profit": 0.0, "benefit_rate": 0.0,
-                        "balanced_budget": False, "reserve_requirement": 0.0, "reserve_rate": 0.0,
+                        "surplus_repay_debt": 0.0, "surplus_public_works": 0.0, "surplus_transfers": 0.0,
+                        "savings_to_bonds": False,
+                        "reserve_requirement": 0.0, "reserve_rate": 0.0,
                         "lender_of_last_resort": False, "llr_penalty": 0.0,
                         "bonds_enabled": False, "debt_limit": 0.0, "bond_spread": 0.0, "bond_days": 360,
                         "pay_period": "daily", "min_contract_days": 0, "severance_rate": 0.0,
@@ -102,7 +113,9 @@ class Government:
         return cls(rules.gov_min_rate, rules.gov_labor_purchase, rules.capital_ratio, rules.government_enabled,
                    policies=rules.gov_policies,
                    min_wage=rules.gov_min_wage, tax_production=rules.tax_production, tax_wage=rules.tax_wage, tax_profit=rules.tax_profit,
-                   benefit_rate=rules.benefit_rate, balanced_budget=rules.balanced_budget,
+                   benefit_rate=rules.benefit_rate, surplus_repay_debt=rules.surplus_repay_debt,
+                   savings_to_bonds=rules.savings_to_bonds,
+                   surplus_public_works=rules.surplus_public_works, surplus_transfers=rules.surplus_transfers,
                    reserve_requirement=rules.reserve_ratio, reserve_rate=rules.reserve_rate,
                    lender_of_last_resort=rules.lender_of_last_resort, llr_penalty=rules.llr_penalty,
                    bonds_enabled=rules.gov_bonds_enabled, debt_limit=rules.gov_debt_limit,
@@ -121,7 +134,10 @@ class Government:
     tax_wage = _policy("tax_wage")
     tax_profit = _policy("tax_profit")
     benefit_rate = _policy("benefit_rate")
-    balanced_budget = _policy("balanced_budget")
+    surplus_repay_debt = _policy("surplus_repay_debt")
+    savings_to_bonds = _policy("savings_to_bonds")
+    surplus_public_works = _policy("surplus_public_works")
+    surplus_transfers = _policy("surplus_transfers")
     reserve_requirement = _policy("reserve_requirement")
     reserve_rate = _policy("reserve_rate")
     lender_of_last_resort = _policy("lender_of_last_resort")
@@ -171,8 +187,9 @@ class Government:
         unemp = (max(0.0, l.get("idle", 0.0)) / l["offered"]) if l.get("offered", 0.0) > 1e-9 else 0.0
         emp = max(0.0, min(1.0, 1.0 - unemp))
         hist = world.recorder.history
-        inf = hist[-1].get("inflation", 0.0) if hist else 0.0
-        inf_score = max(0.0, min(1.0, 1.0 - abs(inf - self.inflation_target) / 0.25))
+        inf = (hist[-1].get("inflation_policy") if hist else None)
+        inf = (hist[-1].get("inflation", 0.0) if hist else 0.0) if inf is None else inf
+        inf_score = inflation_score(inf, self.inflation_target, world.rules.approval_inflation_half)
         tax_sum = self.tax_production + self.tax_wage + self.tax_profit
         tax_score = max(0.0, min(1.0, 1.0 - tax_sum / 1.2))
         target = max(0.0, min(1.0, 0.45 * wb + 0.25 * emp + 0.15 * inf_score + 0.15 * tax_score))
@@ -206,7 +223,9 @@ class Government:
         pol_days = max((len(p.daily) for p in self.policies.items), default=0)
         pol_sum = sum(sum(p.daily) for p in self.policies.items)
         outflows["policies"] = round(pol_sum * (month / pol_days), 2) if pol_days > 0 else 0.0
-        outflows["total"] = round(sum(v for k, v in outflows.items() if k != "debt_repaid"), 2)
+        # (Policy spending is already inside transfers and public works: "policies" shows how much
+        # of them it was, and isn't added again.)
+        outflows["total"] = round(sum(v for k, v in outflows.items() if k not in ("debt_repaid", "policies")), 2)
         return {
             "days": days_r,
             "month_steps": month,
@@ -247,12 +266,14 @@ class Government:
         hist = world.recorder.history
         if not hist or hist[-1].get("accounts_steps", 0) < 3 * world.rules.month_steps:
             return None
-        inflation = hist[-1]["inflation"]
+        inflation = hist[-1].get("inflation_policy")
+        if inflation is None:                       # no reliable reading yet (price discovery)
+            return None
         recent = list(hist)[-world.rules.month_steps:]
         unemployment = sum(s["unemployment"] for s in recent) / len(recent)
         gap = -2.0 * (unemployment - self.taylor_unemployment)              # Okun's law
         rate = self.neutral_rate + inflation + 0.5 * (inflation - self.inflation_target) + 0.5 * gap
-        return max(0.0, min(0.20, rate)), inflation, unemployment, gap
+        return max(0.0, min(world.rules.taylor_max_rate, rate)), inflation, unemployment, gap
 
     def monthly(self, world):
         """Once a month: the central bank resets its rate by the Taylor rule (when on)."""
@@ -261,10 +282,17 @@ class Government:
         found = self.taylor_rate(world)
         if found is None:
             return
-        rate, inflation, unemployment, gap = found
+        target, inflation, unemployment, gap = found
         before = (1 + self.min_rate) ** world.year_steps() - 1
+        # Gradual: keep taylor_smoothing of last month's rate, move the rest toward the rule's rate.
+        rho = world.rules.taylor_smoothing
+        rate = rho * before + (1 - rho) * target
         self.set("min_rate", (1 + rate) ** (1 / world.year_steps()) - 1)
-        self.taylor_last = {"rate": rate, "inflation": inflation, "unemployment": unemployment, "gap": gap}
+        seen = world.expected_inflation if world.rules.expectations_enabled else inflation
+        self.taylor_last = {"rate": rate, "target_rate": target, "inflation": inflation,
+                            "unemployment": unemployment, "gap": gap,
+                            # The real rate: what borrowing costs after (expected) inflation.
+                            "real_rate": (1 + rate) / (1 + seen) - 1 if seen > -1 else None}
         if abs(rate - before) >= 0.0025:
             world.log(f"Central bank {'raised' if rate > before else 'cut'} its rate to {rate:.2%} a year "
                       f"(inflation {inflation:.1%}, unemployment {unemployment:.0%})")

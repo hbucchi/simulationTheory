@@ -64,8 +64,30 @@ class TaxTests(unittest.TestCase):
             w.step()
         self.assertEqual(sum(w.government.revenue.values()), 0)
 
-    def test_taxes_are_spent_and_money_is_conserved(self):
+    def test_by_default_money_left_in_the_treasury_stays_there(self):
         w = World(seed=4, rules=Rules.from_dict({"agents": 25}))
+        w.spawn_random_agents()
+        for _ in range(60):
+            w.step()
+        g = w.government
+        self.assertEqual(g.spent["transfers"], 0)            # nothing paid out unless the player chooses it
+        self.assertGreater(g.treasury, 0)
+
+    def test_the_player_can_pay_out_a_share_of_the_treasury(self):
+        w = World(seed=4, rules=Rules.from_dict({"agents": 25, "surplus_transfers": 0.5}))
+        w.spawn_random_agents()
+        w.government.treasury = 1000.0
+        before = [a.money for a in w.agents]
+        w.labor._spend_surplus(w, [], {}, w.labor._empty_stats())
+        self.assertAlmostEqual(w.government.treasury, 500.0)
+        self.assertAlmostEqual(sum(a.money for a in w.agents) - sum(before), 500.0)
+
+    def test_older_balanced_budget_scenarios_still_load(self):
+        r = Rules.from_dict({"balanced_budget": True})
+        self.assertEqual((r.surplus_public_works, r.surplus_transfers, r.surplus_repay_debt), (1.0, 1.0, 0.0))
+
+    def test_taxes_are_spent_and_money_is_conserved(self):
+        w = World(seed=4, rules=Rules.from_dict({"agents": 25, "surplus_public_works": 1, "surplus_transfers": 1}))
         w.spawn_random_agents()
         start = w.base_money()
         for _ in range(120):

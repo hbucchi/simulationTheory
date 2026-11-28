@@ -342,7 +342,13 @@ const SETUP_SECTIONS = [
       enabledWhen: v => v.government_enabled },
     { path: "benefit_rate", label: "Unemployment benefit (× the wage)", kind: "float", min: 0, max: 10, step: 0.05,
       enabledWhen: v => v.government_enabled },
-    { path: "balanced_budget", label: "Spend all taxes (the rest buys public works)", kind: "bool", full: true,
+    { path: "savings_to_bonds", label: "Savers may buy government bonds with idle money", kind: "bool", full: true,
+      enabledWhen: v => v.government_enabled },
+    { path: "surplus_repay_debt", label: "Treasury cash left over: share repaying debt (per day)", kind: "float", min: 0, max: 1, step: 0.05,
+      enabledWhen: v => v.government_enabled },
+    { path: "surplus_public_works", label: "… share hiring idle labour (public works)", kind: "float", min: 0, max: 1, step: 0.05,
+      enabledWhen: v => v.government_enabled },
+    { path: "surplus_transfers", label: "… share paid out equally to everyone (the rest is kept)", kind: "float", min: 0, max: 1, step: 0.05,
       enabledWhen: v => v.government_enabled },
     { path: "gov_labor_purchase", label: "Labour bought per day", kind: "float", min: 0, step: 0.5,
       enabledWhen: v => v.government_enabled },
@@ -355,6 +361,33 @@ const SETUP_SECTIONS = [
   { title: "Life and death", hint: "What happens when a need reaches 1.00.", fields: [
     { path: "depression_factor", label: "Depressed speed & sleep recovery ×", kind: "float", min: 0, max: 1, step: 0.05,
       full: true, enabledWhen: v => v.depression_enabled },
+  ]},
+  { title: "Life and death: epidemics", hint: "Defaults for an outbreak (each can be changed when you trigger one). " +
+      "Fatality is the share of the infected who die over the illness (COVID-19 ≈ 0.5–1%, 1918 flu ≈ 2–3%, " +
+      "Black Death 30–50%). Frail agents (high health need) are more at risk, so health care saves lives.", fields: [
+    { path: "epidemic_initial_infected", label: "Infected at the start", kind: "int", min: 1, step: 1 },
+    { path: "epidemic_contagion", label: "Contagion (chance a day per agent within reach)", kind: "float", min: 0, max: 1, step: 0.01 },
+    { path: "epidemic_radius", label: "Reach (px)", kind: "float", min: 1, step: 10 },
+    { path: "epidemic_fatality", label: "Fatality (share of the infected)", kind: "float", min: 0, max: 1, step: 0.001 },
+    { path: "epidemic_duration", label: "Illness lasts (days)", kind: "int", min: 1, step: 1 },
+    { path: "epidemic_health_impact", label: "Health need added a day while ill", kind: "float", min: 0, max: 1, step: 0.01 },
+    { path: "epidemic_frailty", label: "Frailty (extra risk for the unwell)", kind: "float", min: 0, max: 10, step: 0.1 },
+  ]},
+  { title: "Central government: inflation and expectations", hint: "The price index starts after a warm-up (price " +
+      "discovery isn't inflation). Expected inflation = credibility × the target + (1 − credibility) × an adaptive " +
+      "estimate that closes half its gap to measured inflation every half-life. The central bank moves its rate " +
+      "gradually (it keeps the smoothing share of last month's rate).", fields: [
+    { path: "cpi_warmup_days", label: "Price-index warm-up (days)", kind: "int", min: 0, max: 360, step: 5 },
+    { path: "expectations_half_life_days", label: "Expectations half-life (days)", kind: "float", min: 1, max: 3600, step: 30 },
+    { path: "expectations_credibility", label: "Central bank credibility (0–1)", kind: "float", min: 0, max: 1, step: 0.05 },
+    { path: "wage_indexation", label: "Wage indexation (share of expected inflation)", kind: "float", min: 0, max: 2, step: 0.05 },
+    { path: "taylor_smoothing", label: "Rate smoothing (share of last month's rate kept)", kind: "float", min: 0, max: 0.99, step: 0.01,
+      enabledWhen: v => v.government_enabled },
+    { path: "taylor_max_rate", label: "Highest policy rate (a year)", kind: "float", min: 0, max: 2, step: 0.01,
+      enabledWhen: v => v.government_enabled },
+    { path: "approval_inflation_half", label: "Approval: inflation excess that halves the score", kind: "float", min: 0.001, max: 10, step: 0.01,
+      enabledWhen: v => v.government_enabled },
+    { path: "owner_cohort_share", label: "Reports: big owners hold this share of asset value", kind: "float", min: 0.01, max: 1, step: 0.05 },
   ]},
 ];
 const SETUP_FIELDS = SETUP_SECTIONS.flatMap(s => s.fields);

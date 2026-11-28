@@ -2024,7 +2024,24 @@ async function triggerShock(payload) {
 }
 if ($("shock-shortage")) $("shock-shortage").onclick = () => triggerShock({ kind: "shortage", severity: 0.5, days: 60 });
 if ($("shock-disaster")) $("shock-disaster").onclick = () => triggerShock({ kind: "disaster", house_loss: 0.2 });
-if ($("shock-epidemic")) $("shock-epidemic").onclick = () => triggerShock({ kind: "epidemic", initial_infected: 3, contagion_rate: 0.15, lethality_rate: 0.01 });
+// Epidemic presets: fatality = share of the infected who die (infection fatality rate).
+const EPI_PRESETS = {
+  covid: { contagion: 5, fatality: 0.7, duration: 14, health: 3 },
+  flu1918: { contagion: 7, fatality: 2.5, duration: 10, health: 4 },
+  plague: { contagion: 4, fatality: 40, duration: 21, health: 5 },
+};
+if ($("epi-preset")) $("epi-preset").onchange = (e) => {
+  const p = EPI_PRESETS[e.target.value];
+  if (!p) return;
+  $("epi-contagion").value = p.contagion; $("epi-fatality").value = p.fatality;
+  $("epi-duration").value = p.duration; $("epi-health").value = p.health;
+};
+if ($("shock-epidemic")) $("shock-epidemic").onclick = () => {
+  const num = (id, scale = 1) => (Number($(id)?.value) || 0) / scale;
+  triggerShock({ kind: "epidemic", initial_infected: num("epi-initial"), contagion_rate: num("epi-contagion", 100),
+                 radius: num("epi-radius"), fatality: num("epi-fatality", 100), duration: num("epi-duration"),
+                 health_impact: num("epi-health", 100), frailty: num("epi-frailty") });
+};
 
 buildForm();
 api("/api/state").then(s => {

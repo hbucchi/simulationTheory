@@ -59,8 +59,8 @@ class PaydayTests(unittest.TestCase):
 
     def test_the_pay_law_is_set_through_the_government_api(self):
         import server
-        changes = server.parse_policy({"pay_period": "weekly", "balanced_budget": True, "debt_limit": 0.9})
-        self.assertEqual(changes, {"pay_period": "weekly", "balanced_budget": True, "debt_limit": 0.9})
+        changes = server.parse_policy({"pay_period": "weekly", "surplus_transfers": 0.5, "debt_limit": 0.9})
+        self.assertEqual(changes, {"pay_period": "weekly", "surplus_transfers": 0.5, "debt_limit": 0.9})
         with self.assertRaises(ValueError):
             server.parse_policy({"pay_period": "hourly"})
 

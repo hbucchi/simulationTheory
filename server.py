@@ -260,13 +260,18 @@ class Simulation:
                                         house_loss=_number(body.get("house_loss", 0.2), "house_loss", 0, 1),
                                         asset_loss=_number(body.get("asset_loss", 0.0), "asset_loss", 0, 0.9))
             elif kind == "epidemic":
+                opt = lambda key, low, high, whole=False: (_number(body[key], key, low, high, whole=whole)
+                                                           if body.get(key) is not None else None)
                 shocks.trigger_epidemic(
                     self.world,
-                    initial_infected=_number(body.get("initial_infected", 3), "initial_infected", 1, 5000, whole=True),
-                    contagion_rate=_number(body.get("contagion_rate", 0.15), "contagion_rate", 0, 1),
-                    lethality_rate=_number(body.get("lethality_rate", 0.01), "lethality_rate", 0, 1),
-                    health_impact=_number(body.get("health_impact", 0.04), "health_impact", 0, 1),
-                    duration=_number(body.get("duration", 30), "duration", 1, 3600, whole=True),
+                    initial_infected=opt("initial_infected", 1, 5000, True),
+                    contagion_rate=opt("contagion_rate", 0, 1),
+                    fatality=opt("fatality", 0, 1),
+                    lethality_rate=opt("lethality_rate", 0, 1),
+                    health_impact=opt("health_impact", 0, 1),
+                    duration=opt("duration", 1, 3600, True),
+                    radius=opt("radius", 1, 5000),
+                    frailty=opt("frailty", 0, 10),
                 )
             else:
                 raise ValueError("kind must be 'shortage', 'disaster', or 'epidemic'")
@@ -278,13 +283,17 @@ class Simulation:
 
 
 # Pricing settings (cost prices) that can be changed live in the Products tab: name -> (low, high).
-PRICING_LIMITS = {'cost_floor_margin': (0, 10), 'stock_target_days': (0.1, 10000), 'stock_adjust_speed': (0, 1), 'distress_days': (0, 10000), 'distress_max': (0, 1)}
+PRICING_LIMITS = {'cost_floor_margin': (0, 10), 'stock_target_days': (0.1, 10000), 'stock_adjust_speed': (0, 1), 'distress_days': (0, 10000), 'distress_max': (0, 1),
+                  # inflation expectations and the central bank's pace (rules, changeable in game)
+                  'expectations_half_life_days': (1, 3600), 'expectations_credibility': (0, 1), 'wage_indexation': (0, 2),
+                  'taylor_smoothing': (0, 0.99), 'taylor_max_rate': (0, 2)}
 
 # Government / central bank settings that can be changed live: name -> (low, high) or bool.
 POLICY_LIMITS = {"min_wage": (0, 1e9), "min_rate": (0, 10), "labor_purchase": (0, 1e6), "capital_ratio": (0, 1),
                  "tax_production": (0, 1), "tax_wage": (0, 1), "tax_profit": (0, 1), "benefit_rate": (0, 10),
                  "reserve_requirement": (0, 1), "reserve_rate": (0, 1), "llr_penalty": (0, 1),
-                 "enabled": bool, "balanced_budget": bool, "lender_of_last_resort": bool,
+                 "enabled": bool, "lender_of_last_resort": bool, "savings_to_bonds": bool,
+                 "surplus_repay_debt": (0, 1), "surplus_public_works": (0, 1), "surplus_transfers": (0, 1),
                  "bonds_enabled": bool, "debt_limit": (0, 10), "bond_spread": (0, 0.01), "bond_days": (1, 3600),
                  "pay_period": ("daily", "weekly", "monthly"),
                  "min_contract_days": (0, 3600), "severance_rate": (0, 2),

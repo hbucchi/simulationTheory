@@ -41,7 +41,7 @@ class Invest(Module):
             return
         # Nothing worth buying today: idle money still goes to work, in government bonds.
         rules = world.rules
-        if not rules.savings_to_bonds or not rules.investing_enabled or agent.project:
+        if not world.government.savings_to_bonds or not rules.investing_enabled or agent.project:
             return
         if economy.is_needy(agent, rules):
             return

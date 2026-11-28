@@ -45,6 +45,20 @@ def labor_factor(agent, rules):
     return f
 
 
+def labor_factors(agent, rules):
+    """{cause: factor} of every penalty cutting the agent's labour now (labor_factor is their
+    product; a critically ill agent has {"health": 0.0})."""
+    if not rules.need_penalties_enabled:
+        return {}
+    if _on(rules, "health") and agent.health >= CRITICAL:
+        return {"health": 0.0}
+    out = {need: factor for need, factor in LABOR_AT_WARNING.items()
+           if _on(rules, need) and getattr(agent, need) >= WARNING}
+    if agent.depressed:
+        out["depression"] = DEPRESSED_LABOR
+    return out
+
+
 def speed_factor(agent, rules):
     return THIRSTY_SPEED if _on(rules, "thirst") and agent.thirst >= WARNING else 1.0
 

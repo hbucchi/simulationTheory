@@ -13,8 +13,8 @@ unemployment benefit), it sells bonds for the shortfall, as long as its debt sta
   only if nobody will lend: the central bank stands behind its government);
 - after ``bond_days`` a bond is repaid from the treasury, or rolled over (the holder gets a new
   bond at today's rate) when the treasury can't repay it;
-- with a balanced budget, taxes left after spending repay debt early (soonest maturity first)
-  before buying more public works.
+- the player may use a share of the treasury's spare cash to repay debt early (soonest maturity
+  first): government.surplus_repay_debt.
 
 Selling bonds only moves money (from buyers to the treasury), it doesn't create any. A dead
 agent's bonds are cancelled with the rest of its estate's money.
@@ -281,6 +281,38 @@ class PublicDebt:
             if not principal:
                 economy.earn(holder, amount, "assets")
 
+    def sustainability(self, world):
+        """Debt arithmetic: r (average yearly rate on the debt), g (yearly growth of nominal GDP,
+        over the last 3 months), r - g, the interest burden (interest / tax revenue, last 30 days),
+        the primary balance (taxes - spending other than interest, a month) and the primary
+        balance that would hold debt / GDP steady: (r - g) / (1 + g) x debt / GDP x GDP.
+        When r > g, debt grows faster than the economy unless the budget runs a primary surplus."""
+        year = world.year_steps()
+        total = self.total
+        r = (sum(b.principal * ((1 + b.rate) ** year - 1) for b in self.bonds) / total) if total > 0 else None
+        h = world.recorder.history
+        g = None
+        back = 3 * world.rules.month_steps
+        if len(h) > back and h[-1].get("accounts_steps") and h[-1 - back].get("accounts_steps"):
+            now = h[-1]["gdp_nominal"] * year / h[-1]["accounts_steps"]
+            then = h[-1 - back]["gdp_nominal"] * year / h[-1 - back]["accounts_steps"]
+            if now > 0 and then > 0:
+                g = (now / then) ** (year / back) - 1
+        gov = world.government
+        month = world.rules.month_steps
+        revenue = sum(gov.revenue_days[-month:]) if gov.revenue_days else 0.0
+        rows = gov.spend_by_day[-month:]
+        interest = sum(d.get("interest", 0.0) for d in rows)
+        other = sum(v for d in rows for k, v in d.items() if k not in ("interest", "debt_repaid"))
+        gdp_year = h[-1]["gdp_nominal"] * year / h[-1]["accounts_steps"] if h and h[-1].get("accounts_steps") else 0.0
+        out = {"r": r, "g": g, "r_minus_g": (r - g) if r is not None and g is not None else None,
+               "interest_burden": interest / revenue if revenue > 0 else None,
+               "primary_balance_month": revenue - other,
+               "debt_to_nominal_gdp": total / gdp_year if gdp_year > 0 else None}
+        if out["r_minus_g"] is not None and gdp_year > 0:
+            out["stabilising_primary_month"] = (r - g) / (1 + g) * total / 12 if g > -1 else None
+        return out
+
     def to_dict(self, world):
         total = self.total
         gdp = self.yearly_gdp(world)
@@ -293,4 +325,6 @@ class PublicDebt:
                 "room": round(self.room(world), 2), "issued": round(self.issued, 2), "repaid": round(self.repaid, 2),
                 "interest_paid": round(self.interest_paid, 2), "step_interest": round(self.step_interest, 2),
                 "step_borrowed": round(self.step_borrowed, 2), "step_repaid": round(self.step_repaid, 2),
-                "unsold": round(self.unsold, 2)}
+                "unsold": round(self.unsold, 2),
+                "sustainability": {k: (round(v, 6) if isinstance(v, float) else v)
+                                   for k, v in self.sustainability(world).items()}}

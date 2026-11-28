@@ -107,32 +107,51 @@ class Shocks:
         self._record(entry)
         return entry
 
-    def trigger_epidemic(self, world, initial_infected=3, contagion_rate=0.15, lethality_rate=0.01,
-                         health_impact=0.04, duration=30, radius=120.0):
-        """Epidemic: infects initial agents; spreads to nearby agents, worsens health, and can kill."""
+    def trigger_epidemic(self, world, initial_infected=None, contagion_rate=None, fatality=None,
+                         health_impact=None, duration=None, radius=None, frailty=None, lethality_rate=None):
+        """Epidemic: infects initial agents; spreads to nearby agents, worsens health, and can kill.
+        Anything not given comes from the rules (epidemic_*). ``fatality`` is the share of the
+        infected who die over the illness (an infection fatality rate); the older ``lethality_rate``
+        (a daily chance) is still accepted and converted: fatality = 1 - (1 - rate)^duration."""
+        r = world.rules
         if not world.agents:
             return None
-        k = min(len(world.agents), max(1, int(initial_infected)))
+        duration = max(1, int(r.epidemic_duration if duration is None else duration))
+        if fatality is None:
+            fatality = (1 - (1 - min(1.0, max(0.0, float(lethality_rate)))) ** duration
+                        if lethality_rate is not None else r.epidemic_fatality)
+        fatality = min(1.0, max(0.0, float(fatality)))
+        k = min(len(world.agents), max(1, int(r.epidemic_initial_infected if initial_infected is None else initial_infected)))
         patient_zeros = self.rng.sample(world.agents, k)
         epi = {
             "id": self.next_id, "kind": "epidemic", "started": world.tick,
-            "contagion_rate": min(1.0, max(0.0, float(contagion_rate))),
-            "lethality_rate": min(1.0, max(0.0, float(lethality_rate))),
-            "health_impact": max(0.0, float(health_impact)),
-            "duration": max(1, int(duration)),
-            "radius": max(1.0, float(radius)),
-            "infected": {a.id: max(1, int(duration)) for a in patient_zeros},
+            "contagion_rate": min(1.0, max(0.0, float(r.epidemic_contagion if contagion_rate is None else contagion_rate))),
+            "fatality": fatality,
+            # The daily chance of dying that gives ``fatality`` over the illness (for an average agent).
+            "lethality_rate": 1 - (1 - fatality) ** (1 / duration) if fatality < 1 else 1.0,
+            "health_impact": max(0.0, float(r.epidemic_health_impact if health_impact is None else health_impact)),
+            "duration": duration,
+            "radius": max(1.0, float(r.epidemic_radius if radius is None else radius)),
+            "frailty": max(0.0, float(r.epidemic_frailty if frailty is None else frailty)),
+            "infected": {a.id: duration for a in patient_zeros},
             "immune": set(),
             "total_infected": k,
             "total_deaths": 0,
         }
         self.next_id += 1
         self.epidemics.append(epi)
-        msg = (f"Epidemic outbreak: {k} infected (contagion {epi['contagion_rate']*100:.0f}%/day, "
-               f"lethality {epi['lethality_rate']*100:.1f}%/day)")
+        msg = (f"Epidemic outbreak: {k} infected (contagion {epi['contagion_rate']*100:.0f}% a day per contact, "
+               f"{fatality*100:.1f}% of the infected may die, ill for {duration} days)")
         world.log(msg)
         self._record({"id": epi["id"], "kind": "epidemic", "tick": world.tick, "summary": msg})
         return epi
+
+    @staticmethod
+    def death_risk(epi, agent):
+        """Today's chance that ``agent`` dies of the epidemic: the average daily rate x its frailty
+        (1 + frailty x (health need - 0.5)), never below 0."""
+        frail = max(0.0, 1 + epi.get("frailty", 0.0) * (agent.health - 0.5))
+        return min(1.0, epi["lethality_rate"] * frail)
 
     # ---------- daily step ----------
 
@@ -168,9 +187,9 @@ class Shocks:
                         if math.hypot(agent.x - other.x, agent.y - other.y) <= r:
                             if self.rng.random() < epi["contagion_rate"]:
                                 new_cases.append(other.id)
-                # Lethality check (only when death_enabled).
+                # Lethality check (only when death_enabled): frail (unwell) agents are more at risk.
                 if world.rules.death_enabled and epi["lethality_rate"] > 0:
-                    if self.rng.random() < epi["lethality_rate"]:
+                    if self.rng.random() < self.death_risk(epi, agent):
                         epi["infected"].pop(aid, None)
                         epi["total_deaths"] += 1
                         world._die(agent, "epidemic")
@@ -211,7 +230,8 @@ class Shocks:
             "epidemics": [{"id": e["id"], "started": e["started"], "infected": len(e["infected"]),
                            "immune": len(e["immune"]), "total_infected": e["total_infected"],
                            "total_deaths": e["total_deaths"], "contagion_rate": e["contagion_rate"],
-                           "lethality_rate": e["lethality_rate"]} for e in self.epidemics],
+                           "lethality_rate": e["lethality_rate"], "fatality": e.get("fatality"),
+                           "duration": e["duration"], "radius": e["radius"]} for e in self.epidemics],
             "infected_ids": sorted({aid for e in self.epidemics for aid in e["infected"]}),
             "history": self.history[-15:],
         }

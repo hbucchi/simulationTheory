@@ -295,7 +295,17 @@ class Rules:
     # from unemployment (Okun's law: 2% of output per point above taylor_unemployment), within
     # 0-20% a year. Off: the policy rate stays where the player puts it (gov_min_rate).
     taylor_enabled: bool = True
+    # Central banks move gradually: each month the rate keeps taylor_smoothing of last month's
+    # rate and moves (1 - smoothing) of the way toward what the rule asks (0.93 a month is about 0.8 a quarter, the inertia estimated for real central banks),
+    # never above taylor_max_rate.
+    taylor_smoothing: float = 0.93
+    taylor_max_rate: float = 0.20
     inflation_target: float = 0.02
+    # Approval: how agents feel inflation away from the target, on a log scale. The excess is
+    # d = |ln((1 + inflation) / (1 + target))| and the inflation score is 1 / (1 + d / d_half), with
+    # d_half = ln(1 + approval_inflation_half): 10% too high (or too low) halves the score, and
+    # every further multiplication of prices hurts again, but less than the one before.
+    approval_inflation_half: float = 0.10
     neutral_rate: float = 0.02
     taylor_unemployment: float = 0.05
     gov_labor_purchase: float = 0.0
@@ -326,12 +336,18 @@ class Rules:
     # Taxes (shares) and spending. Production tax: of the money of every sale of goods (seller
     # pays). Salary tax: of every wage. Profit tax: of company and bank profits. The treasury pays
     # public works, then an unemployment benefit of benefit_rate x the wage for labour offered and
-    # not hired; with balanced_budget what is left hires more idle labour for public works.
+    # not hired, then the player's spending policies.
     tax_production: float = 0.05
     tax_wage: float = 0.10
     tax_profit: float = 0.15
     benefit_rate: float = 0.4
-    balanced_budget: bool = True
+    # What happens to money left in the treasury after that, each day: the player decides. In this
+    # order, each a share of the cash still there after the step before: repay debt early (soonest
+    # due first), hire idle labour for public works, pay out equally to every agent (transfers).
+    # The rest stays in the treasury (all 0 = everything is kept). Nothing is borrowed for this.
+    surplus_repay_debt: float = 0.0
+    surplus_public_works: float = 0.0
+    surplus_transfers: float = 0.0
 
     # Banking (see banking.py). Banks are an industry ("banking"): its plant is built from capital
     # goods, runs on labour and electricity and makes the banking services that loans use up
@@ -517,11 +533,38 @@ class Rules:
     # when shocks_enabled is on, random shocks also occur at shock_chance_year events per year.
     shocks_enabled: bool = False
     shock_chance_year: float = 0.5
+    # Epidemics (defaults for a new outbreak; each can be set when triggering one). An infected
+    # agent stays ill epidemic_duration days, its health need rising epidemic_health_impact a day;
+    # each day it infects each agent within epidemic_radius with chance epidemic_contagion. Of
+    # those infected, epidemic_fatality die over the illness on average (an infection fatality
+    # rate: COVID-19 about 0.5-1%, the 1918 flu about 2-3%, the Black Death 30-50%). Frail agents
+    # are more at risk: an agent's risk is x (1 + epidemic_frailty x (health need - 0.5)), so health
+    # care (health goods, a public health service) saves lives.
+    epidemic_initial_infected: int = 3
+    epidemic_contagion: float = 0.05
+    epidemic_fatality: float = 0.007
+    epidemic_duration: int = 14
+    epidemic_radius: float = 120.0
+    epidemic_health_impact: float = 0.03
+    epidemic_frailty: float = 1.0
 
-    # Adaptive inflation expectations: when on, trailing CPI inflation feeds into wage demands and
-    # nominal loan/bond rates (Fisher effect) so players can compare spot-only vs expectations.
+    # Inflation expectations: when on, expected inflation feeds into wage demands and nominal loan
+    # rates (Fisher effect). Expected inflation = credibility x the central bank's target +
+    # (1 - credibility) x an adaptive estimate that closes half its gap to measured inflation every
+    # expectations_half_life_days (each day by 1 - 0.5^(1 / half-life) of the gap). Real-world
+    # expectations move over months, and partly stay anchored to a credible target. Wages pass on
+    # wage_indexation of expected inflation (1 = full indexation, 0 = none).
     expectations_enabled: bool = False
-    expectations_speed: float = 0.05   # daily EMA weight toward trailing CPI inflation
+    expectations_half_life_days: float = 180.0
+    expectations_credibility: float = 0.5
+    wage_indexation: float = 1.0
+    # Price index (CPI): the first cpi_warmup_days are price discovery (markets finding their
+    # level from the starting prices), not inflation: the index starts at 100 at the end of them.
+    cpi_warmup_days: int = 30
+    # Who counts as an owner (reports only): rank agents by the value of their assets, largest
+    # first; the smallest group that together holds owner_cohort_share of all asset value are the
+    # (big) owners, everyone else holding some assets is an SME (small business or saver).
+    owner_cohort_share: float = 0.8
 
     # Labour law: minimum employment contract length (0 = gig economy, 360 = annual) and early
     # termination severance fee (share of remaining contracted wages). Factored into investment yield.
@@ -652,6 +695,20 @@ class Rules:
         """
         if not isinstance(data, dict):
             raise ValueError("rules must be an object")
+        if "expectations_speed" in data:
+            # Older scenarios gave a daily speed; it is now a half-life in days.
+            import math as _m
+            data = dict(data)
+            speed = float(data.pop("expectations_speed"))
+            if 0 < speed < 1:
+                data.setdefault("expectations_half_life_days", round(_m.log(0.5) / _m.log(1 - speed), 1))
+        if "balanced_budget" in data:
+            # Older scenarios: "balanced budget" spent everything (repay over the limit, then
+            # public works, then transfers). It is now three explicit choices.
+            data = dict(data)
+            on = bool(data.pop("balanced_budget"))
+            for k in ("surplus_repay_debt", "surplus_public_works", "surplus_transfers"):
+                data.setdefault(k, 1.0 if on and k != "surplus_repay_debt" else 0.0)
         known = {f.name for f in fields(cls)}
         unknown = set(data) - known
         if unknown:
@@ -907,7 +964,9 @@ LIMITS = {
     "tax_wage": (0, 1, "float"),
     "tax_profit": (0, 1, "float"),
     "benefit_rate": (0, 10, "float"),
-    "balanced_budget": (None, None, "bool"),
+    "surplus_repay_debt": (0, 1, "float"),
+    "surplus_public_works": (0, 1, "float"),
+    "surplus_transfers": (0, 1, "float"),
     "commerce_enabled": (None, None, "bool"),
     "industries_enabled": (None, None, "bool"),
     "reserve_ratio": (0, 1, "float"),
@@ -947,6 +1006,7 @@ LIMITS = {
     "gov_min_rate": (0, 10, "float"),
     "taylor_enabled": (None, None, "bool"),
     "inflation_target": (-0.5, 1, "float"),
+    "approval_inflation_half": (0.001, 10, "float"),
     "neutral_rate": (-0.5, 1, "float"),
     "taylor_unemployment": (0, 1, "float"),
     "gov_labor_purchase": (0, 1e6, "float"),
@@ -1007,8 +1067,21 @@ LIMITS = {
     "inheritance_rule": (("nearest",), None, "choice"),
     "shocks_enabled": (None, None, "bool"),
     "shock_chance_year": (0, 50, "float"),
+    "epidemic_initial_infected": (1, 5000, "int"),
+    "epidemic_contagion": (0, 1, "float"),
+    "epidemic_fatality": (0, 1, "float"),
+    "epidemic_duration": (1, 3600, "int"),
+    "epidemic_radius": (1, 5000, "float"),
+    "epidemic_health_impact": (0, 1, "float"),
+    "epidemic_frailty": (0, 10, "float"),
     "expectations_enabled": (None, None, "bool"),
-    "expectations_speed": (0, 1, "float"),
+    "expectations_half_life_days": (1, 3600, "float"),
+    "expectations_credibility": (0, 1, "float"),
+    "wage_indexation": (0, 2, "float"),
+    "cpi_warmup_days": (0, 360, "int"),
+    "owner_cohort_share": (0.01, 1, "float"),
+    "taylor_smoothing": (0, 0.99, "float"),
+    "taylor_max_rate": (0, 2, "float"),
     "min_contract_days": (0, 3600, "int"),
     "severance_rate": (0, 2, "float"),
     "firms_enabled": (None, None, "bool"),

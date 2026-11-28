@@ -55,6 +55,80 @@ def efficiency(agent, rules):
     return min(1.0, max(rules.min_efficiency, 1 - drag))
 
 
+# Causes of lost labour, in the order the breakdown shows them.
+LOSS_CAUSES = ("hunger", "thirst", "sleep", "health", "energy", "shelter", "boredom", "depression")
+
+
+def capacity_losses(agent, rules):
+    """{cause: units of labour lost today} explaining labor_capacity - capacity_now.
+
+    capacity_now = labor_capacity x efficiency x penalty factor. The efficiency loss,
+    labor_capacity x (1 - efficiency), is shared out in proportion to each need's drag
+    (weight x level, plus the depression penalty); when efficiency sits at its floor the shares are
+    scaled down to the loss that actually happened. The penalty loss, labor_capacity x efficiency
+    x (1 - factor), is shared in proportion to the log of each penalty's factor (factors multiply,
+    so logs add); a critically ill agent's whole remaining capacity is lost to health."""
+    base = agent.labor_capacity
+    out = {}
+    drags = {n: rules.efficiency_weights.get(n, 0) * getattr(agent, n) for n in NEEDS_FOR_WELLBEING}
+    if agent.depressed:
+        drags["depression"] = rules.depression_penalty
+    drag = sum(v for v in drags.values() if v > 0)
+    eff = efficiency(agent, rules)
+    eff_loss = base * (1 - eff)
+    if drag > 0 and eff_loss > 0:
+        for n, v in drags.items():
+            if v > 0:
+                out[n] = out.get(n, 0.0) + eff_loss * v / drag
+    factors = penalties.labor_factors(agent, rules)
+    pen_loss = base * eff * (1 - penalties.labor_factor(agent, rules))
+    if pen_loss > 0:
+        if any(f <= 0 for f in factors.values()):
+            out["health"] = out.get("health", 0.0) + pen_loss
+        else:
+            logs = {n: -math.log(f) for n, f in factors.items() if f < 1}
+            total = sum(logs.values())
+            for n, v in logs.items():
+                out[n] = out.get(n, 0.0) + pen_loss * v / total
+    return out
+
+
+def labour_breakdown(world):
+    """Where the day's labour went, in units, adding up to the agents' full capacity:
+    capacity lost (by cause: lost_by), used in their own businesses, hired by firms, hired by the
+    government, used in autonomous production, offered but not hired (looking for work), and
+    not offered. Autonomous production can go beyond what penalties leave (survival effort): that
+    extra is reported as survival_extra (it reduces the loss)."""
+    rules = world.rules
+    lost = {c: 0.0 for c in LOSS_CAUSES}
+    out = {"full_capacity": 0.0, "lost": 0.0, "own_business": 0.0, "hired_private": 0.0, "hired_public": 0.0,
+           "autonomous": 0.0, "looking": 0.0, "not_offered": 0.0, "survival_extra": 0.0}
+    sick = 0
+    for a in world.agents:
+        out["full_capacity"] += a.labor_capacity
+        for c, v in capacity_losses(a, rules).items():
+            lost[c] = lost.get(c, 0.0) + v
+        public = a.employers.get("Government", 0.0) if a.employers else 0.0
+        own = getattr(a, "own_labor", 0.0)
+        auto = getattr(a, "subsistence_labor", 0.0)
+        out["own_business"] += own
+        out["hired_public"] += public
+        out["hired_private"] += max(0.0, a.labor_sold - public)
+        used = own + a.labor_sold + auto
+        extra = max(0.0, used - a.capacity_now)
+        out["survival_extra"] += extra
+        out["autonomous"] += auto
+        left = max(0.0, a.capacity_now - used)
+        looking = min(left, max(0.0, a.offered - a.labor_sold))
+        out["looking"] += looking
+        out["not_offered"] += left - looking
+        if penalties.labor_factors(a, rules).get("health") is not None:
+            sick += 1
+    out["lost"] = sum(lost.values()) - out["survival_extra"]
+    return {"breakdown": {k: round(v, 3) for k, v in out.items()},
+            "lost_by": {k: round(v, 3) for k, v in lost.items()}, "workers_sick": sick}
+
+
 def wellbeing(agent, rules):
     weights = rules.efficiency_weights
     total = sum(weights.values()) or 1
@@ -297,7 +371,7 @@ class LaborMarket:
             daily_speed = (1 + monthly_speed) ** (1 / max(1, rules.month_steps)) - 1
             exp_daily = 0.0
             if rules.expectations_enabled and world.expected_inflation > 0:
-                exp_daily = (1 + world.expected_inflation) ** (1 / max(1, world.year_steps())) - 1
+                exp_daily = rules.wage_indexation * ((1 + world.expected_inflation) ** (1 / max(1, world.year_steps())) - 1)
             wage = self.wage * (1 + daily_speed * gap + exp_daily)
         else:
             wage = base * self.multiplier
@@ -416,23 +490,8 @@ class LaborMarket:
         if gov.enabled and world.agents:
             # The player's spending policies (income support, give-aways, public services).
             gov.policies.run(world, offers, remaining, stats)
-        if gov.balanced_budget and gov.treasury > 1e-6 and gov.debt.bonds and gov.debt.room(world) <= 0:
-            # Over the debt limit: taxes left over repay debt first (soonest due first). Otherwise
-            # the treasury spends what it has, savers' bond money included, so savings come back
-            # into the economy as wages and transfers.
-            gov.debt.repay_early(world, gov.treasury)
-        if gov.balanced_budget and gov.treasury > 1e-6:
-            # Whatever the treasury has left hires more idle labour: taxes go back into the economy.
-            stats["gov_hired"] += self._public_works(world, offers, remaining, math.inf, stats, budget=gov.treasury)
-        if gov.balanced_budget and gov.treasury > 1e-6 and world.agents:
-            # Nobody left to hire: the rest is paid out equally to everyone (transfers).
-            each = gov.treasury / len(world.agents)
-            for a in world.agents:
-                a.money += each
-                economy.earn(a, each, "transfers")
-            gov.spent["transfers"] += gov.treasury
-            gov.step_spent["transfers"] += gov.treasury
-            gov.treasury = 0.0
+        if gov.enabled:
+            self._spend_surplus(world, offers, remaining, stats)
 
         if rules.subsistence_enabled and rules.industries_enabled:
             stats["subsistence"] = self._subsistence(world, stats)
@@ -444,7 +503,33 @@ class LaborMarket:
         stats["idle"] = max(0.0, stats["offered"] - stats["hired"] - stats["gov_hired"])
         stats["withheld"] = max(0.0, stats["unused"] - stats["idle"])
         stats["workers_hired"] = sum(1 for a in offers if a.labor_sold > 1e-9)
+        stats.update(labour_breakdown(world))
         self.stats = stats
+
+    def _spend_surplus(self, world, offers, remaining, stats):
+        """The treasury's cash left after the day's spending goes where the player said
+        (government.surplus_* shares of it, in order: repay debt, public works, transfers); the
+        rest stays in the treasury. Only cash already there is used: nothing is borrowed or created."""
+        gov = world.government
+        if gov.treasury <= 1e-6:
+            return
+        # Each share is of what is left after the step before (a waterfall): 100% public works
+        # then 100% transfers hires all the idle labour it can, and pays out whatever remains.
+        repay = gov.treasury * min(1.0, max(0.0, gov.surplus_repay_debt))
+        if repay > 1e-6 and gov.debt.bonds:
+            gov.debt.repay_early(world, repay)
+        works = gov.treasury * min(1.0, max(0.0, gov.surplus_public_works))
+        if works > 1e-6:
+            stats["gov_hired"] += self._public_works(world, offers, remaining, math.inf, stats, budget=works)
+        transfers = gov.treasury * min(1.0, max(0.0, gov.surplus_transfers))
+        if transfers > 1e-6 and world.agents:
+            each = transfers / len(world.agents)
+            for a in world.agents:
+                a.money += each
+                economy.earn(a, each, "transfers")
+            gov.treasury -= transfers
+            gov.spent["transfers"] += transfers
+            gov.step_spent["transfers"] += transfers
 
     @staticmethod
     def _public_works(world, offers, remaining, wanted, stats, budget=math.inf):
@@ -507,6 +592,7 @@ class LaborMarket:
         used, agents, units = 0.0, 0, 0.0
         for a in world.agents:
             a.subsistence_made = {}
+            a.subsistence_labor = 0.0
             if not options:
                 continue
             spare = a.capacity_now - getattr(a, "own_labor", 0.0) - a.labor_sold
@@ -534,6 +620,7 @@ class LaborMarket:
                 a.flow["produced"][good] = a.flow["produced"].get(good, 0) + whole
             a.subsistence[good] = done - whole
             a.subsistence_made[good] = made
+            a.subsistence_labor = spare
             used += spare
             agents += 1
             units += made

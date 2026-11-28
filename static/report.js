@@ -271,12 +271,13 @@ function renderReport(r) {
     kpiSection("Distribution", [
       KPI("Wealth inequality", stock(p => p.gini_wealth), g2, "num", "down", "Gini of wealth"),
       KPI("Money inequality", stock(p => p.gini_money), g2, "num", "down", "Gini of money held"),
-      KPI("Asset ownership", stock(p => p.gini_assets), g2, "num", "down", `Gini of shares · ${c.owners} of ${c.population} own some`),
+      KPI("Asset ownership", stock(p => p.gini_assets), g2, "num", "down", `Gini of shares · ${c.asset_holders ?? c.owners} of ${c.population} hold some`),
       KPI("Income inequality", stock(p => p.gini_income), g2, "num", "down", "Gini of smoothed income"),
       KPI("Consumption inequality", stock(p => p.gini_consumption), g2, "num", "down", "Gini of smoothed consumption"),
       KPI("Richest 10% hold", stock(p => p.top10_wealth), pct, "pp", "down", "share of all wealth"),
       KPI("Poorest 50% hold", stock(p => p.bottom50_wealth), pct, "pp", "up", "share of all wealth (50% = equal)"),
-      KPI("Asset owners", stock(p => p.owners), whole, "int", "up", "agents holding any share"),
+      KPI("Big owners", stock(p => p.owners), whole, "int", "up", "the fewest agents holding 80% of asset value"),
+      KPI("SMEs", stock(p => p.smes ?? 0), whole, "int", "up", "other agents with some assets (small firms, savers)"),
     ]),
     kpiSection("Employment", [
       KPI("Employment rate", rate(p => p.employment), pct, "pp", "up", "agents who worked (own assets or hired)"),
@@ -384,16 +385,18 @@ function renderReport(r) {
              { label: "Unemployment", color: SERIES[2], values: flow(p => p.unemployment) },
              { label: "Unfilled jobs", color: SERIES[3], values: flow(p => p.unfilled_jobs) }] });
   const grp = r.groups;
-  table($("table-groups"), ["", "Owners", "Workers"], [
-    ["Agents", `${grp.owners.count}`, `${grp.workers.count}`],
-    ["Share of wealth", fmt.pct(grp.owners.share), fmt.pct(grp.workers.share)],
-    ["Wealth", fmt.money(grp.owners.wealth), fmt.money(grp.workers.wealth)],
-    ["Money", fmt.money(grp.owners.money), fmt.money(grp.workers.money)],
-    ["Income /day", fmt.money(grp.owners.income), fmt.money(grp.workers.income)],
-    ["Worked today", fmt.pct(grp.owners.worked), fmt.pct(grp.workers.worked)],
-    ["Wellbeing", grp.owners.wellbeing.toFixed(2), grp.workers.wellbeing.toFixed(2)],
-    ["Need for a job", grp.owners.job_need.toFixed(2), grp.workers.job_need.toFixed(2)],
-  ].map((row, i) => [row[0], grp.owners.count || !i ? row[1] : "–", grp.workers.count || !i ? row[2] : "–"]));
+  const cols = [grp.owners, grp.smes || { count: 0 }, grp.workers];
+  const cell = (g, i, f) => (g.count || !i ? f(g) : "–");
+  table($("table-groups"), ["", "Big owners", "SMEs", "Workers"], [
+    ["Agents", g => `${g.count}`],
+    ["Share of wealth", g => fmt.pct(g.share)],
+    ["Wealth", g => fmt.money(g.wealth)],
+    ["Money", g => fmt.money(g.money)],
+    ["Income /day", g => fmt.money(g.income)],
+    ["Worked today", g => fmt.pct(g.worked)],
+    ["Wellbeing", g => g.wellbeing.toFixed(2)],
+    ["Need for a job", g => g.job_need.toFixed(2)],
+  ].map(([name, f], i) => [name, ...cols.map(g => cell(g, i, f))]));
 
   // Labour.
   lineChart($("chart-labor"), { x, xLabel: "Day", title: "Labour per day",

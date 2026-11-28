@@ -46,7 +46,13 @@ class World:
     PRICE_HISTORY = 200  # steps of price history kept for the charts
     CAPITAL_STOCK = 5    # units of a capital good its makers keep ready for builders (usable_jobs)
 
-    def __init__(self, width=1024, height=1024, seed=None, rules=None):
+    # Independent random streams (each seeded from the world seed, or from stream_seeds[name]):
+    # changing what one stream draws never shifts the others, so two worlds can share every
+    # random draw but one (common random numbers), e.g. same people, different map.
+    STREAMS = ("money", "inventory", "assets", "owners", "positions", "traits", "personality",
+               "homes", "luck", "shocks", "run")
+
+    def __init__(self, width=1024, height=1024, seed=None, rules=None, stream_seeds=None):
         self.width = width
         self.height = height
         self.rules = rules or Rules()
@@ -54,9 +60,12 @@ class World:
         # at most this many pixels apart. 12 = two dots of radius 6 touching.
         self.contact_distance = self.rules.contact_distance
         self.seed = seed
-        self.rng = random.Random(seed)
+        self.stream_seeds = {k: v for k, v in (stream_seeds or {}).items() if k in self.STREAMS}
+        self.streams = {k: random.Random(f"{k}-{self.stream_seed(k)}") for k in self.STREAMS}
+        # Day-to-day randomness (who meets whom, how much a buyer buys, ties in hiring, ...).
+        self.rng = self.streams["run"]
         # Personality traits come from their own stream, so adding traits doesn't change the rest.
-        self.personality_rng = random.Random(f"personality-{seed}")
+        self.personality_rng = self.streams["personality"]
         self.agents = []
         self.tick = 0
         self.events = []  # newest last; trimmed to keep the payload small
@@ -74,7 +83,7 @@ class World:
         self.housing = HousingMarket(self.rules)
         self.government = Government.from_rules(self.rules)
         self.banking = Banking(self.rules, self.government)
-        self.shocks = Shocks(self.rules, seed=seed)
+        self.shocks = Shocks(self.rules, seed=self.stream_seed("shocks"))
         self.firms = FirmRegistry(self.rules)
         self.retained_total = 0.0
         self.sell_through = {}        # good -> share of recent output that didn't expire
@@ -122,11 +131,16 @@ class World:
         self.profitable = {}   # {good: its industry pays the wage at current prices} (update_profitability)
         self.step_prices = None
 
+    def stream_seed(self, name):
+        """The seed of random stream ``name`` (the world seed unless overridden)."""
+        return self.stream_seeds.get(name, self.seed)
+
     def clamp_position(self, x, y):
         return (min(max(x, 0.0), self.width), min(max(y, 0.0), self.height))
 
     def random_position(self):
-        return (self.rng.uniform(0, self.width), self.rng.uniform(0, self.height))
+        rng = self.streams["positions"]
+        return (rng.uniform(0, self.width), rng.uniform(0, self.height))
 
     def add_agent(self, agent):
         agent.id = self.next_id
@@ -155,7 +169,7 @@ class World:
 
         def draw(spec, whole=False, field=None):
             low, high = SPREADS[field][1:3] if field else (-math.inf, math.inf)
-            return distributions.sample(spec, self.rng, whole, low, high)
+            return distributions.sample(spec, self.streams["traits"], whole, low, high)
 
         rx, ry = self.random_position()
         x, y = self.clamp_position(rx if x is None else x, ry if y is None else y)
@@ -263,10 +277,11 @@ class World:
         exactly (e.g. the top 1% really hold 50%); other values are drawn per agent."""
         n = self.rules.agents if count is None else count
         r = self.rules
-        money = distributions.allocate(r.money, n, self.rng, False, *SPREADS["money"][1:3])
-        stock = {k: distributions.allocate(v, n, self.rng, True, *SPREADS["inventory"][1:3])
+        st = self.streams
+        money = distributions.allocate(r.money, n, st["money"], False, *SPREADS["money"][1:3])
+        stock = {k: distributions.allocate(v, n, st["inventory"], True, *SPREADS["inventory"][1:3])
                  for k, v in r.inventory.items()}
-        assets = {k: distributions.allocate(v, n, self.rng, False, *SPREADS["assets"][1:3])
+        assets = {k: distributions.allocate(v, n, st["assets"], False, *SPREADS["assets"][1:3])
                   for k, v in r.assets.items()}
         # Starting banks: banking plants for rules.starting_banks agents that can put up the
         # minimum capital, spread evenly over them from richest to poorest (no random draws, so
@@ -284,7 +299,7 @@ class World:
         # Only asset_owner_share of agents start owning assets (the rest own only their labour):
         # every industry's starting shares are handed to them, in proportion to what they drew.
         if 0 < r.asset_owner_share < 1 and n > 1:
-            pick = random.Random(f"owners-{self.seed}")
+            pick = self.streams["owners"]
             k = max(1, round(n * r.asset_owner_share))
             owners = set(chosen)              # bank founders always keep their banks
             if k > len(owners):
@@ -336,7 +351,7 @@ class World:
             created = self.agents[-n:]
             owners = [a for a in created if a.assets]
             others = [a for a in created if not a.assets]
-            random.Random(f"homes-{self.seed}").shuffle(others)
+            self.streams["homes"].shuffle(others)
             self.housing.setup(self, owners, others)
         self.update_price_level()   # starting prices already at the money's level (M x V = P x Y)
 
@@ -959,7 +974,7 @@ class World:
         if not r.luck_enabled:
             return
         chance = r.luck_chance_year / 12
-        luck_rng = random.Random(f"luck-{self.seed}-{self.tick}")
+        luck_rng = random.Random(f"luck-{self.stream_seed('luck')}-{self.tick}")
         for a in self.agents:
             a.luck = {g: v for g, v in a.luck.items() if v[1] >= self.tick and g in a.assets}
             for g in a.assets:
@@ -982,13 +997,21 @@ class World:
         return market
 
     def update_expectations(self):
-        """Adaptive inflation expectations: smooth trailing CPI inflation (yearly) via EMA."""
+        """Inflation expectations (a yearly rate): credibility x the inflation target + (1 -
+        credibility) x an adaptive estimate, which closes 1 - 0.5^(1 / half-life) of its gap to
+        measured inflation (the CPI's inflation_policy reading) each day."""
+        r = self.rules
         hist = self.recorder.history
-        if not hist or hist[-1].get("accounts_steps", 0) < self.rules.month_steps:
-            return
-        cpi_inf = max(-0.5, min(2.0, hist[-1].get("inflation", 0.0)))
-        speed = self.rules.expectations_speed
-        self.expected_inflation += speed * (cpi_inf - self.expected_inflation)
+        gov = self.government
+        target = gov.inflation_target if gov.enabled else 0.0
+        if not hasattr(self, "adaptive_inflation"):
+            self.adaptive_inflation = target
+        measured = hist[-1].get("inflation_policy") if hist else None
+        if measured is not None:
+            speed = 1 - 0.5 ** (1 / max(1.0, r.expectations_half_life_days))
+            self.adaptive_inflation += speed * (max(-0.5, measured) - self.adaptive_inflation)
+        cred = r.expectations_credibility if gov.enabled else 0.0
+        self.expected_inflation = cred * target + (1 - cred) * self.adaptive_inflation
 
     def unit_markups(self):
         """Per-unit price rise inside a deal: only where buyers outnumber sellers."""
@@ -1441,9 +1464,11 @@ class World:
             "consumer_needs": list(self.rules.consumer_needs),
             "banking": self.banking.to_dict(self),
             # National accounts of the latest step (GDP over the last year, price indexes).
-            "macro": ({k: round(self.recorder.history[-1][k], 4) for k in
-                       ("gdp_nominal", "gdp_real", "deflator", "cpi", "inflation", "accounts_steps")}
+            "macro": ({k: (round(self.recorder.history[-1][k], 4) if self.recorder.history[-1].get(k) is not None else None)
+                       for k in ("gdp_nominal", "gdp_real", "deflator", "cpi", "inflation", "inflation_annualised",
+                                 "inflation_policy", "cpi_days", "accounts_steps")}
                       if self.recorder.history else None),
+            "cpi_warmup_days": self.rules.cpi_warmup_days,
             # Industries left out because their recipe needs a good that isn't in this game.
             "auto_excluded": list(self.rules.auto_excluded),
             "government": self.government.to_dict(self),
@@ -1458,7 +1483,10 @@ class World:
                 "industry_yield": {g: round(self.industry_yield(g) * self.year_steps(), 4) for g in self.rules.active_goods},
                 "price_mode": self.rules.price_mode,
                 "pricing": {k: getattr(self.rules, k) for k in ("cost_floor_margin", "stock_target_days",
-                                                                 "stock_adjust_speed", "distress_days", "distress_max")},
+                                                                 "stock_adjust_speed", "distress_days", "distress_max",
+                                                                 "expectations_half_life_days", "expectations_credibility",
+                                                                 "wage_indexation", "taylor_smoothing", "taylor_max_rate")},
+                "expectations_enabled": self.rules.expectations_enabled,
                 "stock_factor": {g: round(self.stock_factor[g], 3) for g in self.rules.active_goods},
                 "clearance_schedule": self.rules.clearance_schedule,
                 "prices": self.current_prices(),

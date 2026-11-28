@@ -48,7 +48,8 @@ class OfferTests(unittest.TestCase):
 
 class BuyingWithAMortgageTests(unittest.TestCase):
     def test_a_first_home_bought_with_a_deposit_and_a_mortgage(self):
-        w, _ = world()
+        w, banker = world()
+        w.rng.shuffle = lambda agents: agents.reverse()   # the buyer shops first (the banker could buy it to let)
         seller = w.create_agent(needs=CALM, money=0, inventory=EMPTY)
         buyer = w.create_agent(needs=CALM, money=30_000, inventory=EMPTY)
         buyer.income_avg = 1_000

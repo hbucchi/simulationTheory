@@ -139,6 +139,24 @@
                 <button type="button" class="danger" id="shock-epidemic">Epidemic outbreak</button>
               </div>
             </div>
+            <details class="epi-form">
+              <summary>Epidemic settings</summary>
+              <div class="bank-fields">
+                <label>Start from <span><select id="epi-preset">
+                  <option value="">your own settings</option>
+                  <option value="covid">COVID-19-like (0.7% of the infected die, ill 14 days)</option>
+                  <option value="flu1918">1918-flu-like (2.5%, ill 10 days)</option>
+                  <option value="plague">Black-Death-like (40%, ill 21 days)</option>
+                </select></span></label>
+                <label>Infected at the start <span><input id="epi-initial" type="number" min="1" step="1" value="3"> agents</span></label>
+                <label>Contagion <span><input id="epi-contagion" type="number" min="0" max="100" step="0.5" value="5"> % a day per agent within reach</span></label>
+                <label>Reach <span><input id="epi-radius" type="number" min="1" step="10" value="120"> px</span></label>
+                <label>Fatality <span><input id="epi-fatality" type="number" min="0" max="100" step="0.1" value="0.7"> % of the infected</span></label>
+                <label>Illness lasts <span><input id="epi-duration" type="number" min="1" step="1" value="14"> days</span></label>
+                <label>Health worsens <span><input id="epi-health" type="number" min="0" max="100" step="0.5" value="3"> points a day while ill</span></label>
+                <label>Frailty <span><input id="epi-frailty" type="number" min="0" max="10" step="0.1" value="1"> (how much more the unwell die; health care lowers it)</span></label>
+              </div>
+            </details>
             <div id="dash-shocks" class="card-sub" style="margin-top:10px"></div>
           </section>
           <section class="card">
@@ -233,7 +251,7 @@
             </select></label>
         </div>
         <details class="card fold settings">
-          <summary>Pricing: base price, inventory and cash flow</summary>
+          <summary>Pricing: base price, inventory, cash flow and inflation expectations</summary>
           <form id="pricing-form" class="panel" novalidate>
             <p class="field-help">Base price = (inputs + labour + depreciation) × (1 + margin, after profit tax) ÷ (1 − production
               tax). The final price adds demand (buyers who can pay vs sellers, concentration) and inventory (unsold stock vs a
@@ -244,6 +262,11 @@
               <label>Prices move with inventory by up to <span><input data-pricing="stock_adjust_speed" data-scale="100" type="number" min="0" max="100" step="1"> % a day</span></label>
               <label>Cash flow: sellers short of cash for <span><input data-pricing="distress_days" type="number" min="0" step="1"> days of wages and loans</span></label>
               <label>… sell at up to <span><input data-pricing="distress_max" data-scale="100" type="number" min="0" max="100" step="5"> % off</span></label>
+              <label>Expected inflation closes half its gap in <span><input data-pricing="expectations_half_life_days" type="number" min="1" max="3600" step="30"> days</span></label>
+              <label>Central bank credibility <span><input data-pricing="expectations_credibility" data-scale="100" type="number" min="0" max="100" step="5"> % anchored to the target</span></label>
+              <label>Wages pass on <span><input data-pricing="wage_indexation" data-scale="100" type="number" min="0" max="200" step="5"> % of expected inflation</span></label>
+              <label>Central bank keeps <span><input data-pricing="taylor_smoothing" data-scale="100" type="number" min="0" max="99" step="1"> % of last month's rate (moves gradually)</span></label>
+              <label>Highest policy rate <span><input data-pricing="taylor_max_rate" data-scale="100" type="number" min="0" max="200" step="1"> % a year</span></label>
             </div>
             <div class="form-actions"><span class="spacer"></span><button type="submit" class="primary">Apply</button></div>
             <p id="pricing-status" class="status" hidden></p>
@@ -425,11 +448,20 @@
             <label>Salary tax <span><input data-policy="tax_wage" data-scale="100" type="number" min="0" max="100" step="1"> % of wages</span></label>
             <label>Profit tax <span><input data-policy="tax_profit" data-scale="100" type="number" min="0" max="100" step="1"> % of profits</span></label>
             <label>Unemployment benefit <span><input data-policy="benefit_rate" data-scale="100" type="number" min="0" max="1000" step="5"> % of the wage</span></label>
-            <label class="check">Spend all taxes (balanced budget: the rest repays debt, buys public works, then is paid out equally) <input data-policy="balanced_budget" type="checkbox"></label>
+          </div>
+          <h4 class="gov-sub">Money left in the treasury: your call</h4>
+          <p class="field-help">After the day's benefit, public works and spending policies, the treasury may still hold cash
+            (taxes, or savers' bond purchases). Each day it uses these shares, in this order, each of the cash still there
+            after the step before. Whatever you don't allocate stays in the treasury. Nothing is spent this way unless you choose it.</p>
+          <div class="bank-fields gov-fields">
+            <label>Repay debt early <span><input data-policy="surplus_repay_debt" data-scale="100" type="number" min="0" max="100" step="5"> % of treasury cash a day</span></label>
+            <label>Then hire idle labour (public works) <span><input data-policy="surplus_public_works" data-scale="100" type="number" min="0" max="100" step="5"> % of what's left</span></label>
+            <label>Then pay out equally to everyone <span><input data-policy="surplus_transfers" data-scale="100" type="number" min="0" max="100" step="5"> % of what's left</span></label>
           </div>
           <h4 class="gov-sub">Borrowing: government bonds</h4>
           <div class="bank-fields gov-fields">
             <label class="check">Government may borrow (sells bonds when taxes can't pay for its policies and the benefit) <input data-policy="bonds_enabled" type="checkbox"></label>
+            <label class="check">Savers may buy bonds with idle money even when the government doesn't need to borrow (the cash then sits in the treasury unless you allocate it below) <input data-policy="savings_to_bonds" type="checkbox"></label>
             <label>Debt limit <span><input data-policy="debt_limit" data-scale="100" type="number" min="0" max="1000" step="5"> % of a year's GDP</span></label>
             <label>Bond rate = central bank rate + <span><input data-policy="bond_spread" data-scale="100" data-yearly="1" type="number" min="0" step="0.1"> % a year</span></label>
             <label>Risk premium at the debt limit <span><input data-policy="bond_risk_max" data-scale="100" type="number" min="0" step="1"> % a year (× (debt ÷ limit)²)</span></label>
@@ -573,8 +605,9 @@
         <div id="chart-employment"></div>
       </section>
       <section class="card report-card">
-        <h2 class="card-title">Owners and workers</h2>
-        <p class="card-sub">Owners hold at least one asset share; workers hold none. Averages per agent now.</p>
+        <h2 class="card-title">Owners, SMEs and workers</h2>
+        <p class="card-sub">Big owners: the fewest agents who together hold 80% of all asset value. SMEs: everyone else with
+          some assets (small firms and savers). Workers hold none. Averages per agent now.</p>
         <div id="table-groups"></div>
       </section>
 
