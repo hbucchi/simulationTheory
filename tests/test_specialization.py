@@ -19,14 +19,14 @@ def world(**rules):
 
 
 class SkillTests(unittest.TestCase):
-    def test_skill_grows_with_diminishing_returns_up_to_ten_times(self):
+    def test_skill_grows_with_diminishing_returns_up_to_skill_max(self):
         w = world()
         a = w.create_agent(needs=CALM, money=0, inventory=EMPTY)
         self.assertEqual(skill(a, "water", w.rules), 1.0)
         a.experience["water"] = 60                       # one learning scale
-        self.assertAlmostEqual(skill(a, "water", w.rules), 1 + 9 * (1 - math.exp(-1)))
+        self.assertAlmostEqual(skill(a, "water", w.rules), 1 + (w.rules.skill_max - 1) * (1 - math.exp(-1)))
         a.experience["water"] = 1e6
-        self.assertAlmostEqual(skill(a, "water", w.rules), 10.0)
+        self.assertAlmostEqual(skill(a, "water", w.rules), 2.0)
         self.assertEqual(skill(a, "food", w.rules), 1.0)  # only where it worked
 
     def test_specialists_lose_the_knack_of_fending_for_themselves(self):
@@ -43,10 +43,9 @@ class SkillTests(unittest.TestCase):
         expert = w.create_agent(needs=CALM, money=0, inventory=EMPTY)
         expert.experience["water"] = 1e6
         stats = LaborMarket._empty_stats()
-        LaborMarket._hire(boss, expert, 0.5, 10.0, stats, w.government, effective=0.5 * 10, good="water")
-        self.assertAlmostEqual(boss.labor_available, 5.0)                 # half a day of an expert = 5 units
+        LaborMarket._hire(boss, expert, 0.5, 10.0, stats, w.government, effective=0.5 * 2, good="water")
+        self.assertAlmostEqual(boss.labor_available, 1.0)                 # half a day of an expert = 1 unit
         self.assertAlmostEqual(expert.experience["water"], 1e6 + 0.5)
-        order = sorted([novice, expert], key=lambda x: x.asking_wage / skill(x, "water", w.rules))
         novice.asking_wage = expert.asking_wage = 10
         order = sorted([novice, expert], key=lambda x: x.asking_wage / skill(x, "water", w.rules))
         self.assertIs(order[0], expert)
@@ -56,6 +55,36 @@ class SkillTests(unittest.TestCase):
         a = w.create_agent(needs=CALM, money=0, inventory=EMPTY)
         a.experience["water"] = 1e6
         self.assertEqual((skill(a, "water", w.rules), autonomous_factor(a, w.rules)), (1.0, 1.0))
+
+    def test_owner_own_labour_uses_specialization_skill(self):
+        w = world()
+        owner = w.create_agent(needs=CALM, money=100, inventory=EMPTY, assets={"water": 50.0}, labor_capacity=0.5)
+        owner.experience["water"] = 1e6
+        w.labor.clear(w)
+        # Half a day of an expert owner (2x skill) delivers ~1.0 unit of effective labour.
+        self.assertGreater(owner.labor_available, owner.own_labor * 1.5)
+
+    def test_autonomous_production_builds_experience_and_output_per_labour(self):
+        w = world(subsistence_rates={"food": 0.35, "water": 0})
+        a = w.create_agent(needs=CALM, money=0, inventory=EMPTY, labor_capacity=0.5)
+        w.labor.clear(w)
+        first_made = a.subsistence_made["food"]
+        self.assertGreater(a.experience.get("food", 0.0), 0.0)
+        # After more autonomous food production, output per labour rises.
+        for _ in range(10):
+            w.labor.clear(w)
+        self.assertGreater(a.subsistence_made["food"], first_made)
+        # Experience in an unrelated industry still penalizes autonomous food output.
+        other = w.create_agent(needs={**CALM, "hunger": 0.4}, money=0, inventory=EMPTY, labor_capacity=0.5)
+        other.experience["software"] = 1e6
+        self.assertAlmostEqual(autonomous_factor(other, w.rules, "food"), 0.05)
+
+    def test_inventory_remove_rejects_negative_quantity(self):
+        w = world()
+        a = w.create_agent(needs=CALM, money=0, inventory={**EMPTY, "water": 2})
+        with self.assertRaises(ValueError):
+            a.inventory.remove("water", -5)
+        self.assertEqual(a.inventory.count("water"), 2)
 
 
 class ClearanceTests(unittest.TestCase):

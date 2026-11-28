@@ -87,13 +87,13 @@ def skill(agent, good, rules):
     return 1.0 + (rules.skill_max - 1.0) * (1.0 - math.exp(-xp / rules.skill_scale)) if xp > 0 else 1.0
 
 
-def autonomous_factor(agent, rules):
+def autonomous_factor(agent, rules, good=None):
     """Share of its starting productivity in autonomous production the agent keeps: specialised
-    workers lose the knack of fending for themselves, down to auto_skill_floor (5%) as their total
-    experience grows (same learning curve as skill)."""
+    workers lose the knack of fending for themselves in unrelated goods, down to auto_skill_floor
+    (5%) as their experience in other industries grows (same learning curve as skill)."""
     if not rules.specialization_enabled:
         return 1.0
-    xp = sum(agent.experience.values())
+    xp = sum(v for k, v in agent.experience.items() if good is None or k != good)
     if xp <= 0:
         return 1.0
     learned = 1.0 - math.exp(-xp / rules.skill_scale)
@@ -110,6 +110,10 @@ class LaborMarket:
         self.paid_last = 0.0      # wages paid on the latest payday
         self.reservation = 0.0    # the reservation wage (see reservation_wage)
         self.unpaid_last = 0.0    # ... and what employers couldn't pay then (arrears)
+        self.wage_streak_dir = 0  # +1 upward pressure, -1 downward pressure, 0 neutral
+        self.wage_streak_days = 0 # consecutive days with pressure in the same direction
+        self.contracts = []       # active employment contracts: {employer_id, worker_id, units, wage, good, end_tick}
+        self.severance_total = 0.0
 
     @staticmethod
     def pay_days(world):
@@ -223,8 +227,10 @@ class LaborMarket:
             a.output_capacity = {g: world.asset_output(g, s) for g, s in a.assets.items() if g in economy.GOODS}
             for g, j in jobs.items():
                 jobs_by_good[g] = jobs_by_good.get(g, 0) + j
-            own = min(a.capacity_now, a.labor_need)
-            a.labor_available = own
+            own_skill = skill(a, a.main_good, rules) if a.main_good else 1.0
+            own = min(a.capacity_now, a.labor_need / own_skill) if own_skill > 0 else 0.0
+            own_effective = own * own_skill
+            a.labor_available = own_effective
             a.own_labor = own
             if own > 0 and a.main_good and rules.specialization_enabled:
                 a.experience[a.main_good] = a.experience.get(a.main_good, 0.0) + own
@@ -234,7 +240,7 @@ class LaborMarket:
             stats["capacity"] += a.capacity_now
             stats["own_use"] += own
             a.flow["labor_made"] += a.capacity_now
-            a.flow["labor_used"] += own
+            a.flow["labor_used"] += own_effective
             free = a.capacity_now - own
             a.offered = free * (rules.participation_floor + (1 - rules.participation_floor) * a.job_need)
             # Fewer than labor_offer_months of living costs left (money + goods for its needs):
@@ -273,15 +279,26 @@ class LaborMarket:
         else:
             self.multiplier = 1.0
         if rules.wage_adjust_speed > 0 and self.wage > 0 and rules.price_mode != "fixed":
-            # Wages follow the labour market (excess demand): up when employers want more paid
-            # labour than is offered, down when workers outnumber jobs, by at most
-            # wage_adjust_speed a day. Not tied to output prices, so prices and wages can't chase
-            # each other upwards (the value of output only sets the first day's wage).
+            # Wages follow the labour market symmetrically (excess demand or supply): starting at
+            # wage_adjust_speed (or wage_down_speed) per month, doubling each consecutive month the
+            # pressure persists in the same direction (2% -> 4% -> 8% ...) up to wage_speed_max.
             gap = (stats["wanted"] - stats["offered"]) / max(stats["offered"], stats["wanted"], 1e-9)
             gap = max(-1.0, min(1.0, gap))
-            # Wages are sticky downward (firms rarely cut pay): they fall at most wage_down_speed a day.
-            speed = rules.wage_adjust_speed if gap > 0 else rules.wage_down_speed
-            wage = self.wage * (1 + speed * gap)
+            direction = 1 if gap > 1e-6 else (-1 if gap < -1e-6 else 0)
+            if direction == 0:
+                self.wage_streak_dir, self.wage_streak_days = 0, 0
+            elif direction == self.wage_streak_dir:
+                self.wage_streak_days += 1
+            else:
+                self.wage_streak_dir, self.wage_streak_days = direction, 1
+            months = (self.wage_streak_days - 1) // max(1, rules.month_steps) if self.wage_streak_days else 0
+            base_monthly = rules.wage_adjust_speed if gap > 0 else rules.wage_down_speed
+            monthly_speed = min(rules.wage_speed_max, base_monthly * (2 ** months))
+            daily_speed = (1 + monthly_speed) ** (1 / max(1, rules.month_steps)) - 1
+            exp_daily = 0.0
+            if rules.expectations_enabled and world.expected_inflation > 0:
+                exp_daily = (1 + world.expected_inflation) ** (1 / max(1, world.year_steps())) - 1
+            wage = self.wage * (1 + daily_speed * gap + exp_daily)
         else:
             wage = base * self.multiplier
         # Floors: the minimum wage (government policy) and the reservation wage (nobody works for
@@ -297,12 +314,62 @@ class LaborMarket:
                                 self.wage * min(3.0, max(0.1, 1 + rules.bargaining_spread * (a.wellbeing - a.job_need))))
         offers.sort(key=lambda a: a.asking_wage)
         remaining = {a: a.offered for a in offers}
+        # Honor active employment contracts first; early termination pays severance.
+        stats["severance_paid"] = 0.0
+        still_contracts = []
+        for c in self.contracts:
+            if world.tick > c["end_tick"]:
+                continue
+            emp = world.agent_by_id(c["employer_id"])
+            wrk = world.agent_by_id(c["worker_id"])
+            if emp is None or wrk is None or emp not in world.alive or wrk not in world.alive:
+                continue
+            rem_worker = remaining.get(wrk, 0.0)
+            s = skill(wrk, c["good"], rules)
+            want = max(0.0, emp.labor_need - emp.labor_available)
+            need = cash_needed(emp, prices, rules)
+            avail_cash = max(0.0, economy.money_of(emp) + emp.company_cash - need - owed.get(emp.id, 0.0))
+            units = min(c["units"], rem_worker, want / s if s > 0 else 0.0,
+                        avail_cash / c["wage"] if c["wage"] > 0 else c["units"])
+            if units >= c["units"] * 0.5 and units > 1e-9:
+                if emp.company_cash:
+                    economy.draw_company_cash(emp, units * c["wage"])
+                if emp.deposits and emp.money < need + units * c["wage"]:
+                    world.banking.cash_up(emp, need + units * c["wage"])
+                affordable = max(0.0, emp.money - need - owed.get(emp.id, 0.0)) / c["wage"] if c["wage"] > 0 else units
+                units = min(units, affordable)
+                if units > 1e-9:
+                    self._hire(emp, wrk, units, c["wage"], stats, world.government,
+                               self.payroll if period > 1 else None, effective=units * s, good=c["good"])
+                    remaining[wrk] = max(0.0, rem_worker - units)
+                    still_contracts.append(c)
+                    continue
+            # Early termination before end_tick: employer owes severance_rate x remaining contracted wages.
+            rem_days = max(0, c["end_tick"] - world.tick)
+            sev_rate = world.government.severance_rate
+            if rem_days > 0 and sev_rate > 0:
+                fee = rem_days * c["units"] * c["wage"] * sev_rate
+                if emp.company_cash:
+                    economy.draw_company_cash(emp, fee)
+                if emp.deposits and emp.money < fee:
+                    world.banking.cash_up(emp, fee)
+                pay = min(fee, max(0.0, emp.money))
+                if pay > 0:
+                    emp.money -= pay
+                    wrk.money += pay
+                    economy.earn(wrk, pay, "wages")
+                    emp.flow["wages_paid"] = emp.flow.get("wages_paid", 0.0) + pay
+                    stats["severance_paid"] += pay
+                    self.severance_total += pay
+        self.contracts = still_contracts
+
         # Employers whose labour creates the most value hire first (as if they outbid the
         # others): a good that becomes scarce gets dearer, and its producers get workers first.
         # Ties (and equal values) are broken at random.
         world.rng.shuffle(employers)
         if rules.labor_priority == "value":
             employers.sort(key=lambda e: world.labor_value(e, prices), reverse=True)
+        min_contract = world.government.min_contract_days
         for employer in employers:
             want = employer.labor_need - employer.labor_available
             need = cash_needed(employer, prices, rules)
@@ -328,11 +395,18 @@ class LaborMarket:
                 s = skill(worker, good, rules)
                 affordable = budget / worker.asking_wage if worker.asking_wage > 0 else remaining[worker]
                 units = min(remaining[worker], want / s, affordable)       # units of the worker's time
+                if units <= 1e-9:
+                    continue
                 self._hire(employer, worker, units, worker.asking_wage, stats, world.government,
                            self.payroll if period > 1 else None, effective=units * s, good=good)
                 remaining[worker] -= units
                 want -= units * s
                 budget -= units * worker.asking_wage
+                if min_contract > 0:
+                    self.contracts.append({
+                        "employer_id": employer.id, "worker_id": worker.id, "units": units,
+                        "wage": worker.asking_wage, "good": good, "end_tick": world.tick + min_contract,
+                    })
 
         # Government spending (public works, then unemployment benefits; see government.py).
         gov = world.government
@@ -365,8 +439,8 @@ class LaborMarket:
 
         # Unused capacity = withheld (not offered: the agent didn't need to work) + idle
         # (offered but nobody hired it).
-        stats["unused"] = (stats["capacity"] - stats["own_use"] - stats["hired"] - stats["gov_hired"]
-                           - stats.get("subsistence", 0.0))     # (autonomous production uses labour too)
+        stats["unused"] = max(0.0, stats["capacity"] - stats["own_use"] - stats["hired"] - stats["gov_hired"]
+                              - stats.get("subsistence", 0.0))     # (autonomous production uses labour too)
         stats["idle"] = max(0.0, stats["offered"] - stats["hired"] - stats["gov_hired"])
         stats["withheld"] = max(0.0, stats["unused"] - stats["idle"])
         stats["workers_hired"] = sum(1 for a in offers if a.labor_sold > 1e-9)
@@ -448,7 +522,11 @@ class LaborMarket:
                 need = rules.need_of(opt[0])
                 return (economy.urgency(a, need, rules) - economy.held_relief(a, need, rules), opt[1])
             good, rate = max(options, key=score)
-            made = spare * rate * autonomous_factor(a, rules)     # specialists fend less well for themselves
+            # Producing a good autonomously builds experience in it and raises output per labour;
+            # experience in unrelated industries still reduces self-sufficiency (autonomous_factor).
+            made = spare * rate * skill(a, good, rules) * autonomous_factor(a, rules, good)
+            if rules.specialization_enabled:
+                a.experience[good] = a.experience.get(good, 0.0) + spare
             done = a.subsistence.get(good, 0.0) + made
             whole = int(done + 1e-9)
             if whole:
@@ -513,5 +591,6 @@ class LaborMarket:
 
     def to_dict(self):
         return {"wage": self.wage, "multiplier": self.multiplier, **self.stats,
+                "active_contracts": len(self.contracts), "severance_total": round(self.severance_total, 2),
                 "wages_owed": round(sum(self.payroll.values()), 2), "paid_last": round(self.paid_last, 2),
                 "unpaid_last": round(self.unpaid_last, 2)}

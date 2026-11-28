@@ -105,19 +105,20 @@ class Rules:
     # participation_floor + (1 - participation_floor) x need of its free capacity and asks
     # wage x (1 + bargaining_spread x (wellbeing - need)).
     labor_share: float = 0.6
-    # After the first day the wage moves with the labour market: by up to this share a day, up when
-    # employers want more paid labour than is offered, down when workers outnumber jobs; never
-    # below the reservation wage (what labour makes in autonomous production). 0 = the old rule
-    # (labor_share x value of output x the demand multiplier).
-    wage_adjust_speed: float = 0.05
-    wage_down_speed: float = 0.002       # ... but they fall at most this a day (sticky downward)
+    # After the first day the wage moves symmetrically with the labour market (excess demand or
+    # supply): starting at up to wage_adjust_speed per month (default 2%/month), doubling each
+    # consecutive month the pressure persists in the same direction (2% -> 4% -> 8% ...) up to
+    # wage_speed_max. 0 = the old rule (labor_share x value of output x the demand multiplier).
+    wage_adjust_speed: float = 0.02      # base monthly max upward adjustment (2%/month)
+    wage_down_speed: float = 0.02        # base monthly max downward adjustment (symmetric: 2%/month)
+    wage_speed_max: float = 0.64         # cap on accelerated monthly wage adjustment (64%/month)
     # Specialization (labour module): working in an industry builds experience there. A worker's
     # time is worth skill = 1 + (skill_max - 1) x (1 - e^(-experience / skill_scale)) units of
-    # labour in that industry (up to 10x; experience in units of labour worked), employers hire the
-    # cheapest per unit of work, and its autonomous production falls toward auto_skill_floor (5%)
-    # of the start as its total experience grows.
+    # labour in that industry (up to 2x by default; experience in units of labour worked),
+    # employers hire the cheapest per unit of work, and its autonomous production in unrelated
+    # goods falls toward auto_skill_floor (5%) of the start as its other experience grows.
     specialization_enabled: bool = True
-    skill_max: float = 10.0
+    skill_max: float = 2.0
     skill_scale: float = 60.0
     auto_skill_floor: float = 0.05
     money_weight: float = 0.5
@@ -211,9 +212,9 @@ class Rules:
     asset_labor: dict = field(default_factory=lambda: {g: BY_ID[g].get("asset_labor", 0.1 if _DEFAULT_LAYERS[g] == 1 else 0.2)
                                                        for g in GOODS})
     productivity: dict = field(default_factory=lambda: {g: default_productivity(g, _DEFAULT_LAYERS[g]) for g in GOODS})
-    productivity_growth: dict = field(default_factory=lambda: {g: 0.05 for g in GOODS})
-    productivity_growth_steps: int = 50
-    labor_saving: dict = field(default_factory=lambda: {g: 0.03 for g in GOODS})
+    productivity_growth: dict = field(default_factory=lambda: {g: 0.02 for g in GOODS})
+    productivity_growth_steps: int = 360
+    labor_saving: dict = field(default_factory=lambda: {g: 0.01 for g in GOODS})
     # Depreciation: every industry's plant wears out by depreciation[g] a year (a year is
     # 12 x month_steps steps), so asset shares shrink unless they are replaced by building.
     depreciation: dict = field(default_factory=lambda: {g: default_depreciation(g) for g in GOODS})
@@ -342,7 +343,8 @@ class Rules:
     starting_bank_shares: float = 1.0  # banking shares each of them starts with
     bank_min_capital: float = 1000.0   # founder's own money a bank needs to open (and to lend)
     bank_liquidity: float = 0.05       # vault cash each bank keeps itself (x deposits) before lending
-    deposit_rate: float = 0.00008211      # 3% a year (rates are per step = per day)
+    deposit_rate: float = (1.01 ** (1 / 360)) - 1   # 1% a year base deposit rate (cost on all deposits)
+    bank_rate_competition: bool = True # banks adjust their deposit rates to compete for deposits
     loan_spread: float = 0.00013554       # 5% a year: loan rate = deposit rate + this
     loan_steps: int = 300              # loans are repaid over this many steps
     max_loan_to_value: float = 0.6     # debt <= this x the borrower's asset shares (+ what it builds)
@@ -505,6 +507,31 @@ class Rules:
     depart_steps: int = 2              # days two traders walk apart
     cooldown_steps: int = 7            # days a pair ignores each other after a deal
     retry_steps: int = 2               # ... and after a meeting where nothing could be traded
+
+    # Inheritance: when on, a dead agent's money, deposits, inventory, assets and houses pass to an
+    # heir (currently "nearest" living agent) instead of being liquidated/destroyed.
+    inheritance_enabled: bool = False
+    inheritance_rule: str = "nearest"
+
+    # Shocks, disasters & epidemics (simulation/shocks.py): manual triggers always work via API/UI;
+    # when shocks_enabled is on, random shocks also occur at shock_chance_year events per year.
+    shocks_enabled: bool = False
+    shock_chance_year: float = 0.5
+
+    # Adaptive inflation expectations: when on, trailing CPI inflation feeds into wage demands and
+    # nominal loan/bond rates (Fisher effect) so players can compare spot-only vs expectations.
+    expectations_enabled: bool = False
+    expectations_speed: float = 0.05   # daily EMA weight toward trailing CPI inflation
+
+    # Labour law: minimum employment contract length (0 = gig economy, 360 = annual) and early
+    # termination severance fee (share of remaining contracted wages). Factored into investment yield.
+    min_contract_days: int = 0
+    severance_rate: float = 0.0
+
+    # Firm Entity module: when off, assets act as simplified local stores on agents; when on, each
+    # business tracks Income Statement, Balance Sheet, Cash Flow Statement, and Market Cap.
+    firms_enabled: bool = False
+    firm_overhead_rate: float = 0.0    # optional yearly fixed overhead as share of plant value
 
     # ---- derived tables (layers, relief per unit, which goods relieve which need) ----
     # Cached; assigning any field clears the cache. Change dicts by assigning a new dict.
@@ -753,6 +780,14 @@ MODULES = {
     "subsistence": ("subsistence_enabled", "Subsistence", (),
                     "Agents with no assets make a little water, grain, wood, herbs or stone with the labour nobody hired."),
     "depression": ("depression_enabled", "Depression", (), "Boredom at 1.00 depresses (slower, less efficient)."),
+    "inheritance": ("inheritance_enabled", "Inheritance", ("death",),
+                    "A dead agent's money, goods, shares and houses pass to its heir (nearest living agent) instead of vanishing."),
+    "shocks": ("shocks_enabled", "Shocks, disasters & epidemics", (),
+               "Random resource shortages, housing disasters and contagious epidemics (manual triggers always available)."),
+    "expectations": ("expectations_enabled", "Inflation expectations", (),
+                     "Trailing CPI inflation feeds into wage demands and nominal interest rates (off = spot info only)."),
+    "firms": ("firms_enabled", "Firm entities & financials", ("industries",),
+              "Tracks each business as a corporate entity with Income Statement, Balance Sheet, Cash Flow and Market Cap (off = simplified local stores)."),
 }
 
 
@@ -836,6 +871,7 @@ LIMITS = {
     "labor_share": (0, 1, "float"),
     "wage_adjust_speed": (0, 1, "float"),
     "wage_down_speed": (0, 1, "float"),
+    "wage_speed_max": (0, 10, "float"),
     "specialization_enabled": (None, None, "bool"),
     "skill_max": (1, 1000, "float"),
     "skill_scale": (0.01, 1e6, "float"),
@@ -876,6 +912,7 @@ LIMITS = {
     "industries_enabled": (None, None, "bool"),
     "reserve_ratio": (0, 1, "float"),
     "deposit_rate": (0, 1, "float"),
+    "bank_rate_competition": (None, None, "bool"),
     "loan_spread": (0, 1, "float"),
     "loan_steps": (1, 100000, "int"),
     "mortgage_years": (0, 100, "float"),
@@ -966,6 +1003,16 @@ LIMITS = {
     "depart_steps": (0, 1000, "int"),
     "cooldown_steps": (0, 10000, "int"),
     "retry_steps": (0, 10000, "int"),
+    "inheritance_enabled": (None, None, "bool"),
+    "inheritance_rule": (("nearest",), None, "choice"),
+    "shocks_enabled": (None, None, "bool"),
+    "shock_chance_year": (0, 50, "float"),
+    "expectations_enabled": (None, None, "bool"),
+    "expectations_speed": (0, 1, "float"),
+    "min_contract_days": (0, 3600, "int"),
+    "severance_rate": (0, 2, "float"),
+    "firms_enabled": (None, None, "bool"),
+    "firm_overhead_rate": (0, 1, "float"),
 }
 
 

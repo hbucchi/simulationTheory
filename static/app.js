@@ -234,6 +234,7 @@ function render(next) {
   if (editingId !== null && !agentById(editingId)) editingId = null;
   ui.tick.textContent = state.tick;
   ui.calDate.textContent = calendar(state.tick);
+  updateRegimeBadge();
   recordTrend();
   if (typeof refreshReport === "function") refreshReport();
   if (typeof reportVisible !== "undefined" && reportVisible) return;
@@ -1126,40 +1127,154 @@ ui.policyAdd.onclick = () => {
   sendPolicy({ action: "add", policy: { kind: "cash", audience: "low_income", share: 0.2, distribution: "equal", budget } });
 };
 
+function renderGovBudgetAndApproval(g) {
+  // 1. Approval card
+  const pctEl = $("gov-approval-pct");
+  const barsEl = $("gov-approval-bars");
+  if (pctEl && barsEl) {
+    const ap = g.approval ?? 0.5;
+    pctEl.textContent = `${Math.round(ap * 100)}%`;
+    pctEl.className = "approval-pct mono " + (ap >= 0.6 ? "good" : ap >= 0.4 ? "warn" : "bad");
+    const bd = g.approval_breakdown || {};
+    const factors = [
+      ["Wellbeing (45%)", bd.wellbeing ?? 0.5],
+      ["Employment (25%)", bd.employment ?? 0.5],
+      ["Price stability (15%)", bd.inflation ?? 0.5],
+      ["Tax burden (15%)", bd.taxes ?? 0.5],
+    ];
+    barsEl.innerHTML = "";
+    for (const [name, val] of factors) {
+      const row = Object.assign(document.createElement("div"), { className: "factor-row" });
+      const top = Object.assign(document.createElement("div"), { className: "factor-head" });
+      top.append(Object.assign(document.createElement("span"), { textContent: name }),
+                 Object.assign(document.createElement("b"), { className: "mono", textContent: `${Math.round(val * 100)}%` }));
+      const track = Object.assign(document.createElement("div"), { className: "budget-track" });
+      const fill = Object.assign(document.createElement("div"), { className: "budget-fill" });
+      fill.style.width = `${Math.round(Math.max(0, Math.min(1, val)) * 100)}%`;
+      fill.style.background = val >= 0.6 ? "var(--good)" : val >= 0.4 ? "var(--warn)" : "var(--bad)";
+      track.append(fill);
+      row.append(top, track);
+      barsEl.append(row);
+    }
+  }
+
+  // 2. 30-day Monthly Budget Summary
+  const bm = g.budget_month || { inflows: { production: 0, wage: 0, profit: 0, total: 0 },
+                                 outflows: { policies: 0, benefits: 0, public_works: 0, interest: 0, transfers: 0, reserve_interest: 0, total: 0 },
+                                 net: 0 };
+  const sumEl = $("gov-monthly-summary");
+  if (sumEl) {
+    sumEl.innerHTML = "";
+    const cards = [
+      ["Projected revenue /mo", usd(bm.inflows.total), ""],
+      ["Projected spending /mo", usd(bm.outflows.total), ""],
+      ["Monthly balance", (bm.net >= 0 ? "+" : "") + usd(bm.net), bm.net < 0 ? "warn" : ""],
+      ["Treasury on hand", usd(g.treasury), ""],
+    ];
+    for (const [label, val, cls] of cards) {
+      const d = Object.assign(document.createElement("div"), { className: cls });
+      d.append(label, Object.assign(document.createElement("b"), { className: "mono", textContent: val }));
+      sumEl.append(d);
+    }
+  }
+
+  // 3. Left: Revenue by tax + live interactive tax sliders
+  const sliderEl = $("gov-tax-sliders");
+  if (sliderEl) {
+    const revMax = Math.max(bm.inflows.total, 1);
+    const taxes = [
+      ["tax_production", "Production tax (sales)", g.tax_production, bm.inflows.production],
+      ["tax_wage", "Salary tax (wages)", g.tax_wage, bm.inflows.wage],
+      ["tax_profit", "Profit tax (companies & banks)", g.tax_profit, bm.inflows.profit],
+    ];
+    // Rebuild only if not currently dragging a slider
+    if (!sliderEl.dataset.dragging) {
+      sliderEl.innerHTML = "";
+      for (const [key, label, rate, monthlyAmt] of taxes) {
+        const row = Object.assign(document.createElement("div"), { className: "tax-slider-row" });
+        const head = Object.assign(document.createElement("div"), { className: "factor-head" });
+        const pctSpan = Object.assign(document.createElement("b"), { className: "mono", textContent: `${Math.round(rate * 100)}%` });
+        const amtSpan = Object.assign(document.createElement("span"), { className: "mono muted-amt", textContent: `${usd(monthlyAmt)} /mo` });
+        head.append(Object.assign(document.createElement("span"), { textContent: label }), amtSpan, pctSpan);
+        const slider = Object.assign(document.createElement("input"), {
+          type: "range", min: "0", max: "60", step: "1", value: String(Math.round(rate * 100)),
+          disabled: !g.enabled,
+        });
+        slider.onpointerdown = () => { sliderEl.dataset.dragging = "1"; };
+        slider.oninput = () => { pctSpan.textContent = `${slider.value}%`; };
+        slider.onchange = async () => {
+          delete sliderEl.dataset.dragging;
+          try {
+            render(await api("/api/government", { [key]: Number(slider.value) / 100 }));
+          } catch (err) {
+            alert(err.message);
+          }
+        };
+        const track = Object.assign(document.createElement("div"), { className: "budget-track thin" });
+        const fill = Object.assign(document.createElement("div"), { className: "budget-fill" });
+        fill.style.width = `${Math.round(monthlyAmt / revMax * 100)}%`;
+        fill.style.background = "var(--good)";
+        track.append(fill);
+        row.append(head, slider, track);
+        sliderEl.append(row);
+      }
+    }
+  }
+
+  // 4. Right: Monthly outflows breakdown
+  const outEl = $("gov-outflows");
+  if (outEl) {
+    const outMax = Math.max(bm.outflows.total, 1);
+    const items = [
+      ["Public spending policies", bm.outflows.policies, "var(--accent)"],
+      ["Unemployment benefits", bm.outflows.benefits, "var(--sky)"],
+      ["Public works (hired labour)", bm.outflows.public_works, "var(--violet)"],
+      ["Debt interest", bm.outflows.interest, "var(--bad)"],
+      ["Equal citizen transfers", bm.outflows.transfers, "var(--good)"],
+      ["Central bank reserve interest", bm.outflows.reserve_interest, "var(--warn)"],
+    ];
+    outEl.innerHTML = "";
+    for (const [label, amt, color] of items) {
+      const share = Math.round(amt / outMax * 100);
+      const row = Object.assign(document.createElement("div"), { className: "factor-row" });
+      const head = Object.assign(document.createElement("div"), { className: "factor-head" });
+      head.append(Object.assign(document.createElement("span"), { textContent: label }),
+                  Object.assign(document.createElement("b"), { className: "mono", textContent: `${usd(amt)} /mo (${share}%)` }));
+      const track = Object.assign(document.createElement("div"), { className: "budget-track" });
+      const fill = Object.assign(document.createElement("div"), { className: "budget-fill" });
+      fill.style.width = `${share}%`;
+      fill.style.background = color;
+      track.append(fill);
+      row.append(head, track);
+      outEl.append(row);
+    }
+  }
+}
+
 function renderGovernment() {
   fillGovernment();
   renderPolicies();
   const g = state.government;
   const m = state.market;
+  renderGovBudgetAndApproval(g);
+  const bm = g.budget_month || { inflows: { total: 0 }, outflows: { total: 0 } };
   const stats = [
     ["Policy rate", pctYear(g.min_rate, 2), g.taylor_enabled
       ? (g.taylor ? `Taylor rule: inflation ${(g.taylor.inflation * 100).toFixed(1)}%, unemployment ${(g.taylor.unemployment * 100).toFixed(0)}%`
                   : "Taylor rule: from month 3 (needs a quarter of data)")
       : "set by you · minimum return on assets"],
-    ["Labour hired", `${g.labor_purchase} /day`, "with newly created money"],
-    ["Money created", usd(g.money_created), `${usd(g.last_spent)} yesterday`],
-    ["Labour used up", g.labor_bought.toFixed(1), "in public works so far"],
-    ["Money in the economy", usd(m.money), "held by agents"],
-    ["Labour price", usd(m.prices.labor), `food ${usd(m.prices.food)} · water ${usd(m.prices.water)}`],
-    ...(state.market.labor.wages_owed > 0.01 || g.pay_period !== "daily" ? [["Wages owed", usd(state.market.labor.wages_owed),
-      `paid ${g.pay_period}` + (state.market.labor.unpaid_last > 0.01 ? ` · ${usd(state.market.labor.unpaid_last)} unpaid on the last payday` : "")]] : []),
-    ["Taxes today", usd(Object.values(g.step_revenue).reduce((a, v) => a + v, 0)),
-      `production ${usd(g.step_revenue.production)} · salary ${usd(g.step_revenue.wage)} · profit ${usd(g.step_revenue.profit)}`],
-    ["Spending today", usd(g.step_spent.benefits + g.step_spent.public_works + g.step_spent.transfers + (g.step_spent.interest || 0)),
-      `benefits ${usd(g.step_spent.benefits)} · public works ${usd(g.step_spent.public_works)} · transfers ${usd(g.step_spent.transfers)}` +
-      (g.step_spent.interest ? ` · interest ${usd(g.step_spent.interest)}` : "")],
-    ["Treasury", usd(g.treasury), `${usd(Object.values(g.revenue).reduce((a, v) => a + v, 0))} collected so far`],
+    ["Labour law", g.min_contract_days > 0 ? `${g.min_contract_days}d contract` : "Gig economy (0d)",
+      `paid ${g.pay_period} · severance ${Math.round((g.severance_rate || 0) * 100)}%`],
+    ["Money created", usd(g.money_created), `${usd(g.last_spent)} yesterday · ${g.labor_bought.toFixed(1)} labour bought`],
     ["Central bank loans", usd(g.llr_outstanding), `to banks · ${usd(g.llr_lent)} lent so far`],
     ...(g.debt ? [
       ["Public debt", usd(g.debt.debt), g.debt.gdp_year > 0
         ? `${(g.debt.debt_to_gdp * 100).toFixed(1)}% of a year's real GDP (limit ${Math.round(g.debt_limit * 100)}%)`
         : `limit ${Math.round(g.debt_limit * 100)}% of GDP`],
       ["Bond rate", `${(g.debt.rate_year * 100).toFixed(2)}% a year`,
-        `central bank rate + ${(perYear(g.bond_spread) * 100).toFixed(2)}% + risk ${(g.debt.risk_premium_year * 100).toFixed(2)}% · ${g.debt.bonds} bonds`],
-      ["Interest on debt", `${usd(g.debt.step_interest)} /day`, `${usd(g.debt.interest_paid)} paid so far`],
-      ["Who lent", `banks ${usd(g.debt.holders_banks)}`, `savers ${usd(g.debt.holders_agents)}` +
-        (g.debt.step_borrowed ? ` · borrowed ${usd(g.debt.step_borrowed)} yesterday` : "") +
-        (g.debt.step_repaid ? ` · repaid ${usd(g.debt.step_repaid)} yesterday` : "")],
+        `CB rate + ${(perYear(g.bond_spread) * 100).toFixed(2)}% + risk ${(g.debt.risk_premium_year * 100).toFixed(2)}% · ${g.debt.bonds} bonds`],
+      ["Debt interest /mo", usd(bm.outflows.interest || 0), `${usd(g.debt.interest_paid)} paid in total`],
+      ["Who lent", `banks ${usd(g.debt.holders_banks)}`, `savers ${usd(g.debt.holders_agents)}`],
     ] : []),
     ...(state.macro ? [
       ["GDP (last year)", usd(state.macro.gdp_nominal), `real ${usd(state.macro.gdp_real)} at year-ago prices`],
@@ -1363,6 +1478,15 @@ function renderDashboard() {
     return row;
   }));
 
+  const sh = state.shocks;
+  const dashShocks = $("dash-shocks");
+  if (dashShocks && sh) {
+    const active = [];
+    for (const s of sh.shortages || []) active.push(`Shortage: ${s.goods.join(", ")} -${Math.round(s.severity * 100)}% (ends day ${s.ends})`);
+    for (const e of sh.epidemics || []) active.push(`Epidemic: ${e.infected} infected, ${e.immune} immune, ${e.total_deaths} died`);
+    dashShocks.textContent = active.length ? `Active: ${active.join(" · ")}` : "No active shocks.";
+  }
+
   ui.dashEvents.replaceChildren(...[...state.events].reverse().slice(0, 6).map(ev => {
     const li = document.createElement("li");
     li.append(Object.assign(document.createElement("span"), { className: "ev-day", textContent: calendar(ev.tick) }),
@@ -1530,6 +1654,7 @@ function fillBanking(force = false) {
   bankDirty = false;
   const b = state.banking;
   ui.bankEnabled.checked = b.enabled;
+  $("bank-compete").checked = !!b.rate_competition;
   ui.bankDeposit.value = +(perYear(b.deposit_rate) * 100).toFixed(2);   // shown % a year, kept per day
   ui.bankSpread.value = +(perYear(b.loan_spread) * 100).toFixed(2);
   ui.bankReserve.value = +(b.liquidity * 100).toFixed(2);
@@ -1577,8 +1702,9 @@ function renderBanking() {
     head.append(Object.assign(document.createElement("b"), { textContent: bank.name }),
                 Object.assign(document.createElement("span"), { className: "bank-status", textContent: bank.status }));
     const ratio = bank.loans > 0 ? `${(bank.equity / bank.loans * 100).toFixed(0)}% of loans` : "no loans";
+    const depRate = `${(perYear(bank.deposit_rate ?? b.deposit_rate_now) * 100).toFixed(2)}%/yr`;
     const lines = [
-      `Equity ${usd(bank.equity)} (${ratio}; founder put in ${usd(bank.capital_in)})`,
+      `Equity ${usd(bank.equity)} (${ratio}; founder put in ${usd(bank.capital_in)}) · deposit rate ${depRate}`,
       `Deposits ${usd(bank.deposits)} from ${bank.depositors} · reserves ${usd(bank.reserves)}`,
       `Loans ${usd(bank.loans)} to ${bank.borrowers} · banking services ${bank.services} units · plant ${bank.shares} shares`,
       `Interest in ${usd(bank.interest_received)} · out ${usd(bank.interest_paid)} · dividends ${usd(bank.dividends)}` +
@@ -1597,6 +1723,7 @@ ui.bankForm.onsubmit = async (e) => {
   try {
     const next = await api("/api/banking", {
       enabled: ui.bankEnabled.checked,
+      rate_competition: $("bank-compete").checked,
       deposit_rate: perDay(Number(ui.bankDeposit.value) / 100),
       loan_spread: perDay(Number(ui.bankSpread.value) / 100),
       liquidity: Number(ui.bankReserve.value) / 100,
@@ -1856,10 +1983,54 @@ document.addEventListener("keydown", (e) => {
   if (e.code === "ArrowRight" && !playing) step(1);
 });
 
+function updateRegimeBadge() {
+  const el = $("regime-badge");
+  if (!el || !state) return;
+  const macro = state.macro;
+  const l = state.market?.labor;
+  const unemp = l && l.offered > 0 ? Math.max(0, l.idle) / l.offered : 0;
+  let labelText = "Early cycle", tone = "neutral";
+  if (macro && macro.accounts_steps >= DAYS_PER_MONTH()) {
+    const inf = macro.inflation || 0;
+    if (inf > 0.12 && unemp > 0.15) { labelText = "Stagflation"; tone = "bad"; }
+    else if (inf > 0.12) { labelText = "Overheating"; tone = "warn"; }
+    else if (unemp > 0.15) { labelText = "Recession"; tone = "bad"; }
+    else if (inf < -0.02) { labelText = "Deflation"; tone = "warn"; }
+    else { labelText = "Expansion"; tone = "good"; }
+  }
+  el.textContent = labelText;
+  el.className = `regime-badge ${tone}`;
+}
+
+const themeBtn = $("theme-toggle");
+function applyTheme(mode) {
+  document.documentElement.dataset.theme = mode;
+  try { localStorage.setItem("econsim-theme", mode); } catch (_) {}
+  if (themeBtn) themeBtn.textContent = mode === "dark" ? "Light mode" : "Dark mode";
+}
+if (themeBtn) {
+  const saved = (() => { try { return localStorage.getItem("econsim-theme"); } catch (_) { return null; } })();
+  const initial = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  applyTheme(initial);
+  themeBtn.onclick = () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+}
+
+async function triggerShock(payload) {
+  try {
+    render(await api("/api/shock", payload));
+  } catch (err) {
+    alert(err.message);
+  }
+}
+if ($("shock-shortage")) $("shock-shortage").onclick = () => triggerShock({ kind: "shortage", severity: 0.5, days: 60 });
+if ($("shock-disaster")) $("shock-disaster").onclick = () => triggerShock({ kind: "disaster", house_loss: 0.2 });
+if ($("shock-epidemic")) $("shock-epidemic").onclick = () => triggerShock({ kind: "epidemic", initial_infected: 3, contagion_rate: 0.15, lethality_rate: 0.01 });
+
 buildForm();
 api("/api/state").then(s => {
   ui.agentCount.value = s.agents.length;
   state = s;
   refreshForm(true);
   render(s);
+  updateRegimeBadge();
 });

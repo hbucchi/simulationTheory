@@ -243,6 +243,35 @@ class Simulation:
         with self.lock:
             return build_report(self.world, window)
 
+    def trigger_shock(self, body):
+        """Trigger a resource shortage, disaster, or epidemic live (for trainer workshops)."""
+        kind = body.get("kind")
+        with self.lock:
+            shocks = self.world.shocks
+            if kind == "shortage":
+                goods = body.get("goods")
+                if isinstance(goods, str):
+                    goods = [goods]
+                shocks.trigger_shortage(self.world, goods=goods,
+                                        severity=_number(body.get("severity", 0.5), "severity", 0.05, 0.95),
+                                        days=_number(body.get("days", 60), "days", 1, 3600, whole=True))
+            elif kind == "disaster":
+                shocks.trigger_disaster(self.world,
+                                        house_loss=_number(body.get("house_loss", 0.2), "house_loss", 0, 1),
+                                        asset_loss=_number(body.get("asset_loss", 0.0), "asset_loss", 0, 0.9))
+            elif kind == "epidemic":
+                shocks.trigger_epidemic(
+                    self.world,
+                    initial_infected=_number(body.get("initial_infected", 3), "initial_infected", 1, 5000, whole=True),
+                    contagion_rate=_number(body.get("contagion_rate", 0.15), "contagion_rate", 0, 1),
+                    lethality_rate=_number(body.get("lethality_rate", 0.01), "lethality_rate", 0, 1),
+                    health_impact=_number(body.get("health_impact", 0.04), "health_impact", 0, 1),
+                    duration=_number(body.get("duration", 30), "duration", 1, 3600, whole=True),
+                )
+            else:
+                raise ValueError("kind must be 'shortage', 'disaster', or 'epidemic'")
+            return self.world.to_dict(self.detail)
+
     def state(self):
         with self.lock:
             return self.world.to_dict(self.detail)
@@ -258,6 +287,7 @@ POLICY_LIMITS = {"min_wage": (0, 1e9), "min_rate": (0, 10), "labor_purchase": (0
                  "enabled": bool, "balanced_budget": bool, "lender_of_last_resort": bool,
                  "bonds_enabled": bool, "debt_limit": (0, 10), "bond_spread": (0, 0.01), "bond_days": (1, 3600),
                  "pay_period": ("daily", "weekly", "monthly"),
+                 "min_contract_days": (0, 3600), "severance_rate": (0, 2),
                  "taylor_enabled": bool, "inflation_target": (-0.5, 1), "neutral_rate": (-0.5, 1),
                  "taylor_unemployment": (0, 1), "bond_risk_max": (0, 10)}
 
@@ -403,9 +433,9 @@ class Handler(SimpleHTTPRequestHandler):
                 for key, value in body.items():
                     if key == "detail":
                         continue
-                    if key == "enabled":
+                    if key in ("enabled", "rate_competition"):
                         if not isinstance(value, bool):
-                            raise ValueError("enabled must be true or false")
+                            raise ValueError(f"{key} must be true or false")
                         changes[key] = value
                     elif key in limits:
                         changes[key] = _number(value, key, *limits[key])
@@ -422,9 +452,9 @@ class Handler(SimpleHTTPRequestHandler):
                     if key == "clearance_schedule":
                         from simulation.rules import clean_schedule
                         changes[key] = clean_schedule(value)
-                    elif key == "clearance_enabled":
+                    elif key in ("clearance_enabled", "expectations_enabled"):
                         if not isinstance(value, bool):
-                            raise ValueError("clearance_enabled must be true or false")
+                            raise ValueError(f"{key} must be true or false")
                         changes[key] = value
                     elif key == "price_stickiness":
                         changes[key] = _number(value, key, 0, 0.99)
@@ -433,6 +463,8 @@ class Handler(SimpleHTTPRequestHandler):
                     else:
                         raise ValueError(f"unknown market setting: {key}")
                 return self.sim.set_market(changes)
+            if self.path == "/api/shock":
+                return self.sim.trigger_shock(body)
             if self.path == "/api/personality":
                 return self.sim.set_personality(body)
             if self.path == "/api/housing":

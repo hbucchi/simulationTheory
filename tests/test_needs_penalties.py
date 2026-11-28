@@ -62,7 +62,7 @@ class SubsistenceTests(unittest.TestCase):
     """Autonomous production: every agent can make a little water or food with labour it has left."""
 
     def test_a_thirsty_agent_fetches_a_little_water(self):
-        w = world()
+        w = world(specialization_enabled=False)
         a = w.create_agent(needs={**CALM, "thirst": 0.7}, money=0, inventory=EMPTY)
         a.capacity_now, a.labor_sold, a.own_labor = 0.5, 0.0, 0.0
         for _ in range(4):

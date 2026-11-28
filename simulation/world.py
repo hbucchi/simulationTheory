@@ -10,9 +10,11 @@ from .agent import Agent
 from .inventory import Inventory
 from .modules import Build, Consume, Invest, Leisure, Mood, Navigate, NeedsDecay, Production, Rest
 from .banking import Banking
+from .firms import FirmRegistry
 from .government import Government
 from .labor import LaborMarket
 from .housing import HousingMarket
+from .shocks import Shocks
 from .modules.invest import cash_needed, transfer_shares
 from .report import Recorder
 from .catalog import CAPITAL_GOODS
@@ -67,9 +69,13 @@ class World:
         # of the way to what the market says. Changeable in game (Products tab).
         self.price_stickiness = self.rules.price_stickiness
         self.posted_prices = {}
+        self.spot_prices = {}
+        self.expected_inflation = 0.0
         self.housing = HousingMarket(self.rules)
         self.government = Government.from_rules(self.rules)
         self.banking = Banking(self.rules, self.government)
+        self.shocks = Shocks(self.rules, seed=seed)
+        self.firms = FirmRegistry(self.rules)
         self.retained_total = 0.0
         self.sell_through = {}        # good -> share of recent output that didn't expire
         self.price_level = 1.0        # scales every price (money_velocity: M x V = P x Y)
@@ -642,7 +648,7 @@ class World:
         # Owners of a good that goes to waste make less of it for a while (sell-through: the share
         # of recent output that didn't expire).
         jobs = self.asset_jobs(good, shares) * self.sell_through.get(good, 1.0)
-        productivity = self.productivity_now[good]
+        productivity = self.productivity_now[good] * self.shocks.productivity_factor(good)
         for item, per_unit in self.rules.inputs.get(good, {}).items():
             stock = agent.inventory.count(item) + agent.input_credit.get(item, 0.0)
             jobs = min(jobs, stock / per_unit / productivity if productivity > 0 else 0.0)
@@ -775,7 +781,7 @@ class World:
         where labour used is at most what the asset can employ (all of it if ``labor`` is None)."""
         jobs = self.asset_jobs(good, shares)
         used = jobs if labor is None else min(labor, jobs)
-        return used * self.productivity_now[good]
+        return used * self.productivity_now[good] * self.shocks.productivity_factor(good)
 
     def step_asset_prices(self):
         """asset_prices at this step's prices, worked out once per step (fresh outside a step)."""
@@ -785,6 +791,15 @@ class World:
         if "asset_prices" not in cache:
             cache["asset_prices"] = self.asset_prices(self.current_prices())
         return cache["asset_prices"]
+
+    def contract_wage_multiplier(self):
+        """Expected effective wage multiplier from mandatory contract length and early-termination
+        severance fees (1.0 in a gig economy; higher with rigid contracts + severance)."""
+        days = self.government.min_contract_days
+        sev = self.government.severance_rate
+        if days <= 0 or sev <= 0:
+            return 1.0
+        return 1.0 + 0.5 * sev * min(1.0, days / max(1, self.year_steps()))
 
     def industry_yield(self, good, prices=None):
         """Measured profitability of ``good``'s industry, per day: profit per asset share at the
@@ -807,7 +822,9 @@ class World:
                 used = 1.0
             value = self.build_cost_money(good, prices)
             wear = (value or 0.0) * rules.depreciation.get(good, 0.0) / self.year_steps() / out
-            margin = prices[good] * (1 - self.government.tax_production) - self.unit_cost(good, prices) - wear
+            prod = self.productivity_now[good] * self.shocks.productivity_factor(good)
+            extra_labour = (self.labor.wage / prod * (self.contract_wage_multiplier() - 1.0)) if prod > 0 else 0.0
+            margin = prices[good] * (1 - self.government.tax_production) - self.unit_cost(good, prices) - extra_labour - wear
             capital = value if value else self.asset_prices(prices).get(good, 0.0)
             result = margin * out * used / capital if capital > 0 else 0.0
         if cache is not None:
@@ -817,16 +834,18 @@ class World:
     def asset_prices(self, prices=None):
         """Price of one whole asset: profit per step at full capacity / effective return.
 
-        Profit = output x (price of the good - its inputs) - labour it employs x the wage. The effective
-        return is the asset's return, or the government's minimum rate if higher. Never below 0.
+        Profit = output x (price of the good - its inputs) - labour it employs x effective wage.
+        The effective return is the asset's return, or the government's minimum rate if higher.
+        Never below 0.
         """
         prices = prices or self.current_prices()
+        wage_mult = self.contract_wage_multiplier()
         out = {}
         for g in economy.GOODS:
             # Output that expires unsold earns nothing: value only what sells (sell-through).
             sold = self.sell_through.get(g, 1.0)
             profit = (self.asset_output(g, 1) * sold * self.value_added(g, prices)
-                      - self.asset_jobs(g, 1) * sold * prices[economy.LABOR])
+                      - self.asset_jobs(g, 1) * sold * prices[economy.LABOR] * wage_mult)
             out[g] = max(0.0, profit) / self.government.effective_return(self.rules, g)
         return out
 
@@ -952,13 +971,24 @@ class World:
 
     def post_prices(self, market):
         """Today's posted prices given what the ``market`` says: the same with flexible prices;
-        with sticky ones, yesterday's posted prices moved (1 - stickiness) of the way."""
+        with sticky ones, yesterday's posted prices moved (1 - stickiness) of the way. Saves
+        ``spot_prices`` so clearance and distressed sales can bypass sticky-price inertia."""
+        self.spot_prices = dict(market)
         stick = self.price_stickiness
         if stick > 0 and self.posted_prices:
             market = {g: self.posted_prices.get(g, p) + (1 - stick) * (p - self.posted_prices.get(g, p))
                       for g, p in market.items()}
         self.posted_prices = market
         return market
+
+    def update_expectations(self):
+        """Adaptive inflation expectations: smooth trailing CPI inflation (yearly) via EMA."""
+        hist = self.recorder.history
+        if not hist or hist[-1].get("accounts_steps", 0) < self.rules.month_steps:
+            return
+        cpi_inf = max(-0.5, min(2.0, hist[-1].get("inflation", 0.0)))
+        speed = self.rules.expectations_speed
+        self.expected_inflation += speed * (cpi_inf - self.expected_inflation)
 
     def unit_markups(self):
         """Per-unit price rise inside a deal: only where buyers outnumber sellers."""
@@ -998,6 +1028,8 @@ class World:
         self.recorder.begin_step(self)
         self._dead_flows = []
         self.grow_assets()
+        self.shocks.step(self)
+        self.update_expectations()
         self.update_scarcity()
         self.update_demand()
         self.update_price_level()
@@ -1035,9 +1067,11 @@ class World:
         finally:
             self._step_cache = None
         self.retain_earnings()
+        self.firms.step(self)
         if self.rules.housing_enabled:
             self.housing.step(self)          # new houses, rent, evictions, buying and renting
         self.banking.step(self)
+        self.government.update_approval(self)
         self.recorder.end_step(self, self._dead_flows)
 
     # ---- spatial grid: contacts are only looked for in the 3 x 3 cells around an agent ----
@@ -1106,13 +1140,75 @@ class World:
     def _die(self, agent, cause):
         prices = self.current_prices()
         asset_prices = self.asset_prices(prices)
+        # Pick heir before remove_agent wipes bank deposits, if inheritance is enabled.
+        heir = None
+        if self.rules.inheritance_enabled:
+            candidates = [o for o in self.agents if o is not agent]
+            if candidates:
+                heir = min(candidates, key=lambda o: math.hypot(o.x - agent.x, o.y - agent.y))
+        if heir is not None:
+            self._transfer_deposits(agent, heir)
         self.remove_agent(agent)
-        self.settle_estate(agent, prices, asset_prices)
+        if heir is not None:
+            self.inherit_estate(agent, heir)
+        else:
+            self.settle_estate(agent, prices, asset_prices)
         self._dead_flows.append(agent.flow)
         self.recorder.count("deaths")
         self.recorder.count(f"deaths_{cause}")
-        self.log(f"{agent.name} died of {cause}" if cause != "health"
-                 else f"{agent.name} died of illness ({penalties.HEALTH_DEATH_DAYS} days at health 1.00)")
+        if cause == "epidemic":
+            self.log(f"{agent.name} died in the epidemic")
+        else:
+            self.log(f"{agent.name} died of {cause}" if cause != "health"
+                     else f"{agent.name} died of illness ({penalties.HEALTH_DEATH_DAYS} days at health 1.00)")
+
+    def _transfer_deposits(self, dead, heir):
+        """Move a dead agent's bank deposits to its heir before banking.forget runs."""
+        from .banking import _sync
+        for bank in self.banking.banks:
+            bal = bank.deposits.pop(dead.id, 0.0)
+            if bal > 0:
+                bank.deposits[heir.id] = bank.deposits.get(heir.id, 0.0) + bal
+        dead.deposits = {}
+        _sync(heir, self.banking)
+
+    def inherit_estate(self, dead, heir):
+        """Transfer all of ``dead``'s cash, inventory, asset shares, and houses to ``heir``."""
+        parts = []
+        cash = dead.money + dead.company_cash
+        if cash > 0.01:
+            heir.money += cash
+            dead.money = 0.0
+            dead.company_cash = 0.0
+            parts.append(f"${cash:,.2f} cash")
+        goods_n = 0
+        for resource in economy.GOODS:
+            units = math.floor(dead.inventory.count(resource) + 1e-9)
+            if units > 0:
+                economy.transfer(dead, heir, resource, units)
+                goods_n += units
+        if goods_n:
+            parts.append(f"{goods_n:g} goods")
+        shares_n = 0.0
+        for resource, shares in list(dead.assets.items()):
+            if shares > 1e-9:
+                transfer_shares(dead, heir, resource, shares)
+                shares_n += shares
+        if shares_n > 0.01:
+            parts.append(f"{shares_n:.2f} asset shares")
+        if self.rules.housing_enabled:
+            if dead.home is not None:
+                self.housing.move_out(dead)
+            houses_n = 0
+            for h in list(dead.houses):
+                self.housing.set_owner(h, heir)
+                if heir.home is None and h.occupant is None:
+                    self.housing.move_in(heir, h)
+                houses_n += 1
+            if houses_n:
+                parts.append(f"{houses_n} house{'s' if houses_n != 1 else ''}")
+        detail = ", ".join(parts) if parts else "nothing"
+        self.log(f"{heir.name} inherited {dead.name}'s estate ({detail})")
 
     def settle_estate(self, dead, prices, asset_prices):
         """Sell a dead agent's goods and asset shares at market price to whoever is nearest
@@ -1200,7 +1296,8 @@ class World:
         for x in (a, b):
             if x.deposits:
                 self.banking.cash_up(x, economy.money_of(x))
-        deals = economy.trade(a, b, prices, rules, self.rng, scarcity, self.unit_markups())
+        deals = economy.trade(a, b, prices, rules, self.rng, scarcity, self.unit_markups(),
+                              spot_prices=self.spot_prices)
         for buyer, seller, bought, paid, stocked, unit_prices in deals:
             self.recorder.count("goods_deals")
             # Production tax: the seller pays its share of the money it got for the goods.
@@ -1351,6 +1448,9 @@ class World:
             "auto_excluded": list(self.rules.auto_excluded),
             "government": self.government.to_dict(self),
             "housing": self.housing.to_dict(self) if self.rules.housing_enabled else None,
+            "shocks": self.shocks.to_dict(),
+            "firms": self.firms.to_dict(self),
+            "expected_inflation": round(self.expected_inflation, 4),
             "market": {
                 "price_stickiness": self.price_stickiness,
                 "clearance_enabled": self.rules.clearance_enabled,

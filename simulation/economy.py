@@ -627,7 +627,7 @@ def clearance_discount(seller, resource, rules=DEFAULT_RULES):
     return max((d for days, d in rules.clearance_schedule if left <= days), default=0.0)
 
 
-def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, markups=None):
+def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, markups=None, spot_prices=None):
     """Buyer acquires what it needs (times a random multiplier) from seller at market prices,
     plus any stockpile reserve it is missing.
 
@@ -676,9 +676,12 @@ def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, mar
         markup = (markups or {}).get(resource, 0)
         while buyer.inventory.count(resource) < goal and spare(seller, resource, rules, scarcity) > 0:
             # Discounts: clearance (about to expire) or cash flow (a seller short of cash for wages
-            # and loans, World.update_distress): the bigger one.
+            # and loans, World.update_distress): the bigger one. Distressed / clearance sales bypass
+            # sticky-price inertia by discounting from the lower of posted or spot price.
             off = max(clearance_discount(seller, resource, rules), getattr(seller, "distress", 0.0))
-            unit_price = prices[resource] * (1 + markup) ** bought.get(resource, 0) * (1 - off)
+            base_p = (min(prices[resource], spot_prices[resource])
+                      if off > 0 and spot_prices and resource in spot_prices else prices[resource])
+            unit_price = base_p * (1 + markup) ** bought.get(resource, 0) * (1 - off)
             for_reserve = buyer.inventory.count(resource) >= need_goal
             if for_reserve and (no_reserves or spent_on_reserve + unit_price > budget):
                 break
@@ -702,14 +705,15 @@ def buy(buyer, seller, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, mar
     return bought, paid, stocked, unit_prices
 
 
-def trade(a, b, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, markups=None):
+def trade(a, b, prices, rules=DEFAULT_RULES, rng=None, scarcity=None, markups=None, spot_prices=None):
     """Both agents buy what they need (and any stockpile) from each other, then consume.
 
     Returns a list of deals: (buyer, seller, bought, paid, stocked, unit_prices).
     """
     deals = []
     for buyer, seller in ((a, b), (b, a)):
-        bought, paid, stocked, unit_prices = buy(buyer, seller, prices, rules, rng, scarcity, markups)
+        bought, paid, stocked, unit_prices = buy(buyer, seller, prices, rules, rng, scarcity, markups,
+                                                 spot_prices=spot_prices)
         if bought:
             deals.append((buyer, seller, bought, paid, stocked, unit_prices))
     consume(a, rules)

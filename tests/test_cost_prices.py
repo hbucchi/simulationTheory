@@ -69,15 +69,36 @@ class CashFlowTests(unittest.TestCase):
 
 
 class StickyWageTests(unittest.TestCase):
-    def test_wages_fall_slowly_and_rise_fast(self):
+    def test_wages_move_symmetrically_and_accelerate_when_pressure_persists(self):
         w = World(seed=3, rules=Rules.from_dict({"agents": 30}))
+        self.assertEqual(w.rules.wage_adjust_speed, w.rules.wage_down_speed)
         w.spawn_random_agents()
         w.step()
         before = w.labor.wage
         w.step()
         change = w.labor.wage / before - 1
-        self.assertGreaterEqual(change, -w.rules.wage_down_speed - 1e-9)
-        self.assertLessEqual(change, w.rules.wage_adjust_speed + 1e-9)
+        daily_base = (1 + w.rules.wage_adjust_speed) ** (1 / w.rules.month_steps) - 1
+        self.assertGreaterEqual(change, -daily_base - 1e-9)
+        self.assertLessEqual(change, daily_base + 1e-9)
+
+        # Persistent pressure in the same direction for >1 month doubles the monthly max rate (2% -> 4%).
+        w2 = World(seed=3, rules=Rules.from_dict({"agents": 10, "month_steps": 30, "wage_adjust_speed": 0.02,
+                                                  "wage_down_speed": 0.02, "gov_min_wage": 0}))
+        w2.spawn_random_agents()
+        w2.labor.wage = 100.0
+        # Month 1 (day 1 of streak): max daily move <= (1.02)^(1/30) - 1
+        w2.labor.wage_streak_dir, w2.labor.wage_streak_days = 1, 0
+        # Force excess demand by giving an owner lots of jobs and cash
+        w2.agents[0].assets = {"water": 500.0}
+        w2.agents[0].money = 1e7
+        w2.labor.clear(w2)
+        m1_change = w2.labor.wage / 100.0 - 1
+        # Simulate being in month 2 (day 31 of upward streak): rate should double (~4%/month).
+        w2.labor.wage = 100.0
+        w2.labor.wage_streak_dir, w2.labor.wage_streak_days = 1, 30
+        w2.labor.clear(w2)
+        m2_change = w2.labor.wage / 100.0 - 1
+        self.assertGreater(m2_change, m1_change * 1.8)
 
 
 if __name__ == "__main__":
