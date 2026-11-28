@@ -47,3 +47,11 @@ Next in line, noted at the panel's request:
 | I-40 | Competition policy: concentration index, antitrust levers | Sofia | |
 | I-28 | Accessibility and phone layout review | Kenji | Mentioned in passing |
 | I-22 | Speed for live classes (1,000 agents in real time), hosting, multi-seat sessions | Kenji | Prerequisite for #4 at scale |
+
+## Already started elsewhere on this branch (added after the panel)
+
+Commits merged from the remote after the panel ran overlap with some items. The panel's runs used the code before these commits.
+- **#5 Shock library:** `simulation/shocks.py` (shortages, disasters, epidemics; trainer-triggered via `POST /api/shock` or random). Still to do: the instructor console (pause, lock settings) and the "expected textbook effect" for each shock.
+- **#11 Firms as entities:** `simulation/firms.py` (income statement, balance sheet, cash flow, market cap; `firms_enabled`). Still to do: entry, exit and bankruptcy as a firm-level process.
+- **#12 Inflation expectations:** `expectations_enabled` (adaptive, feeds wage demands and nominal rates). Still to do: forward guidance.
+- **I-14 inheritance tax:** an inheritance module was added; check whether it covers taxation.
